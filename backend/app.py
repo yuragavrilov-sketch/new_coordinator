@@ -150,4 +150,5 @@ threading.Thread(target=_demo_producer, daemon=True).start()
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    # use_reloader=False: reloader kills SSE connections on every file save
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)

@@ -1,18 +1,34 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useSSE } from "./hooks/useSSE";
 import { EventTable } from "./components/EventTable";
 import { Stats } from "./components/Stats";
 import { StatusBadge } from "./components/StatusBadge";
 
-// SSE connects directly to Flask — Vite proxy buffers streams and breaks SSE
-const SSE_URL = "http://127.0.0.1:5000/api/events";
+const BACKEND = "http://127.0.0.1:5000";
+const SSE_URL = `${BACKEND}/api/events`;
+
+type BackendStatus = "checking" | "ok" | "unreachable";
+
+function useBackendHealth(url: string): BackendStatus {
+  const [s, setS] = useState<BackendStatus>("checking");
+  useEffect(() => {
+    let cancelled = false;
+    const check = () =>
+      fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) })
+        .then((r) => { if (!cancelled) setS(r.ok ? "ok" : "unreachable"); })
+        .catch(() => { if (!cancelled) setS("unreachable"); });
+    check();
+    const id = setInterval(check, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [url]);
+  return s;
+}
 
 export default function App() {
   const { events, status, clear } = useSSE({ url: SSE_URL });
+  const backendStatus = useBackendHealth(BACKEND);
   const [filter, setFilter] = useState("");
   const [paused, setPaused] = useState(false);
-
-  // When paused we freeze the displayed list but keep the hook running
   const [frozen, setFrozen] = useState(events);
   const displayed = paused ? frozen : events;
 
@@ -37,6 +53,16 @@ export default function App() {
         * { box-sizing: border-box; }
         input { outline: none; }
       `}</style>
+
+      {/* Backend unreachable banner */}
+      {backendStatus === "unreachable" && (
+        <div style={{
+          background: "#7f1d1d", color: "#fca5a5", padding: "10px 16px",
+          borderRadius: 6, marginBottom: 16, fontSize: 13,
+        }}>
+          Flask backend unreachable at <code>{BACKEND}</code> — запусти: <code>python backend/app.py</code>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
