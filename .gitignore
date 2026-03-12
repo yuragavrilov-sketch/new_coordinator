@@ -13,12 +13,30 @@ env/
 
 # Node
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# React / Vite build output
 dist/
 dist-ssr/
 *.local
-
-# Vite
 frontend/.vite/
+frontend/build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+coverage/
+.nyc_output/
+
+# Storybook
+storybook-static/
 
 # Editor
 .vscode/
