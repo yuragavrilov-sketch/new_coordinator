@@ -1,63 +1,55 @@
 import React, { useEffect, useState } from "react";
 import { useSSE } from "./hooks/useSSE";
-import { EventTable } from "./components/EventTable";
-import { StatusBadge } from "./components/StatusBadge";
 import { ServiceStatusBar } from "./components/ServiceStatusBar";
 import { SettingsModal } from "./components/SettingsModal";
+import { MigrationList } from "./components/MigrationList";
+import { StatusBadge } from "./components/StatusBadge";
 
-// Same origin as Flask — no CORS, no proxy
-const BACKEND = "";
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
+type Tab = "migrations";
 
-function useBackendHealth(url: string): BackendStatus {
+function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
   useEffect(() => {
     let cancelled = false;
     const check = () =>
-      fetch(`${url}/api/health`, { signal: AbortSignal.timeout(3000) })
-        .then((r) => { if (!cancelled) setS(r.ok ? "ok" : "unreachable"); })
+      fetch("/api/health", { signal: AbortSignal.timeout(3000) })
+        .then(r => { if (!cancelled) setS(r.ok ? "ok" : "unreachable"); })
         .catch(() => { if (!cancelled) setS("unreachable"); });
     check();
     const id = setInterval(check, 5000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [url]);
+  }, []);
   return s;
 }
 
 export default function App() {
-  const { events, status, clear, serviceStatuses } = useSSE({ url: SSE_URL });
-  const backendStatus = useBackendHealth(BACKEND);
-  const [filter, setFilter] = useState("");
-  const [paused, setPaused] = useState(false);
-  const [frozen, setFrozen] = useState(events);
+  const { status, serviceStatuses } = useSSE({ url: SSE_URL });
+  const backendStatus = useBackendHealth();
+  const [activeTab, setActiveTab] = useState<Tab>("migrations");
   const [showSettings, setShowSettings] = useState(false);
-  const displayed = paused ? frozen : events;
-
-  function togglePause() {
-    if (!paused) setFrozen(events);
-    setPaused((p) => !p);
-  }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0f172a",
-        color: "#e2e8f0",
-        fontFamily: "'Inter', 'Segoe UI', sans-serif",
-        padding: 24,
-      }}
-    >
+    <div style={{
+      minHeight: "100vh",
+      background: "#0f172a",
+      color: "#e2e8f0",
+      fontFamily: "'Inter', 'Segoe UI', sans-serif",
+      padding: 24,
+    }}>
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
         * { box-sizing: border-box; }
         input { outline: none; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0a111f; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
       `}</style>
 
-      {/* Settings modal */}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       {/* Backend unreachable banner */}
@@ -66,7 +58,7 @@ export default function App() {
           background: "#7f1d1d", color: "#fca5a5", padding: "10px 16px",
           borderRadius: 6, marginBottom: 16, fontSize: 13,
         }}>
-          Flask backend unreachable at <code>{BACKEND}</code> — запусти: <code>python backend/app.py</code>
+          Flask backend недоступен — запусти: <code>python backend/app.py</code>
         </div>
       )}
 
@@ -74,71 +66,71 @@ export default function App() {
       <ServiceStatusBar statuses={serviceStatuses} />
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: -0.5 }}>
-          CDC UI
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 0 }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: "#e2e8f0" }}>
+          DB Migration
         </h1>
         <StatusBadge status={status} />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={() => setShowSettings(true)} style={btnStyle("#334155")} title="Connection settings">
-            ⚙ Settings
-          </button>
-          <button onClick={togglePause} style={btnStyle(paused ? "#3b82f6" : "#334155")}>
-            {paused ? "▶ Resume" : "⏸ Pause"}
-          </button>
-          <button onClick={clear} style={btnStyle("#334155")}>
-            Clear
+          <button onClick={() => setShowSettings(true)} style={btnStyle("#1e293b")} title="Connection settings">
+            ⚙ Настройки
           </button>
         </div>
       </div>
 
-      {/* Filter */}
-      <div style={{ margin: "16px 0" }}>
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter by table, schema, or operation…"
-          style={{
-            background: "#1e293b",
-            border: "1px solid #334155",
-            borderRadius: 6,
-            color: "#e2e8f0",
-            padding: "7px 12px",
-            fontSize: 13,
-            width: "100%",
-            maxWidth: 400,
-          }}
+      {/* Tab bar */}
+      <div style={{
+        display: "flex",
+        gap: 0,
+        marginTop: 16,
+        borderBottom: "1px solid #1e293b",
+      }}>
+        <TabButton
+          label="Миграции"
+          active={activeTab === "migrations"}
+          onClick={() => setActiveTab("migrations")}
         />
       </div>
 
-      {/* Event table */}
-      <div
-        style={{
-          background: "#0f172a",
-          border: "1px solid #1e293b",
-          borderRadius: 8,
-          overflow: "hidden",
-        }}
-      >
-        <EventTable events={displayed} filter={filter} />
-      </div>
-
-      <div style={{ marginTop: 12, color: "#334155", fontSize: 11 }}>
-        Showing {displayed.length} events · SSE → {SSE_URL}
+      {/* Tab content */}
+      <div style={{ marginTop: 16 }}>
+        {activeTab === "migrations" && <MigrationList />}
       </div>
     </div>
+  );
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: "none",
+        border: "none",
+        borderBottom: `2px solid ${active ? "#3b82f6" : "transparent"}`,
+        color: active ? "#93c5fd" : "#475569",
+        padding: "8px 16px",
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        cursor: "pointer",
+        marginBottom: -1,
+        transition: "color 0.15s, border-color 0.15s",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
 function btnStyle(bg: string): React.CSSProperties {
   return {
     background: bg,
-    border: "none",
+    border: "1px solid #334155",
     borderRadius: 6,
-    color: "#e2e8f0",
-    padding: "6px 14px",
-    fontSize: 13,
+    color: "#94a3b8",
+    padding: "5px 12px",
+    fontSize: 12,
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 500,
   };
 }
