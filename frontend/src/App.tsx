@@ -4,7 +4,8 @@ import { EventTable } from "./components/EventTable";
 import { Stats } from "./components/Stats";
 import { StatusBadge } from "./components/StatusBadge";
 
-const SSE_URL = "http://localhost:5000/api/events";
+// SSE connects directly to Flask — Vite proxy buffers streams and breaks SSE
+const SSE_URL = "http://127.0.0.1:5000/api/events";
 
 export default function App() {
   const { events, status, clear } = useSSE({ url: SSE_URL });

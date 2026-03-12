@@ -8,7 +8,7 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 
 # Global event bus: list of subscriber queues
 _subscribers: list[queue.Queue] = []
