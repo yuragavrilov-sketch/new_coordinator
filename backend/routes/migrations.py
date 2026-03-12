@@ -231,3 +231,43 @@ def transition_phase(migration_id: str):
 
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+
+
+_DELETABLE_PHASES = {"DRAFT", "CANCELLED", "FAILED"}
+
+
+@bp.delete("/api/migrations/<migration_id>")
+def delete_migration(migration_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    try:
+        conn = _state["get_conn"]()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT phase FROM migrations WHERE migration_id = %s FOR UPDATE",
+                    (migration_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Not found"}), 404
+                phase = row[0]
+                if phase not in _DELETABLE_PHASES:
+                    return jsonify({
+                        "error": f"Нельзя удалить миграцию в фазе {phase}. "
+                                 f"Допустимо: {', '.join(sorted(_DELETABLE_PHASES))}"
+                    }), 409
+                cur.execute(
+                    "DELETE FROM migration_state_history WHERE migration_id = %s",
+                    (migration_id,),
+                )
+                cur.execute(
+                    "DELETE FROM migrations WHERE migration_id = %s",
+                    (migration_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
