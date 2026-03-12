@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useSSE } from "./hooks/useSSE";
 import { EventTable } from "./components/EventTable";
-import { Stats } from "./components/Stats";
 import { StatusBadge } from "./components/StatusBadge";
+import { ServiceStatusBar } from "./components/ServiceStatusBar";
+import { SettingsModal } from "./components/SettingsModal";
 
 // Same origin as Flask — no CORS, no proxy
 const BACKEND = "";
@@ -26,11 +27,12 @@ function useBackendHealth(url: string): BackendStatus {
 }
 
 export default function App() {
-  const { events, status, clear } = useSSE({ url: SSE_URL });
+  const { events, status, clear, serviceStatuses } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth(BACKEND);
   const [filter, setFilter] = useState("");
   const [paused, setPaused] = useState(false);
   const [frozen, setFrozen] = useState(events);
+  const [showSettings, setShowSettings] = useState(false);
   const displayed = paused ? frozen : events;
 
   function togglePause() {
@@ -55,6 +57,9 @@ export default function App() {
         input { outline: none; }
       `}</style>
 
+      {/* Settings modal */}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
       {/* Backend unreachable banner */}
       {backendStatus === "unreachable" && (
         <div style={{
@@ -65,6 +70,9 @@ export default function App() {
         </div>
       )}
 
+      {/* Service status bar */}
+      <ServiceStatusBar statuses={serviceStatuses} />
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: -0.5 }}>
@@ -72,6 +80,9 @@ export default function App() {
         </h1>
         <StatusBadge status={status} />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button onClick={() => setShowSettings(true)} style={btnStyle("#334155")} title="Connection settings">
+            ⚙ Settings
+          </button>
           <button onClick={togglePause} style={btnStyle(paused ? "#3b82f6" : "#334155")}>
             {paused ? "▶ Resume" : "⏸ Pause"}
           </button>
@@ -80,9 +91,6 @@ export default function App() {
           </button>
         </div>
       </div>
-
-      {/* Stats */}
-      <Stats events={displayed} />
 
       {/* Filter */}
       <div style={{ margin: "16px 0" }}>
