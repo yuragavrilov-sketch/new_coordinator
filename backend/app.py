@@ -1,14 +1,28 @@
 import json
+import os
 import queue
 import threading
 import time
 from datetime import datetime
 
-from flask import Flask, Response, jsonify, request
-from flask_cors import CORS
+from flask import Flask, Response, jsonify, request, send_from_directory
 
-app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
+# Serve the React build from ../frontend/dist on the same origin — no CORS needed
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
+
+
+# ---------------------------------------------------------------------------
+# SPA catch-all: any non-API path returns index.html
+# ---------------------------------------------------------------------------
+@app.get("/")
+@app.get("/<path:path>")
+def spa(path: str = ""):
+    target = os.path.join(STATIC_DIR, path)
+    if path and os.path.isfile(target):
+        return send_from_directory(STATIC_DIR, path)
+    return send_from_directory(STATIC_DIR, "index.html")
 
 # Global event bus: list of subscriber queues
 _subscribers: list[queue.Queue] = []

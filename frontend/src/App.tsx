@@ -4,8 +4,9 @@ import { EventTable } from "./components/EventTable";
 import { Stats } from "./components/Stats";
 import { StatusBadge } from "./components/StatusBadge";
 
-const BACKEND = "http://127.0.0.1:5000";
-const SSE_URL = `${BACKEND}/api/events`;
+// Same origin as Flask — no CORS, no proxy
+const BACKEND = "";
+const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
 
