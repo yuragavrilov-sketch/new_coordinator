@@ -256,19 +256,47 @@ def _apply_event(oracle_conn, event: dict, target_schema: str,
             _delete_row(oracle_conn, target_schema, target_table, row, key_cols)
 
 
+# Fields injected by ExtractNewRecordState — not real table columns
+_DEBEZIUM_META = frozenset({"__op", "__table", "__source_ts_ms", "__deleted",
+                            "__db", "__schema"})
+
+
 def _parse_debezium(msg_value: bytes) -> Optional[dict]:
+    """
+    Parse a message produced by the ExtractNewRecordState (unwrap) transform.
+
+    With value.converter.schemas.enable=true the wire format is:
+        { "schema": {...}, "payload": { col1: v1, ..., "__op": "c"|"u"|"d"|"r",
+                                        "__deleted": "true"|"false" } }
+
+    Delete events use delete.handling.mode=rewrite: the value payload contains
+    the *before* record with __deleted=true and __op=d.
+    Tombstones (null value) are skipped.
+    """
     if msg_value is None:
-        return None
+        return None  # tombstone — skip
     try:
-        payload = json.loads(msg_value.decode("utf-8")).get("payload")
+        envelope = json.loads(msg_value.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
         return None
-    if not payload:
+
+    # schemas.enable=true → {schema:…, payload:{…}}; =false → payload IS the root
+    payload = envelope.get("payload") if isinstance(envelope, dict) and "schema" in envelope \
+              else envelope
+    if not isinstance(payload, dict):
         return None
-    op = payload.get("op")
-    if op not in ("c", "u", "d", "r"):
-        return None
-    return {"op": op, "before": payload.get("before"), "after": payload.get("after")}
+
+    op = payload.get("__op")
+    deleted = payload.get("__deleted") == "true"
+
+    # Strip meta fields — what remains is the actual row
+    row = {k: v for k, v in payload.items() if k not in _DEBEZIUM_META}
+
+    if deleted or op == "d":
+        return {"op": "d", "before": row, "after": None}
+    if op in ("c", "r", "u"):
+        return {"op": op, "before": None, "after": row}
+    return None
 
 
 def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
