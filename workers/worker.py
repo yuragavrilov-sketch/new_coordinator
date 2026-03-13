@@ -23,7 +23,7 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -260,6 +260,70 @@ def _apply_event(oracle_conn, event: dict, target_schema: str,
 _DEBEZIUM_META = frozenset({"__op", "__table", "__source_ts_ms", "__deleted",
                             "__db", "__schema"})
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+# Debezium / Kafka Connect logical type names for temporal fields
+# (appear as "name" inside the field schema)
+_LTYPE_TS_MS = frozenset({          # int64 → milliseconds since epoch → datetime
+    "org.apache.kafka.connect.data.Timestamp",
+    "io.debezium.time.Timestamp",
+})
+_LTYPE_TS_US = frozenset({          # int64 → microseconds since epoch → datetime
+    "io.debezium.time.MicroTimestamp",
+})
+_LTYPE_TS_NS = frozenset({          # int64 → nanoseconds since epoch → datetime
+    "io.debezium.time.NanoTimestamp",
+})
+_LTYPE_DATE = frozenset({           # int32 → days since epoch → date
+    "org.apache.kafka.connect.data.Date",
+    "io.debezium.time.Date",
+})
+_LTYPE_TIME_MS = frozenset({        # int32/int64 → time-of-day ms → skip (pass as-is)
+    "org.apache.kafka.connect.data.Time",
+    "io.debezium.time.Time",
+})
+
+
+def _build_type_map(schema: dict) -> dict:
+    """
+    Walk a Debezium struct schema and return {field_name: logical_type_name}
+    for every field that has a logical type.  Fields without a 'name' (logical
+    type) are omitted — they need no special coercion.
+    """
+    if not schema or schema.get("type") != "struct":
+        return {}
+    return {
+        f["field"]: f["name"]
+        for f in schema.get("fields", [])
+        if f.get("field") and f.get("name")
+    }
+
+
+def _coerce_row(row: dict, type_map: dict) -> dict:
+    """
+    Convert Debezium-encoded temporal values to Python datetime / date objects
+    so that oracledb accepts them for Oracle DATE / TIMESTAMP columns.
+    Values that are None, or whose logical type is unknown, pass through unchanged.
+    """
+    if not type_map:
+        return row
+    out: dict = {}
+    for col, val in row.items():
+        ltype = type_map.get(col)
+        if val is None or ltype is None:
+            out[col] = val
+        elif ltype in _LTYPE_TS_MS:
+            out[col] = _EPOCH + timedelta(milliseconds=int(val))
+        elif ltype in _LTYPE_TS_US:
+            out[col] = _EPOCH + timedelta(microseconds=int(val))
+        elif ltype in _LTYPE_TS_NS:
+            out[col] = _EPOCH + timedelta(microseconds=int(val) // 1000)
+        elif ltype in _LTYPE_DATE:
+            out[col] = (_EPOCH + timedelta(days=int(val))).date()
+        else:
+            out[col] = val
+    return out
+
 
 def _parse_debezium(msg_value: bytes) -> Optional[dict]:
     """
@@ -268,6 +332,10 @@ def _parse_debezium(msg_value: bytes) -> Optional[dict]:
     With value.converter.schemas.enable=true the wire format is:
         { "schema": {...}, "payload": { col1: v1, ..., "__op": "c"|"u"|"d"|"r",
                                         "__deleted": "true"|"false" } }
+
+    Temporal columns (Oracle DATE / TIMESTAMP) arrive as integers
+    (ms / µs / days since epoch).  _coerce_row converts them to Python
+    datetime / date so that oracledb accepts them without ORA-00932.
 
     Delete events use delete.handling.mode=rewrite: the value payload contains
     the *before* record with __deleted=true and __op=d.
@@ -281,16 +349,21 @@ def _parse_debezium(msg_value: bytes) -> Optional[dict]:
         return None
 
     # schemas.enable=true → {schema:…, payload:{…}}; =false → payload IS the root
-    payload = envelope.get("payload") if isinstance(envelope, dict) and "schema" in envelope \
-              else envelope
+    has_schema = isinstance(envelope, dict) and "schema" in envelope
+    payload    = envelope.get("payload") if has_schema else envelope
     if not isinstance(payload, dict):
         return None
 
-    op = payload.get("__op")
+    type_map = _build_type_map(envelope.get("schema") if has_schema else {})
+
+    op      = payload.get("__op")
     deleted = payload.get("__deleted") == "true"
 
-    # Strip meta fields — what remains is the actual row
-    row = {k: v for k, v in payload.items() if k not in _DEBEZIUM_META}
+    # Strip meta fields → actual table columns only
+    row = _coerce_row(
+        {k: v for k, v in payload.items() if k not in _DEBEZIUM_META},
+        type_map,
+    )
 
     if deleted or op == "d":
         return {"op": "d", "before": row, "after": None}
