@@ -451,19 +451,39 @@ function ConstraintTable({
   busy: Record<string, boolean>; actErr: Record<string, string>;
   onAction: (action: string, name: string) => void;
 }) {
-  const srcNames = useMemo(() => new Set(src.map(c => c.name)), [src]);
-  const tgtMap   = useMemo(() => new Map(tgt.map(c => [c.name, c])), [tgt]);
-
+  // Match constraints by name first; fallback to type+columns (handles SYS_Cxxxx)
   const rows = useMemo(() => {
-    const out: { srcC: Constraint | null; tgtC: Constraint | null }[] = [];
+    const out: { srcC: Constraint | null; tgtC: Constraint | null; nameMatch: boolean }[] = [];
+    const tgtUsed = new Set<string>();
+    const srcUsed = new Set<string>();
+
+    // Phase 1: exact name match
     for (const sc of src) {
-      out.push({ srcC: sc, tgtC: tgtMap.get(sc.name) ?? null });
+      const tc = tgt.find(t => t.name === sc.name);
+      if (tc) {
+        out.push({ srcC: sc, tgtC: tc, nameMatch: true });
+        tgtUsed.add(tc.name);
+        srcUsed.add(sc.name);
+      }
     }
-    for (const tc of tgt) {
-      if (!srcNames.has(tc.name)) out.push({ srcC: null, tgtC: tc });
+    // Phase 2: type + columns match (for SYS_-named or renamed constraints)
+    for (const sc of src.filter(c => !srcUsed.has(c.name))) {
+      const colKey = sc.columns.join(",");
+      const tc = tgt.find(t => !tgtUsed.has(t.name) && t.type_code === sc.type_code && t.columns.join(",") === colKey);
+      if (tc) {
+        out.push({ srcC: sc, tgtC: tc, nameMatch: false });
+        tgtUsed.add(tc.name);
+        srcUsed.add(sc.name);
+      } else {
+        out.push({ srcC: sc, tgtC: null, nameMatch: false });
+      }
+    }
+    // Phase 3: target-only constraints
+    for (const tc of tgt.filter(c => !tgtUsed.has(c.name))) {
+      out.push({ srcC: null, tgtC: tc, nameMatch: false });
     }
     return out;
-  }, [src, tgt, srcNames, tgtMap]);
+  }, [src, tgt]);
 
   if (rows.length === 0) return <EmptyRow text="Нет ограничений" />;
 
@@ -472,20 +492,26 @@ function ConstraintTable({
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ borderBottom: "1px solid #1e293b" }}>
-            {["Constraint", "Тип", "Колонки", "Есть на источнике", "Статус на таргете", "Действие"].map(h => (
+            {["Имя (таргет)", "Имя (источник)", "Тип", "Колонки", "Есть на источнике", "Статус на таргете", "Действие"].map(h => (
               <th key={h} style={TH}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ srcC, tgtC }) => {
+          {rows.map(({ srcC, tgtC, nameMatch }) => {
             const c = tgtC ?? srcC!;
             const isPK = c.type_code === "P";
             const typeC = CTYPE_COLOR[c.type] ?? "#64748b";
+            const namesDiffer = !nameMatch && srcC && tgtC && srcC.name !== tgtC.name;
             return (
               <tr key={c.name} style={TR_BORDER}>
                 <td style={TD}>
-                  <code style={{ color: "#e2e8f0", fontSize: 11 }}>{c.name}</code>
+                  <code style={{ color: "#e2e8f0", fontSize: 11 }}>{tgtC?.name ?? "—"}</code>
+                </td>
+                <td style={TD}>
+                  {srcC
+                    ? <code style={{ color: namesDiffer ? "#eab308" : "#64748b", fontSize: 11 }}>{srcC.name}</code>
+                    : <span style={{ color: "#475569", fontSize: 11 }}>—</span>}
                 </td>
                 <td style={TD}>
                   <span style={{
@@ -536,50 +562,82 @@ function ConstraintTable({
 }
 
 function TriggerTable({
-  tgt, busy, actErr, onAction,
+  src, tgt, busy, actErr, onAction,
 }: {
-  tgt: Trigger[];
+  src: Trigger[]; tgt: Trigger[];
   busy: Record<string, boolean>; actErr: Record<string, string>;
   onAction: (action: string, name: string) => void;
 }) {
-  if (tgt.length === 0) return <EmptyRow text="Нет триггеров" />;
+  // Merge source and target by name; show both
+  const rows = useMemo(() => {
+    const tgtMap = new Map(tgt.map(t => [t.name, t]));
+    const srcMap = new Map(src.map(t => [t.name, t]));
+    const out: { srcT: Trigger | null; tgtT: Trigger | null }[] = [];
+    for (const st of src) {
+      out.push({ srcT: st, tgtT: tgtMap.get(st.name) ?? null });
+    }
+    for (const tt of tgt) {
+      if (!srcMap.has(tt.name)) out.push({ srcT: null, tgtT: tt });
+    }
+    return out;
+  }, [src, tgt]);
+
+  if (rows.length === 0) return <EmptyRow text="Нет триггеров" />;
 
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ borderBottom: "1px solid #1e293b" }}>
-            {["Триггер", "Тип", "Событие", "Статус", "Действие"].map(h => (
+            {["Триггер", "Тип", "Событие", "На источнике", "На таргете (статус)", "Действие"].map(h => (
               <th key={h} style={TH}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {tgt.map(t => (
-            <tr key={t.name} style={TR_BORDER}>
-              <td style={TD}>
-                <code style={{ color: "#e2e8f0", fontSize: 11 }}>{t.name}</code>
-              </td>
-              <td style={{ ...TD, color: "#64748b", fontSize: 11 }}>{t.trigger_type}</td>
-              <td style={{ ...TD, color: "#94a3b8", fontSize: 11 }}>{t.event}</td>
-              <td style={TD}>
-                <StatusPill status={t.status} ok="ENABLED" warn="DISABLED" />
-              </td>
-              <td style={TD}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  <div>
-                    {t.status === "ENABLED"
-                      ? <ActionBtn label="Отключить" onClick={() => onAction("disable_trigger", t.name)} busy={busy[t.name]} variant="danger" />
-                      : <ActionBtn label="Включить"  onClick={() => onAction("enable_trigger",  t.name)} busy={busy[t.name]} variant="success" />
-                    }
-                  </div>
-                  {actErr[t.name] && (
-                    <div style={{ fontSize: 10, color: "#ef4444", maxWidth: 240 }}>{actErr[t.name]}</div>
+          {rows.map(({ srcT, tgtT }) => {
+            const t = tgtT ?? srcT!;
+            const srcEvent  = srcT ? `${srcT.trigger_type} / ${srcT.event}` : null;
+            const tgtEvent  = tgtT ? `${tgtT.trigger_type} / ${tgtT.event}` : null;
+            const eventDiff = srcEvent && tgtEvent && srcEvent !== tgtEvent;
+            return (
+              <tr key={t.name} style={TR_BORDER}>
+                <td style={TD}>
+                  <code style={{ color: "#e2e8f0", fontSize: 11 }}>{t.name}</code>
+                </td>
+                <td style={{ ...TD, color: "#64748b", fontSize: 11 }}>{t.trigger_type}</td>
+                <td style={{ ...TD, color: eventDiff ? "#eab308" : "#94a3b8", fontSize: 11 }}>
+                  {tgtEvent ?? srcEvent}
+                  {eventDiff && (
+                    <div style={{ fontSize: 10, color: "#eab308" }}>src: {srcEvent}</div>
                   )}
-                </div>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td style={{ ...TD, textAlign: "center" }}>
+                  {srcT ? <Dot color="#22c55e" /> : <span style={{ color: "#475569", fontSize: 11 }}>—</span>}
+                </td>
+                <td style={TD}>
+                  {tgtT
+                    ? <StatusPill status={tgtT.status} ok="ENABLED" warn="DISABLED" />
+                    : <span style={{ color: "#475569", fontSize: 11 }}>отсутствует</span>}
+                </td>
+                <td style={TD}>
+                  {tgtT && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div>
+                        {tgtT.status === "ENABLED"
+                          ? <ActionBtn label="Отключить" onClick={() => onAction("disable_trigger", tgtT.name)} busy={busy[tgtT.name]} variant="danger" />
+                          : <ActionBtn label="Включить"  onClick={() => onAction("enable_trigger",  tgtT.name)} busy={busy[tgtT.name]} variant="success" />
+                        }
+                      </div>
+                      {actErr[tgtT.name] && (
+                        <div style={{ fontSize: 10, color: "#ef4444", maxWidth: 240 }}>{actErr[tgtT.name]}</div>
+                      )}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -614,35 +672,27 @@ export function TargetPrep() {
       .then(d => Array.isArray(d) && setTgtSchemas(d)).catch(() => {});
   }, []);
 
-  // Load source tables
+  // Load source tables — reset table synchronously so auto-fill can set it after
   useEffect(() => {
-    if (!srcSchema) { setSrcTables([]); setSrcTable(""); return; }
-    fetch(`/api/db/source/tables?schema=${srcSchema}`).then(r => r.json())
-      .then(d => { if (Array.isArray(d)) { setSrcTables(d); setSrcTable(""); } }).catch(() => {});
+    setSrcTable("");
+    setSrcTables([]);
+    if (!srcSchema) return;
+    fetch("/api/db/source/tables?" + new URLSearchParams({ schema: srcSchema }))
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setSrcTables(d); })
+      .catch(() => {});
   }, [srcSchema]);
 
-  // Load target tables
+  // Load target tables — same pattern
   useEffect(() => {
-    if (!tgtSchema) { setTgtTables([]); setTgtTable(""); return; }
-    fetch(`/api/db/target/tables?schema=${tgtSchema}`).then(r => r.json())
-      .then(d => { if (Array.isArray(d)) { setTgtTables(d); setTgtTable(""); } }).catch(() => {});
+    setTgtTable("");
+    setTgtTables([]);
+    if (!tgtSchema) return;
+    fetch("/api/db/target/tables?" + new URLSearchParams({ schema: tgtSchema }))
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setTgtTables(d); })
+      .catch(() => {});
   }, [tgtSchema]);
-
-  // Auto-fill target when source changes (only if target not set yet)
-  const prevSrcSchema = useRef("");
-  const prevSrcTable  = useRef("");
-  useEffect(() => {
-    if (srcSchema && srcSchema !== prevSrcSchema.current) {
-      if (!tgtSchema) setTgtSchema(srcSchema);
-      prevSrcSchema.current = srcSchema;
-    }
-  }, [srcSchema, tgtSchema]);
-  useEffect(() => {
-    if (srcTable && srcTable !== prevSrcTable.current) {
-      if (!tgtTable) setTgtTable(srcTable);
-      prevSrcTable.current = srcTable;
-    }
-  }, [srcTable, tgtTable]);
 
   const fetchDdl = useCallback(async () => {
     if (!srcSchema || !srcTable || !tgtSchema || !tgtTable) return;
@@ -650,7 +700,7 @@ export function TargetPrep() {
     setError(null);
     try {
       const r = await fetch(
-        `/api/target-prep/ddl?src_schema=${srcSchema}&src_table=${srcTable}&tgt_schema=${tgtSchema}&tgt_table=${tgtTable}`
+        "/api/target-prep/ddl?" + new URLSearchParams({ src_schema: srcSchema, src_table: srcTable, tgt_schema: tgtSchema, tgt_table: tgtTable })
       );
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Ошибка загрузки");
@@ -721,8 +771,16 @@ export function TargetPrep() {
             Источник
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <SearchSelect value={srcSchema} onChange={setSrcSchema} options={srcSchemas} placeholder="Схема..." />
-            <SearchSelect value={srcTable}  onChange={setSrcTable}  options={srcTables}  placeholder="Таблица..." disabled={!srcSchema} />
+            <SearchSelect
+              value={srcSchema}
+              onChange={v => { setSrcSchema(v); if (!tgtSchema) setTgtSchema(v); }}
+              options={srcSchemas} placeholder="Схема..."
+            />
+            <SearchSelect
+              value={srcTable}
+              onChange={v => { setSrcTable(v); if (!tgtTable) setTgtTable(v); }}
+              options={srcTables} placeholder="Таблица..." disabled={!srcSchema}
+            />
           </div>
         </div>
 
@@ -923,7 +981,7 @@ export function TargetPrep() {
                 : undefined
             }
           >
-            <TriggerTable tgt={ddl.target.triggers} busy={busy} actErr={actErr} onAction={doAction} />
+            <TriggerTable src={ddl.source.triggers} tgt={ddl.target.triggers} busy={busy} actErr={actErr} onAction={doAction} />
           </Section>
 
         </div>
