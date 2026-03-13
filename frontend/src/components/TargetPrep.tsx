@@ -612,8 +612,10 @@ function TriggerTable({
                     <div style={{ fontSize: 10, color: "#eab308" }}>src: {srcEvent}</div>
                   )}
                 </td>
-                <td style={{ ...TD, textAlign: "center" }}>
-                  {srcT ? <Dot color="#22c55e" /> : <span style={{ color: "#475569", fontSize: 11 }}>—</span>}
+                <td style={TD}>
+                  {srcT
+                    ? <StatusPill status={srcT.status} ok="ENABLED" warn="DISABLED" />
+                    : <span style={{ color: "#475569", fontSize: 11 }}>—</span>}
                 </td>
                 <td style={TD}>
                   {tgtT
