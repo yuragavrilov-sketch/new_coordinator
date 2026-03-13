@@ -866,7 +866,17 @@ export function TargetPrep() {
 
   const compareAll = useCallback(async () => {
     setCompareAllBusy(true);
-    await Promise.all(pairs.filter(p => p.tgtTable).map(p => comparePair(p.srcTable, p.tgtTable!)));
+    const withTarget = pairs.filter(p => p.tgtTable);
+    // Limit concurrency to avoid overwhelming Flask / Oracle connection pool
+    const CONCURRENCY = 5;
+    let i = 0;
+    async function worker() {
+      while (i < withTarget.length) {
+        const { srcTable, tgtTable } = withTarget[i++];
+        await comparePair(srcTable, tgtTable!);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, withTarget.length) }, worker));
     setCompareAllBusy(false);
   }, [pairs, comparePair]);
 
