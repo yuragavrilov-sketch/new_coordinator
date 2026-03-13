@@ -47,19 +47,27 @@ def _build_insert(cursor_description, target_schema: str,
     """
     Returns (sql, bind_names).
 
-    Bind variable names are :c0, :c1, … — safe prefixed form that avoids
-    ORA-01745 (names must start with a letter) and reserved-word collisions.
-    executemany must be called with a list of dicts keyed by bind_names.
+    Uses APPEND_VALUES hint for direct-path (no undo) insert and
+    safe :c0, :c1 bind names (oracledb requires names to start with a letter).
+    executemany is called with a list of dicts keyed by bind_names.
     """
     col_names  = [d[0] for d in cursor_description]
     bind_names = [f"c{i}" for i in range(len(col_names))]
     cols   = ", ".join(f'"{c}"' for c in col_names)
     params = ", ".join(f":{b}" for b in bind_names)
     sql = (
-        f'INSERT INTO "{target_schema.upper()}"."{stage_table.upper()}" '
+        f'INSERT /*+ APPEND_VALUES */ INTO '
+        f'"{target_schema.upper()}"."{stage_table.upper()}" '
         f'({cols}) VALUES ({params})'
     )
     return sql, bind_names
+
+
+def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
+    """Execute one batch insert and commit."""
+    with dst_conn.cursor() as ic:
+        ic.executemany(insert_sql, batch)
+    dst_conn.commit()
 
 
 def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
@@ -78,11 +86,13 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
-    insert_sql  = ""
-    bind_names: list = []
 
     try:
         with src_conn.cursor() as cur:
+            # arraysize controls how many rows are fetched per network round-trip
+            cur.arraysize = BULK_BATCH_SIZE
+            cur.prefetchrows = BULK_BATCH_SIZE + 1
+
             cur.execute(
                 f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                 f'AS OF SCN :scn '
@@ -91,23 +101,15 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
             )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, stage)
 
-            batch: list = []
-            for row in cur:
-                batch.append(dict(zip(bind_names, row)))
-                if len(batch) >= BULK_BATCH_SIZE:
-                    with dst_conn.cursor() as ic:
-                        ic.executemany(insert_sql, batch)
-                    dst_conn.commit()
-                    rows_loaded += len(batch)
-                    batch = []
-                    db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
-                    print(f"  → {rows_loaded} rows")
-
-            if batch:
-                with dst_conn.cursor() as ic:
-                    ic.executemany(insert_sql, batch)
-                dst_conn.commit()
+            while True:
+                rows = cur.fetchmany(BULK_BATCH_SIZE)
+                if not rows:
+                    break
+                batch = [dict(zip(bind_names, row)) for row in rows]
+                _flush_batch(dst_conn, insert_sql, batch)
                 rows_loaded += len(batch)
+                db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
+                print(f"  → {rows_loaded} rows")
 
         db.complete_chunk(pg_conn, chunk_id, rows_loaded)
         print(f"[bulk] chunk {chunk_id} DONE — {rows_loaded} rows")
