@@ -241,7 +241,7 @@ def transition_phase(migration_id: str):
         return jsonify({"error": str(exc)}), 500
 
 
-_DELETABLE_PHASES = {"DRAFT", "CANCELLED", "FAILED"}
+_DELETABLE_PHASES = {"DRAFT", "CANCELLING", "CANCELLED", "FAILED"}
 
 
 @bp.delete("/api/migrations/<migration_id>")

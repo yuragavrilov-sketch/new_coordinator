@@ -44,7 +44,7 @@ const ACTIVE_PHASES = new Set([
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ]);
-const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLED", "FAILED"]);
+const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
 
 export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: number; sseEvents?: SSEEvent[] }) {
   const [migrations,  setMigrations]  = useState<MigrationSummary[]>([]);
