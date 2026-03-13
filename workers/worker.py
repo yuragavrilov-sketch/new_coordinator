@@ -42,14 +42,24 @@ CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  15))
 # BULK LOADING
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _build_insert(cursor_description, target_schema: str, stage_table: str) -> str:
-    col_names = [d[0] for d in cursor_description]
+def _build_insert(cursor_description, target_schema: str,
+                  stage_table: str) -> tuple:
+    """
+    Returns (sql, bind_names).
+
+    Bind variable names are :c0, :c1, … — safe prefixed form that avoids
+    ORA-01745 (names must start with a letter) and reserved-word collisions.
+    executemany must be called with a list of dicts keyed by bind_names.
+    """
+    col_names  = [d[0] for d in cursor_description]
+    bind_names = [f"c{i}" for i in range(len(col_names))]
     cols   = ", ".join(f'"{c}"' for c in col_names)
-    params = ", ".join(f":{i + 1}" for i in range(len(col_names)))
-    return (
+    params = ", ".join(f":{b}" for b in bind_names)
+    sql = (
         f'INSERT INTO "{target_schema.upper()}"."{stage_table.upper()}" '
         f'({cols}) VALUES ({params})'
     )
+    return sql, bind_names
 
 
 def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
@@ -69,6 +79,7 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
     insert_sql  = ""
+    bind_names: list = []
 
     try:
         with src_conn.cursor() as cur:
@@ -78,11 +89,11 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 f'WHERE ROWID BETWEEN CHARTOROWID(:start) AND CHARTOROWID(:end)',
                 {"scn": start_scn, "start": rowid_start, "end": rowid_end},
             )
-            insert_sql = _build_insert(cur.description, tgt_schema, stage)
+            insert_sql, bind_names = _build_insert(cur.description, tgt_schema, stage)
 
             batch: list = []
             for row in cur:
-                batch.append(row)
+                batch.append(dict(zip(bind_names, row)))
                 if len(batch) >= BULK_BATCH_SIZE:
                     with dst_conn.cursor() as ic:
                         ic.executemany(insert_sql, batch)
