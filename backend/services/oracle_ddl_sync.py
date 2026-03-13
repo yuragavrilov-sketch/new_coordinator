@@ -68,11 +68,12 @@ _NOT_NULL_RE = re.compile(r'^\s*"[^"]+"\s+IS\s+NOT\s+NULL\s*$', re.IGNORECASE)
 
 
 def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_table, out):
+    # search_condition is LONG — cannot be in GROUP BY (ORA-00997).
+    # Fetch it separately for CHECK constraints only.
     with src_conn.cursor() as cur:
         cur.execute("""
             SELECT ac.constraint_name, ac.constraint_type,
-                   ac.search_condition, ac.r_owner, ac.r_constraint_name,
-                   ac.delete_rule,
+                   ac.r_owner, ac.r_constraint_name, ac.delete_rule,
                    LISTAGG(acc.column_name, ',')
                        WITHIN GROUP (ORDER BY acc.position) AS cols
             FROM   all_constraints  ac
@@ -83,9 +84,26 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
               AND  ac.table_name      = :t
               AND  ac.constraint_type IN ('P','U','R','C')
             GROUP BY ac.constraint_name, ac.constraint_type,
-                     ac.search_condition, ac.r_owner, ac.r_constraint_name, ac.delete_rule
+                     ac.r_owner, ac.r_constraint_name, ac.delete_rule
         """, {"s": src_schema.upper(), "t": src_table.upper()})
         src_rows = cur.fetchall()
+
+    # Fetch search_condition (LONG) row-by-row to avoid ORA-00997
+    search_cond_map: dict = {}
+    with src_conn.cursor() as cur:
+        cur.execute("""
+            SELECT constraint_name, search_condition
+            FROM   all_constraints
+            WHERE  owner           = :s
+              AND  table_name      = :t
+              AND  constraint_type = 'C'
+        """, {"s": src_schema.upper(), "t": src_table.upper()})
+        for row in cur:
+            cname, cond = row
+            try:
+                search_cond_map[cname] = str(cond).strip() if cond else ""
+            except Exception:
+                search_cond_map[cname] = ""
 
     # Target constraints keyed by (type_code, cols) for structural matching
     with dst_conn.cursor() as cur:
@@ -109,7 +127,7 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
 
     # PK/UK first so FK can reference them, CHECK last
     _order = {"P": 0, "U": 1, "R": 2, "C": 3}
-    for cname, ctype, search_cond, r_owner, r_cname, delete_rule, cols in sorted(
+    for cname, ctype, r_owner, r_cname, delete_rule, cols in sorted(
         src_rows, key=lambda r: _order.get(r[1], 9)
     ):
         key = (ctype, cols)
@@ -129,7 +147,7 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
                     f"UNIQUE ({_qcols(cols)})"
                 )
             elif ctype == "C":
-                cond = str(search_cond or "").strip()
+                cond = search_cond_map.get(cname, "")
                 if not cond or _NOT_NULL_RE.match(cond):
                     out["skipped"].append(cname)
                     continue
@@ -196,7 +214,7 @@ def _resolve_ref(conn, owner: str, constraint_name: str):
 # ── Indexes ────────────────────────────────────────────────────────────────────
 
 def _sync_indexes(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_table, out):
-    # Only indexes not backing a constraint (Oracle creates those automatically)
+    # All source indexes (including constraint-backed — we label them separately)
     with src_conn.cursor() as cur:
         cur.execute("""
             SELECT ai.index_name, ai.uniqueness, ai.index_type,
@@ -208,15 +226,19 @@ def _sync_indexes(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_tab
                    AND ai.owner       = aic.index_owner
             WHERE  ai.owner      = :s
               AND  ai.table_name = :t
-              AND  NOT EXISTS (
-                       SELECT 1 FROM all_constraints ac
-                       WHERE  ac.owner      = :s
-                         AND  ac.table_name = :t
-                         AND  ac.index_name = ai.index_name
-                   )
             GROUP BY ai.index_name, ai.uniqueness, ai.index_type
         """, {"s": src_schema.upper(), "t": src_table.upper()})
         src_rows = cur.fetchall()
+
+    # Constraint-backed index names on source — these are auto-created with their constraint
+    with src_conn.cursor() as cur:
+        cur.execute("""
+            SELECT index_name FROM all_constraints
+            WHERE  owner      = :s
+              AND  table_name = :t
+              AND  index_name IS NOT NULL
+        """, {"s": src_schema.upper(), "t": src_table.upper()})
+        con_backed = {r[0] for r in cur.fetchall()}
 
     with dst_conn.cursor() as cur:
         cur.execute(
@@ -229,13 +251,18 @@ def _sync_indexes(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_tab
     t = tgt_table.upper()
 
     for idx_name, uniqueness, idx_type, cols in src_rows:
+        # Constraint-backed: skipped with explanation (created automatically with PK/UK)
+        if idx_name in con_backed:
+            out["skipped"].append(f"{idx_name} (создаётся вместе с констрейнтом)")
+            continue
+
         if idx_name in tgt_names:
             out["skipped"].append(idx_name)
             continue
 
-        # Skip function-based and BITMAP (require expression / special syntax)
+        # Skip function-based / BITMAP — require special DDL
         if not idx_type.startswith("NORMAL"):
-            out["skipped"].append(f"{idx_name} (type={idx_type}, skipped)")
+            out["skipped"].append(f"{idx_name} (тип {idx_type} не поддерживается)")
             continue
 
         unique_kw = "UNIQUE " if uniqueness == "UNIQUE" else ""
