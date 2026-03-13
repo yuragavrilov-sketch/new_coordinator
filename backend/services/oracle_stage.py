@@ -112,6 +112,105 @@ def drop_stage_table(dst_cfg: dict, target_schema: str, stage_table: str) -> Non
         dst_conn.close()
 
 
+def sync_target_columns(
+    src_cfg: dict,
+    dst_cfg: dict,
+    source_schema: str,
+    source_table: str,
+    target_schema: str,
+    target_table: str,
+) -> dict:
+    """
+    Bring the target table column set in line with the source table.
+
+    Actions:
+    - Columns present in source but missing in target → ALTER TABLE ADD
+    - Columns with mismatched type/length → logged as warning only (no auto-ALTER)
+    - Extra columns in target not in source → left untouched
+
+    Returns a summary:
+      {
+        "added":    [{"column": str, "type": str}, ...],
+        "warnings": [{"column": str, "source_type": str, "target_type": str}, ...],
+        "skipped":  [str, ...],   # extra target columns
+      }
+    """
+    src_conn = open_oracle_conn(src_cfg)
+    try:
+        with src_conn.cursor() as cur:
+            cur.execute("""
+                SELECT column_name, data_type, data_length,
+                       data_precision, data_scale, nullable, char_used
+                FROM   all_tab_columns
+                WHERE  owner      = :s
+                  AND  table_name = :t
+                ORDER BY column_id
+            """, {"s": source_schema.upper(), "t": source_table.upper()})
+            src_cols = {
+                r[0]: r for r in cur.fetchall()
+            }
+    finally:
+        src_conn.close()
+
+    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        with dst_conn.cursor() as cur:
+            cur.execute("""
+                SELECT column_name, data_type, data_length,
+                       data_precision, data_scale, nullable, char_used
+                FROM   all_tab_columns
+                WHERE  owner      = :s
+                  AND  table_name = :t
+                ORDER BY column_id
+            """, {"s": target_schema.upper(), "t": target_table.upper()})
+            dst_cols = {r[0]: r for r in cur.fetchall()}
+
+        added: list   = []
+        warnings: list = []
+        skipped: list  = [c for c in dst_cols if c not in src_cols]
+
+        for col_name, src_row in src_cols.items():
+            _, data_type, data_length, data_precision, data_scale, nullable, char_used = src_row
+            type_str  = _col_type_str(data_type, data_length, data_precision,
+                                      data_scale, char_used or "B")
+            null_str  = "" if nullable == "Y" else " NOT NULL"
+
+            if col_name not in dst_cols:
+                ddl = (
+                    f'ALTER TABLE "{target_schema.upper()}"."{target_table.upper()}" '
+                    f'ADD ("{col_name}" {type_str}{null_str})'
+                )
+                with dst_conn.cursor() as cur:
+                    cur.execute(ddl)
+                added.append({"column": col_name, "type": type_str})
+            else:
+                dst_row = dst_cols[col_name]
+                dst_type_str = _col_type_str(
+                    dst_row[1], dst_row[2], dst_row[3], dst_row[4], dst_row[6] or "B"
+                )
+                if dst_type_str != type_str:
+                    warnings.append({
+                        "column":      col_name,
+                        "source_type": type_str,
+                        "target_type": dst_type_str,
+                    })
+
+        dst_conn.commit()
+    finally:
+        dst_conn.close()
+
+    if warnings:
+        print(
+            f"[oracle_stage] sync_target_columns: type mismatches (not auto-fixed): "
+            + ", ".join(
+                f"{w['column']} src={w['source_type']} dst={w['target_type']}"
+                for w in warnings
+            )
+        )
+
+    return {"added": added, "warnings": warnings, "skipped": skipped}
+
+
 def count_stage(dst_cfg: dict, target_schema: str, stage_table: str) -> int:
     """Return the row count of the stage table."""
     dst_conn = open_oracle_conn(dst_cfg)

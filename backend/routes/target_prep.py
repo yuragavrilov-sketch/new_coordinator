@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request
 from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action
+from services.oracle_stage import sync_target_columns
 
 bp = Blueprint("target_prep", __name__)
 
@@ -64,5 +65,27 @@ def target_action():
             return jsonify({"ok": True})
         finally:
             conn.close()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@bp.post("/api/target-prep/sync-columns")
+def sync_columns():
+    """Add columns present in source but missing in target (ALTER TABLE ADD)."""
+    data       = request.json or {}
+    src_schema = data.get("src_schema", "").strip().upper()
+    src_table  = data.get("src_table",  "").strip().upper()
+    tgt_schema = data.get("tgt_schema", "").strip().upper()
+    tgt_table  = data.get("tgt_table",  "").strip().upper()
+
+    if not all([src_schema, src_table, tgt_schema, tgt_table]):
+        return jsonify({"error": "src_schema, src_table, tgt_schema, tgt_table required"}), 400
+
+    configs = _state["load_configs"]()
+    src_cfg = configs.get("oracle_source", {})
+    dst_cfg = configs.get("oracle_target", {})
+    try:
+        result = sync_target_columns(src_cfg, dst_cfg, src_schema, src_table, tgt_schema, tgt_table)
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503

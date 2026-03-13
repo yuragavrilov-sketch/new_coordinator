@@ -663,8 +663,10 @@ export function TargetPrep() {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
-  const [busy,   setBusy]   = useState<Record<string, boolean>>({});
-  const [actErr, setActErr] = useState<Record<string, string>>({});
+  const [busy,       setBusy]       = useState<Record<string, boolean>>({});
+  const [actErr,     setActErr]     = useState<Record<string, string>>({});
+  const [syncBusy,   setSyncBusy]   = useState(false);
+  const [syncResult, setSyncResult] = useState<{ added: {column: string; type: string}[]; warnings: {column: string; source_type: string; target_type: string}[] } | null>(null);
 
   // Load schemas once
   useEffect(() => {
@@ -715,6 +717,32 @@ export function TargetPrep() {
       setLoading(false);
     }
   }, [srcSchema, srcTable, tgtSchema, tgtTable]);
+
+  const doSyncColumns = useCallback(async () => {
+    if (!ddl) return;
+    setSyncBusy(true);
+    setSyncResult(null);
+    try {
+      const r = await fetch("/api/target-prep/sync-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          src_schema: ddl.source.schema,
+          src_table:  ddl.source.table,
+          tgt_schema: ddl.target.schema,
+          tgt_table:  ddl.target.table,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Ошибка синхронизации");
+      setSyncResult(d);
+      await fetchDdl();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  }, [ddl, fetchDdl]);
 
   const doAction = useCallback(async (action: string, objectName: string) => {
     if (!ddl) return;
@@ -840,6 +868,16 @@ export function TargetPrep() {
             title="Колонки"
             count={ddl.source.columns.length}
             status={colIssues === 0 ? "ok" : "warn"}
+            bulkAction={
+              colDiff.some(r => r.state === "noTgt")
+                ? <ActionBtn
+                    label="Добавить недостающие колонки"
+                    onClick={doSyncColumns}
+                    busy={syncBusy}
+                    variant="success"
+                  />
+                : undefined
+            }
           >
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -909,6 +947,25 @@ export function TargetPrep() {
                   <span style={{ color: "#f97316" }}>
                     + {colDiff.filter(r => r.state === "extra").length} лишних в таргете
                   </span>
+                )}
+              </div>
+            )}
+            {syncResult && (
+              <div style={{ padding: "8px 14px", borderTop: "1px solid #1e293b", fontSize: 11 }}>
+                {syncResult.added.length > 0 && (
+                  <div style={{ color: "#22c55e", marginBottom: 4 }}>
+                    ✓ Добавлено: {syncResult.added.map(a => `${a.column} (${a.type})`).join(", ")}
+                  </div>
+                )}
+                {syncResult.warnings.length > 0 && (
+                  <div style={{ color: "#eab308" }}>
+                    ⚠ Несовпадение типов (не применено): {syncResult.warnings.map(w =>
+                      `${w.column}: src=${w.source_type} / tgt=${w.target_type}`
+                    ).join("; ")}
+                  </div>
+                )}
+                {syncResult.added.length === 0 && syncResult.warnings.length === 0 && (
+                  <span style={{ color: "#475569" }}>Нет изменений</span>
                 )}
               </div>
             )}
