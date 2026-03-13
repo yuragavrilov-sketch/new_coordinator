@@ -169,8 +169,23 @@ def sync_target_columns(
         warnings: list = []
         skipped: list  = [c for c in dst_cols if c not in src_cols]
 
+        # LONG / LONG RAW columns cannot be added via ALTER TABLE without
+        # restrictions (ORA-00997 / ORA-01703) — skip them.
+        _SKIP_TYPES = {"LONG", "LONG RAW"}
+
         for col_name, src_row in src_cols.items():
             _, data_type, data_length, data_precision, data_scale, nullable, char_used = src_row
+
+            if data_type.upper() in _SKIP_TYPES:
+                if col_name not in dst_cols:
+                    warnings.append({
+                        "column":      col_name,
+                        "source_type": data_type,
+                        "target_type": "—",
+                        "note":        f"{data_type} columns cannot be added automatically",
+                    })
+                continue
+
             type_str  = _col_type_str(data_type, data_length, data_precision,
                                       data_scale, char_used or "B")
             null_str  = "" if nullable == "Y" else " NOT NULL"

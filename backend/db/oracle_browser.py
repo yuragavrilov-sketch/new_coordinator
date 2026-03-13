@@ -97,10 +97,11 @@ def get_table_info(conn, schema: str, table: str) -> dict:
 def get_full_ddl_info(conn, schema: str, table: str) -> dict:
     """Return full DDL snapshot: columns, constraints, indexes, triggers."""
     with conn.cursor() as cur:
-        # Full column details
+        # Fetch columns without data_default (LONG type — cannot be used in
+        # expressions; fetched separately below to avoid ORA-00997).
         cur.execute("""
             SELECT column_name, data_type, data_length, data_precision, data_scale,
-                   nullable, data_default, column_id
+                   nullable, column_id
             FROM   all_tab_columns
             WHERE  owner = :s AND table_name = :t
             ORDER BY column_id
@@ -113,11 +114,31 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
                 "data_precision": r[3],
                 "data_scale":     r[4],
                 "nullable":       r[5] == "Y",
-                "data_default":   str(r[6]).strip() if r[6] is not None else None,
-                "column_id":      r[7],
+                "data_default":   None,   # populated below
+                "column_id":      r[6],
             }
             for r in cur.fetchall()
         ]
+
+    # Fetch data_default (LONG) one row at a time — the only safe way to read
+    # Oracle LONG columns without risking ORA-00997.
+    col_index = {c["name"]: c for c in columns}
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, data_default
+            FROM   all_tab_columns
+            WHERE  owner = :s AND table_name = :t
+            ORDER BY column_id
+        """, {"s": schema, "t": table})
+        for row in cur:
+            col_name, default_val = row
+            if col_name in col_index and default_val is not None:
+                try:
+                    col_index[col_name]["data_default"] = str(default_val).strip()
+                except Exception:
+                    pass   # ignore unreadable LONG values
+
+    with conn.cursor() as cur:
 
         # Constraints (PK / UK / FK / CHECK) — subquery avoids outer-join NULLs
         cur.execute("""
