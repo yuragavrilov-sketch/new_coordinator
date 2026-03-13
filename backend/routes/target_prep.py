@@ -70,6 +70,79 @@ def target_action():
         return jsonify({"error": str(exc)}), 503
 
 
+def _diff_summary(src: dict, tgt: dict) -> dict:
+    """Compute diff counts between source and target DDL info dicts."""
+    tgt_col     = {c["name"] for c in tgt["columns"]}
+    src_col_map = {c["name"]: c for c in src["columns"]}
+    tgt_col_map = {c["name"]: c for c in tgt["columns"]}
+
+    cols_missing = sum(1 for c in src["columns"] if c["name"] not in tgt_col)
+    cols_extra   = sum(1 for c in tgt["columns"] if c["name"] not in src_col_map)
+    cols_type    = sum(
+        1 for c in src["columns"]
+        if c["name"] in tgt_col_map
+        and c["data_type"] != tgt_col_map[c["name"]]["data_type"]
+    )
+
+    tgt_idx      = {i["name"] for i in tgt["indexes"]}
+    idx_missing  = sum(1 for i in src["indexes"] if i["name"] not in tgt_idx)
+    idx_disabled = sum(1 for i in tgt["indexes"] if i["status"] != "VALID")
+
+    tgt_con_keys = {(c["type_code"], ",".join(c["columns"])) for c in tgt["constraints"]}
+    con_missing  = sum(
+        1 for c in src["constraints"]
+        if (c["type_code"], ",".join(c["columns"])) not in tgt_con_keys
+    )
+    con_disabled = sum(
+        1 for c in tgt["constraints"]
+        if c["status"] == "DISABLED" and c["type_code"] != "P"
+    )
+
+    tgt_trg     = {t["name"] for t in tgt["triggers"]}
+    trg_missing = sum(1 for t in src["triggers"] if t["name"] not in tgt_trg)
+
+    total = cols_missing + cols_extra + cols_type + idx_missing + idx_disabled + con_missing + con_disabled + trg_missing
+    return {
+        "ok":           total == 0,
+        "total":        total,
+        "cols_missing": cols_missing,
+        "cols_extra":   cols_extra,
+        "cols_type":    cols_type,
+        "idx_missing":  idx_missing,
+        "idx_disabled": idx_disabled,
+        "con_missing":  con_missing,
+        "con_disabled": con_disabled,
+        "trg_missing":  trg_missing,
+    }
+
+
+@bp.post("/api/target-prep/compare-summary")
+def compare_summary():
+    """Return diff summary (counts only) for a source/target table pair."""
+    data       = request.json or {}
+    src_schema = data.get("src_schema", "").strip().upper()
+    src_table  = data.get("src_table",  "").strip().upper()
+    tgt_schema = data.get("tgt_schema", "").strip().upper()
+    tgt_table  = data.get("tgt_table",  "").strip().upper()
+
+    if not all([src_schema, src_table, tgt_schema, tgt_table]):
+        return jsonify({"error": "src_schema, src_table, tgt_schema, tgt_table required"}), 400
+
+    configs = _state["load_configs"]()
+    try:
+        src_conn = get_oracle_conn("source", configs)
+        tgt_conn = get_oracle_conn("target", configs)
+        try:
+            src_info = get_full_ddl_info(src_conn, src_schema, src_table)
+            tgt_info = get_full_ddl_info(tgt_conn, tgt_schema, tgt_table)
+            return jsonify(_diff_summary(src_info, tgt_info))
+        finally:
+            src_conn.close()
+            tgt_conn.close()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
 @bp.post("/api/target-prep/sync-columns")
 def sync_columns():
     """Add columns present in source but missing in target (ALTER TABLE ADD)."""
