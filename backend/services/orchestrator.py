@@ -31,6 +31,7 @@ import services.oracle_baseline as oracle_baseline
 import services.kafka_lag       as kafka_lag_svc
 import services.validator       as validator
 import services.job_queue       as job_queue
+import db.oracle_browser        as oracle_browser
 
 TICK_INTERVAL = 5  # seconds
 
@@ -104,6 +105,8 @@ def _dispatch(migration_id: str, phase: str, m: dict) -> None:
         "STAGE_VALIDATED":      _handle_stage_validated,
         "BASELINE_PUBLISHING":  _handle_baseline_publishing,
         "BASELINE_PUBLISHED":   _handle_baseline_published,
+        "STAGE_DROPPING":       _handle_stage_dropping,
+        "INDEXES_ENABLING":     _handle_indexes_enabling,
         "CDC_APPLY_STARTING":   _handle_cdc_apply_starting,
         "CDC_CATCHING_UP":      _handle_cdc_catching_up,
         "CDC_CAUGHT_UP":        _handle_cdc_caught_up,
@@ -460,8 +463,79 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
 
 
 def _handle_baseline_published(mid: str, m: dict) -> None:
-    _transition(mid, "CDC_APPLY_STARTING",
-                message="Ожидание запуска CDC apply-worker")
+    _transition(mid, "STAGE_DROPPING",
+                message="Удаление stage-таблицы")
+
+
+def _handle_stage_dropping(mid: str, m: dict) -> None:
+    """Drop the stage table — runs in a thread."""
+    if _in_prog(mid):
+        return
+    _mark_in_prog(mid)
+
+    def _run():
+        try:
+            dst_cfg = _oracle_cfg(m["target_connection_id"])
+            oracle_stage.drop_stage_table(
+                dst_cfg, m["target_schema"], m["stage_table_name"],
+            )
+            _transition(mid, "INDEXES_ENABLING",
+                        message="Stage-таблица удалена, включение индексов и прочих объектов")
+        except Exception as exc:
+            _fail(mid, str(exc), "STAGE_DROP_ERROR")
+        finally:
+            _unmark_in_prog(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_indexes_enabling(mid: str, m: dict) -> None:
+    """Enable all UNUSABLE indexes, DISABLED constraints and triggers — runs in a thread."""
+    if _in_prog(mid):
+        return
+    _mark_in_prog(mid)
+
+    def _run():
+        try:
+            dst_cfg = _oracle_cfg(m["target_connection_id"])
+            conn = oracle_scn.open_oracle_conn(dst_cfg)
+            try:
+                result = oracle_browser.enable_all_disabled_objects(
+                    conn, m["target_schema"], m["target_table"],
+                )
+            finally:
+                conn.close()
+
+            err_count = (
+                len(result["errors"]["indexes"])
+                + len(result["errors"]["constraints"])
+            )
+            if err_count:
+                names = (
+                    [e["name"] for e in result["errors"]["indexes"]]
+                    + [e["name"] for e in result["errors"]["constraints"]]
+                )
+                _fail(
+                    mid,
+                    f"Не удалось включить объекты: {', '.join(names)}. "
+                    + str(result["errors"]),
+                    "INDEXES_ENABLE_ERROR",
+                )
+                return
+
+            n_idx = len(result["enabled"]["indexes"])
+            n_con = len(result["enabled"]["constraints"])
+            msg = (
+                f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                "Ожидание запуска CDC apply-worker"
+            )
+            _transition(mid, "CDC_APPLY_STARTING", message=msg)
+        except Exception as exc:
+            _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
+        finally:
+            _unmark_in_prog(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _handle_cdc_apply_starting(mid: str, m: dict) -> None:

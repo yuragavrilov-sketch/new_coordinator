@@ -222,3 +222,45 @@ def execute_target_action(conn, action: str, schema: str, table: str, object_nam
     with conn.cursor() as cur:
         cur.execute(ddl)
     conn.commit()
+
+
+def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
+    """
+    Enable all UNUSABLE indexes and DISABLED constraints on *table* in *schema*.
+    Triggers are intentionally left untouched.
+
+    Returns a summary dict:
+      { "enabled": {"indexes": [...], "constraints": [...]},
+        "errors":  {"indexes": [...], "constraints": [...]} }
+
+    Errors list items: {"name": str, "error": str}
+    A single commit is issued after all statements.  Any per-object error is
+    collected and returned rather than raised so the caller decides policy.
+    """
+    info = get_full_ddl_info(conn, schema, table)
+    s = schema.upper()
+    t = table.upper()
+    enabled: dict = {"indexes": [], "constraints": []}
+    errors:  dict = {"indexes": [], "constraints": []}
+
+    with conn.cursor() as cur:
+        for idx in info["indexes"]:
+            if idx["status"] != "VALID":
+                try:
+                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD')
+                    enabled["indexes"].append(idx["name"])
+                except Exception as exc:
+                    errors["indexes"].append({"name": idx["name"], "error": str(exc)})
+
+        for con in info["constraints"]:
+            if con["status"] == "DISABLED":
+                try:
+                    cur.execute(
+                        f'ALTER TABLE "{s}"."{t}" ENABLE CONSTRAINT "{con["name"]}"'
+                    )
+                    enabled["constraints"].append(con["name"])
+                except Exception as exc:
+                    errors["constraints"].append({"name": con["name"], "error": str(exc)})
+
+    conn.commit()
+    return {"enabled": enabled, "errors": errors}
