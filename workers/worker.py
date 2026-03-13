@@ -118,9 +118,9 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
 
             cur.execute(
                 f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
-                f'AS OF SCN :scn '
-                f'WHERE ROWID BETWEEN CHARTOROWID(:start) AND CHARTOROWID(:end)',
-                {"scn": start_scn, "start": rowid_start, "end": rowid_end},
+                f'AS OF SCN :p_scn '
+                f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
+                {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
             )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, stage)
 
