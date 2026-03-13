@@ -53,6 +53,15 @@ sys.path.insert(0, str(_HERE))
 import common as db
 from common import WORKER_ID
 
+# Fetch LOBs (CLOB/BLOB/NCLOB) as Python str/bytes directly — LOB locators
+# from AS OF SCN flashback cursors are invalid outside the fetching cursor,
+# which causes ORA-64219.  Setting this globally is safe for bulk copy.
+try:
+    import oracledb
+    oracledb.defaults.fetch_lobs = False
+except ImportError:
+    pass
+
 BULK_BATCH_SIZE    = int(os.environ.get("BULK_BATCH_SIZE",    5_000))
 BULK_POLL_INTERVAL = int(os.environ.get("BULK_POLL_INTERVAL", 5))
 CDC_BATCH_SIZE     = int(os.environ.get("CDC_BATCH_SIZE",     500))
