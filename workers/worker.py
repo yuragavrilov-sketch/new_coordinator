@@ -1,23 +1,21 @@
 """
-Universal Worker — handles both bulk chunk loading and CDC apply tasks.
+Universal Worker — bulk loading + CDC apply, both via direct PostgreSQL access.
 
-A single process that:
-  * polls for PENDING bulk chunks   → processes them one by one
-  * polls for CDC migrations needing a worker → runs a Kafka consumer
-    thread per migration (auto-restarts if thread dies)
+No HTTP calls to Flask.  Workers read configs and job queue straight from the
+state DB using SELECT … FOR UPDATE SKIP LOCKED.
 
 Usage:
     python worker.py
 
 Environment variables (see .env.example):
-    API_URL            Flask backend URL            (default: http://localhost:5000)
-    WORKER_ID          Unique identifier            (default: hostname:pid)
-    BULK_BATCH_SIZE    Rows per INSERT batch        (default: 5000)
-    BULK_POLL_INTERVAL Seconds between claim polls  (default: 5)
-    CDC_BATCH_SIZE     Kafka records per poll cycle (default: 500)
-    CDC_CHECKIN_SEC    Seconds between CDC checkins (default: 30)
-    CDC_POLL_MS        Kafka poll timeout ms        (default: 1000)
-    CDC_SCAN_INTERVAL  Seconds between CDC claim polls (default: 15)
+    STATE_DB_DSN       PostgreSQL DSN           (default: postgres://postgres:postgres@localhost:5432/migration_state)
+    WORKER_ID          Unique identifier        (default: hostname:pid)
+    BULK_BATCH_SIZE    Rows per INSERT batch    (default: 5000)
+    BULK_POLL_INTERVAL Seconds between polls    (default: 5)
+    CDC_BATCH_SIZE     Kafka records per cycle  (default: 500)
+    CDC_CHECKIN_SEC    Seconds between checkins (default: 30)
+    CDC_POLL_MS        Kafka poll timeout ms    (default: 1000)
+    CDC_SCAN_INTERVAL  Seconds between CDC scans (default: 15)
 """
 
 import json
@@ -29,9 +27,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import api_get, api_post, get_configs, open_oracle, WORKER_ID
-
-# ── Tunables ──────────────────────────────────────────────────────────────────
+import common as db
+from common import WORKER_ID
 
 BULK_BATCH_SIZE    = int(os.environ.get("BULK_BATCH_SIZE",    5_000))
 BULK_POLL_INTERVAL = int(os.environ.get("BULK_POLL_INTERVAL", 5))
@@ -47,18 +44,16 @@ CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  15))
 
 def _build_insert(cursor_description, target_schema: str, stage_table: str) -> str:
     col_names = [d[0] for d in cursor_description]
-    cols      = ", ".join(f'"{c}"' for c in col_names)
-    params    = ", ".join(f":{i + 1}" for i in range(len(col_names)))
+    cols   = ", ".join(f'"{c}"' for c in col_names)
+    params = ", ".join(f":{i + 1}" for i in range(len(col_names)))
     return (
         f'INSERT INTO "{target_schema.upper()}"."{stage_table.upper()}" '
         f'({cols}) VALUES ({params})'
     )
 
 
-def process_bulk_chunk(chunk: dict) -> None:
+def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     chunk_id    = chunk["chunk_id"]
-    src_id      = chunk["source_connection_id"]
-    dst_id      = chunk["target_connection_id"]
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
     tgt_schema  = chunk["target_schema"]
@@ -67,11 +62,11 @@ def process_bulk_chunk(chunk: dict) -> None:
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
-    print(f"[bulk] chunk {chunk_id} ({rowid_start}..{rowid_end}) scn={start_scn}")
+    print(f"[bulk] chunk {chunk_id} seq={chunk['chunk_seq']}"
+          f" ({rowid_start}..{rowid_end}) scn={start_scn}")
 
-    configs  = get_configs(force=True)
-    src_conn = open_oracle(src_id, configs)
-    dst_conn = open_oracle(dst_id, configs)
+    src_conn = db.open_oracle(chunk["source_connection_id"], configs)
+    dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
     insert_sql  = ""
 
@@ -94,9 +89,8 @@ def process_bulk_chunk(chunk: dict) -> None:
                     dst_conn.commit()
                     rows_loaded += len(batch)
                     batch = []
-                    api_post(f"/api/worker/chunks/{chunk_id}/progress",
-                             {"rows_loaded": rows_loaded})
-                    print(f"  → {rows_loaded} строк")
+                    db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
+                    print(f"  → {rows_loaded} rows")
 
             if batch:
                 with dst_conn.cursor() as ic:
@@ -104,14 +98,14 @@ def process_bulk_chunk(chunk: dict) -> None:
                 dst_conn.commit()
                 rows_loaded += len(batch)
 
-        api_post(f"/api/worker/chunks/{chunk_id}/complete", {"rows_loaded": rows_loaded})
-        print(f"[bulk] chunk {chunk_id} DONE — {rows_loaded} строк")
+        db.complete_chunk(pg_conn, chunk_id, rows_loaded)
+        print(f"[bulk] chunk {chunk_id} DONE — {rows_loaded} rows")
 
     except Exception as exc:
         err = str(exc)
         print(f"[bulk] chunk {chunk_id} FAILED: {err}")
         try:
-            api_post(f"/api/worker/chunks/{chunk_id}/fail", {"error_text": err})
+            db.fail_chunk(pg_conn, chunk_id, err)
         except Exception:
             pass
         raise
@@ -124,65 +118,56 @@ def process_bulk_chunk(chunk: dict) -> None:
 
 
 def bulk_loop() -> None:
-    """Runs in the main thread: continuously claim + process bulk chunks."""
+    """Main thread: continuously claim + process bulk chunks."""
     print(f"[bulk] loop started (worker_id={WORKER_ID})")
-    while True:
-        try:
-            resp = api_post("/api/worker/chunks/claim", {"worker_id": WORKER_ID})
-            if resp is None:
+    pg = db.get_pg_conn()
+    try:
+        while True:
+            try:
+                chunk = db.claim_chunk(pg)
+                if chunk is None:
+                    time.sleep(BULK_POLL_INTERVAL)
+                    continue
+                configs = db.load_configs(pg)
+                process_bulk_chunk(chunk, pg, configs)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                print(f"[bulk] error: {exc}")
+                # Reconnect on connection errors
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+                pg = db.get_pg_conn()
                 time.sleep(BULK_POLL_INTERVAL)
-                continue
-            process_bulk_chunk(resp)
-        except KeyboardInterrupt:
-            raise
-        except Exception as exc:
-            print(f"[bulk] error: {exc}")
-            time.sleep(BULK_POLL_INTERVAL)
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CDC APPLY
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _cdc_checkin(migration_id: str, consumer, rows_applied: int) -> None:
+def _calc_lag(consumer, consumer_group: str, bootstrap: list) -> int:
     from kafka import KafkaAdminClient
-
-    configs   = get_configs()
-    kafka_cfg = configs.get("kafka", {})
-    bootstrap = [s.strip() for s in kafka_cfg.get("bootstrap_servers", "").split(",")]
-    migration = api_get(f"/api/migrations/{migration_id}")
-
-    consumer_group = migration["consumer_group"]
-    total_lag      = 0
-
+    total_lag = 0
     try:
         admin = KafkaAdminClient(bootstrap_servers=bootstrap, request_timeout_ms=5_000)
         try:
-            offsets  = admin.list_consumer_group_offsets(consumer_group)
+            offsets   = admin.list_consumer_group_offsets(consumer_group)
             committed = {tp: om.offset for tp, om in offsets.items() if om.offset >= 0}
-            end      = consumer.end_offsets(list(committed.keys()))
+            end       = consumer.end_offsets(list(committed.keys()))
             for tp, off in committed.items():
                 total_lag += max(0, end.get(tp, off) - off)
         finally:
             admin.close()
     except Exception as exc:
-        print(f"[cdc:{migration_id[:8]}] lag error: {exc}")
-
-    api_post("/api/worker/cdc/checkin", {
-        "migration_id": migration_id,
-        "worker_id":    WORKER_ID,
-        "lag":          total_lag,
-        "rows_applied": rows_applied,
-        "last_event_ts": datetime.now(timezone.utc).isoformat(),
-    })
-    print(f"[cdc:{migration_id[:8]}] checkin lag={total_lag} rows_applied={rows_applied}")
-
-    if total_lag == 0:
-        try:
-            api_post(f"/api/migrations/{migration_id}/action",
-                     {"action": "lag_zero", "actor_id": WORKER_ID})
-        except Exception:
-            pass
+        print(f"[cdc] lag error: {exc}")
+    return total_lag
 
 
 def _merge_upsert(conn, schema: str, table: str, row: dict, key_cols: list) -> None:
@@ -194,76 +179,59 @@ def _merge_upsert(conn, schema: str, table: str, row: dict, key_cols: list) -> N
     insert_vals = ", ".join(f's."{c}"' for c in columns)
     update_set  = ", ".join(f't."{c}" = s."{c}"' for c in non_keys)
 
-    if update_set:
-        sql = (
-            f'MERGE INTO "{schema.upper()}"."{table.upper()}" t '
-            f'USING (SELECT {src_cols} FROM DUAL) s ON ({key_conds}) '
-            f'WHEN MATCHED THEN UPDATE SET {update_set} '
-            f'WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})'
-        )
-    else:
-        sql = (
-            f'MERGE INTO "{schema.upper()}"."{table.upper()}" t '
-            f'USING (SELECT {src_cols} FROM DUAL) s ON ({key_conds}) '
-            f'WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})'
-        )
+    sql = (
+        f'MERGE INTO "{schema.upper()}"."{table.upper()}" t '
+        f'USING (SELECT {src_cols} FROM DUAL) s ON ({key_conds}) '
+        + (f'WHEN MATCHED THEN UPDATE SET {update_set} ' if update_set else '')
+        + f'WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})'
+    )
     with conn.cursor() as cur:
         cur.execute(sql, list(row.values()))
 
 
 def _delete_row(conn, schema: str, table: str, key_data: dict, key_cols: list) -> None:
     where  = " AND ".join(f'"{c}" = :{i + 1}' for i, c in enumerate(key_cols))
-    values = [key_data.get(c) for c in key_cols]
     with conn.cursor() as cur:
         cur.execute(
             f'DELETE FROM "{schema.upper()}"."{table.upper()}" WHERE {where}',
-            values,
+            [key_data.get(c) for c in key_cols],
         )
 
 
-def _apply_event(conn, event: dict, target_schema: str,
+def _apply_event(oracle_conn, event: dict, target_schema: str,
                  target_table: str, key_cols: list) -> None:
     op = event["op"]
-    if op in ("c", "r"):
+    if op in ("c", "r", "u"):
         row = event.get("after") or {}
         if row:
-            _merge_upsert(conn, target_schema, target_table, row, key_cols)
-    elif op == "u":
-        row = event.get("after") or {}
-        if row:
-            _merge_upsert(conn, target_schema, target_table, row, key_cols)
+            _merge_upsert(oracle_conn, target_schema, target_table, row, key_cols)
     elif op == "d":
         row = event.get("before") or {}
         if row and key_cols:
-            _delete_row(conn, target_schema, target_table, row, key_cols)
+            _delete_row(oracle_conn, target_schema, target_table, row, key_cols)
 
 
 def _parse_debezium(msg_value: bytes) -> Optional[dict]:
     if msg_value is None:
         return None
     try:
-        doc = json.loads(msg_value.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
+        payload = json.loads(msg_value.decode("utf-8")).get("payload")
+    except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
         return None
-    payload = doc.get("payload")
     if not payload:
         return None
     op = payload.get("op")
     if op not in ("c", "u", "d", "r"):
         return None
-    return {"op": op, "before": payload.get("before"),
-            "after": payload.get("after"), "ts_ms": payload.get("ts_ms")}
+    return {"op": op, "before": payload.get("before"), "after": payload.get("after")}
 
 
 def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
-    """
-    Long-running thread: consume Kafka events for one migration and apply
-    them to the target Oracle table.  Exits when stop_event is set.
-    """
+    """Long-running thread: apply Debezium events for one migration."""
     try:
         from kafka import KafkaConsumer
     except ImportError:
-        print("[cdc] kafka-python not installed — CDC disabled")
+        print("[cdc] kafka-python not installed")
         return
 
     migration_id   = migration["migration_id"]
@@ -274,15 +242,15 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
     topic_prefix   = migration["topic_prefix"]
     consumer_group = migration["consumer_group"]
     key_cols       = json.loads(migration.get("effective_key_columns_json") or "[]")
+    topic          = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}"
+    tag            = migration_id[:8]
 
-    topic = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}"
-    tag   = migration_id[:8]
+    print(f"[cdc:{tag}] thread started  topic={topic}  group={consumer_group}")
 
-    print(f"[cdc:{tag}] thread started topic={topic} group={consumer_group}")
-
-    configs         = get_configs(force=True)
-    kafka_cfg       = configs.get("kafka", {})
-    bootstrap       = [s.strip() for s in kafka_cfg.get("bootstrap_servers", "localhost:9092").split(",")]
+    pg      = db.get_pg_conn()
+    configs = db.load_configs(pg)
+    kafka_cfg   = configs.get("kafka") or {}
+    bootstrap   = [s.strip() for s in (kafka_cfg.get("bootstrap_servers") or "localhost:9092").split(",")]
 
     consumer = KafkaConsumer(
         topic,
@@ -294,8 +262,7 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
         consumer_timeout_ms=CDC_POLL_MS,
         max_poll_records=CDC_BATCH_SIZE,
     )
-
-    dst_conn        = open_oracle(migration["target_connection_id"], configs)
+    oracle_conn     = db.open_oracle(migration["target_connection_id"], configs)
     last_checkin_ts = time.time()
     rows_applied    = 0
 
@@ -313,34 +280,44 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                     event = _parse_debezium(msg.value)
                     if event is None:
                         continue
-                    try:
-                        _apply_event(dst_conn, event,
-                                     target_schema, target_table, key_cols)
-                        rows_applied += 1
-                    except Exception as exc:
-                        print(f"[cdc:{tag}] apply error: {exc}")
-                        raise
+                    _apply_event(oracle_conn, event,
+                                 target_schema, target_table, key_cols)
+                    rows_applied += 1
 
-                dst_conn.commit()
+                oracle_conn.commit()
                 consumer.commit()
 
-            # Periodic checkin / heartbeat
+            # Periodic checkin
             if time.time() - last_checkin_ts >= CDC_CHECKIN_SEC:
                 try:
-                    _cdc_checkin(migration_id, consumer, rows_applied)
+                    total_lag = _calc_lag(consumer, consumer_group, bootstrap)
+                    db.cdc_checkin(pg, migration_id, total_lag, rows_applied)
+                    print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied}")
+                    if total_lag == 0:
+                        db.trigger_lag_zero(pg, migration_id)
                 except Exception as exc:
                     print(f"[cdc:{tag}] checkin error: {exc}")
+                    # Reconnect pg on error
+                    try:
+                        pg.close()
+                    except Exception:
+                        pass
+                    pg = db.get_pg_conn()
                 last_checkin_ts = time.time()
 
     except Exception as exc:
-        print(f"[cdc:{tag}] fatal error: {exc}")
+        print(f"[cdc:{tag}] fatal: {exc}")
     finally:
         print(f"[cdc:{tag}] thread stopping")
-        for obj in (dst_conn, consumer):
+        for obj in (oracle_conn, consumer):
             try:
                 obj.close()
             except Exception:
                 pass
+        try:
+            pg.close()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -350,48 +327,58 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
 def cdc_manager(stop_event: threading.Event) -> None:
     """
     Periodically scans for CDC migrations needing a worker and starts
-    a cdc_thread for each one.  Cleans up threads that have finished.
+    a cdc_thread for each one.  Reaps finished threads.
     """
     # migration_id → (thread, stop_event)
-    active: dict[str, tuple[threading.Thread, threading.Event]] = {}
-
+    active: dict = {}
     print(f"[cdc_manager] started (scan every {CDC_SCAN_INTERVAL}s)")
 
-    while not stop_event.is_set():
-        # Reap finished threads
-        for mid in list(active.keys()):
-            t, _ = active[mid]
-            if not t.is_alive():
-                print(f"[cdc_manager] thread for {mid[:8]} exited")
-                del active[mid]
+    pg = db.get_pg_conn()
+    try:
+        while not stop_event.is_set():
+            # Reap dead threads
+            for mid in list(active):
+                t, _ = active[mid]
+                if not t.is_alive():
+                    print(f"[cdc_manager] thread {mid[:8]} exited")
+                    del active[mid]
 
-        # Try to claim a new CDC migration
+            # Claim a new CDC migration if available
+            try:
+                migration = db.claim_cdc_migration(pg)
+                if migration:
+                    mid = migration["migration_id"]
+                    if mid not in active:
+                        se = threading.Event()
+                        t  = threading.Thread(
+                            target=cdc_thread,
+                            args=(migration, se),
+                            name=f"cdc-{mid[:8]}",
+                            daemon=True,
+                        )
+                        t.start()
+                        active[mid] = (t, se)
+                        print(f"[cdc_manager] started thread for {mid[:8]}")
+            except Exception as exc:
+                print(f"[cdc_manager] scan error: {exc}")
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+                pg = db.get_pg_conn()
+
+            time.sleep(CDC_SCAN_INTERVAL)
+    finally:
+        # Signal all CDC threads to stop
+        for mid, (t, se) in active.items():
+            se.set()
+        for mid, (t, _) in active.items():
+            t.join(timeout=10)
+            print(f"[cdc_manager] joined {mid[:8]}")
         try:
-            resp = api_post("/api/worker/cdc/claim", {"worker_id": WORKER_ID})
-            if resp:  # 200 with body
-                mid = resp["migration_id"]
-                if mid not in active:
-                    se = threading.Event()
-                    t  = threading.Thread(
-                        target=cdc_thread,
-                        args=(resp, se),
-                        name=f"cdc-{mid[:8]}",
-                        daemon=True,
-                    )
-                    t.start()
-                    active[mid] = (t, se)
-                    print(f"[cdc_manager] started thread for migration {mid[:8]}")
-        except Exception as exc:
-            print(f"[cdc_manager] claim error: {exc}")
-
-        time.sleep(CDC_SCAN_INTERVAL)
-
-    # Graceful shutdown: signal all CDC threads
-    for mid, (t, se) in active.items():
-        se.set()
-    for mid, (t, _) in active.items():
-        t.join(timeout=10)
-        print(f"[cdc_manager] joined thread {mid[:8]}")
+            pg.close()
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -399,23 +386,20 @@ def cdc_manager(stop_event: threading.Event) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
-    print(f"[worker] universal worker started  worker_id={WORKER_ID}")
+    print(f"[worker] started  worker_id={WORKER_ID}")
+    print(f"[worker] state_db={db.STATE_DB_DSN}")
     print(f"[worker] bulk_batch={BULK_BATCH_SIZE}  cdc_batch={CDC_BATCH_SIZE}"
           f"  cdc_scan={CDC_SCAN_INTERVAL}s")
 
     main_stop = threading.Event()
-
-    # Start CDC manager in a background daemon thread
     mgr = threading.Thread(
-        target=cdc_manager,
-        args=(main_stop,),
-        name="cdc-manager",
-        daemon=True,
+        target=cdc_manager, args=(main_stop,),
+        name="cdc-manager", daemon=True,
     )
     mgr.start()
 
     try:
-        bulk_loop()  # blocks; ctrl-c raises KeyboardInterrupt
+        bulk_loop()
     except KeyboardInterrupt:
         print("[worker] shutting down…")
         main_stop.set()
