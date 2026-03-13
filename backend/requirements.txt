@@ -5,3 +5,4 @@ psycopg2-binary>=2.9
 oracledb>=2.0
 kafka-python>=2.0
 requests>=2.31
+gunicorn>=21.2
