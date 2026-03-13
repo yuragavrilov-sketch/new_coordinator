@@ -21,6 +21,8 @@ interface FormData {
   consumer_group: string;
   stage_table_name: string;
   chunk_size: number;
+  max_parallel_workers: number;
+  validate_hash_sample: boolean;
   effective_key_type: string;
   effective_key_columns: string[];
   selected_uk_index: number;
@@ -299,6 +301,8 @@ const INIT: FormData = {
   target_schema: "", target_table: "",
   connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "",
   chunk_size: 1_000_000,
+  max_parallel_workers: 4,
+  validate_hash_sample: false,
   effective_key_type: "", effective_key_columns: [], selected_uk_index: 0,
 };
 
@@ -415,6 +419,8 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       topic_prefix:               form.topic_prefix.trim(),
       consumer_group:             form.consumer_group.trim(),
       chunk_size:                 form.chunk_size,
+      max_parallel_workers:       form.max_parallel_workers,
+      validate_hash_sample:       form.validate_hash_sample,
       source_pk_exists:           (tableInfo?.pk_columns.length ?? 0) > 0,
       source_uk_exists:           (tableInfo?.uk_constraints.length ?? 0) > 0,
       effective_key_type:         form.effective_key_type,
@@ -543,9 +549,26 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   onChange={v => setF({ stage_table_name: v })} />
               </Field>
             </div>
-            <Field label="Chunk size" required error={fieldErrs.chunk_size}>
-              <input style={S.input} type="number" value={form.chunk_size} min={1}
-                onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
+            <div style={S.row2}>
+              <Field label="Chunk size" required error={fieldErrs.chunk_size}>
+                <input style={S.input} type="number" value={form.chunk_size} min={1}
+                  onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
+              </Field>
+              <Field label="Max workers" required>
+                <input style={S.input} type="number" value={form.max_parallel_workers} min={1} max={32}
+                  onChange={e => setF({ max_parallel_workers: parseInt(e.target.value) || 1 })} />
+              </Field>
+            </div>
+            <Field label="Валидация stage">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox"
+                  checked={form.validate_hash_sample}
+                  onChange={e => setF({ validate_hash_sample: e.target.checked })}
+                />
+                <span style={{ fontSize: 12, color: "#94a3b8" }}>
+                  Hash/sample проверка (сравнивает выборку строк source vs stage)
+                </span>
+              </label>
             </Field>
           </Section>
 

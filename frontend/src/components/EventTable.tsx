@@ -1,5 +1,9 @@
 import React from "react";
-import type { CdcEvent } from "../hooks/useSSE";
+
+interface CdcEvent {
+  id: string; ts: string; schema: string; table: string;
+  operation: string; data: unknown; old_data?: unknown;
+}
 
 const opColor: Record<string, string> = {
   INSERT: "#22c55e",

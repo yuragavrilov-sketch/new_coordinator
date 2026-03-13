@@ -1,0 +1,142 @@
+"""Stage-table lifecycle on the target Oracle database."""
+
+from services.oracle_scn import open_oracle_conn
+
+
+# ---------------------------------------------------------------------------
+# DDL helpers
+# ---------------------------------------------------------------------------
+
+def _col_type_str(data_type: str, data_length, data_precision, data_scale,
+                  char_used: str) -> str:
+    """Convert all_tab_columns metadata to a DDL type string."""
+    dt = data_type.upper()
+    if dt == "NUMBER":
+        if data_precision is not None:
+            return f"NUMBER({data_precision},{data_scale or 0})"
+        return "NUMBER"
+    if dt in ("VARCHAR2", "NVARCHAR2"):
+        unit = " CHAR" if char_used == "C" else ""
+        return f"{dt}({data_length}{unit})"
+    if dt in ("CHAR", "NCHAR"):
+        unit = " CHAR" if char_used == "C" else ""
+        return f"{dt}({data_length}{unit})"
+    if dt == "FLOAT":
+        return f"FLOAT({data_precision})" if data_precision else "FLOAT"
+    if dt == "RAW":
+        return f"RAW({data_length})"
+    # DATE, CLOB, BLOB, XMLTYPE, TIMESTAMP*, INTERVAL* — keep as-is
+    return data_type
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def create_stage_table(
+    src_cfg: dict,
+    dst_cfg: dict,
+    source_schema: str,
+    source_table: str,
+    target_schema: str,
+    stage_table: str,
+) -> None:
+    """
+    Create the stage table on the target Oracle with the same column structure
+    as the source table. Idempotent — silent no-op if the table already exists.
+    """
+    src_conn = open_oracle_conn(src_cfg)
+    try:
+        with src_conn.cursor() as cur:
+            cur.execute("""
+                SELECT column_name, data_type, data_length,
+                       data_precision, data_scale, nullable, char_used
+                FROM   all_tab_columns
+                WHERE  owner      = :s
+                  AND  table_name = :t
+                ORDER BY column_id
+            """, {"s": source_schema.upper(), "t": source_table.upper()})
+            columns = cur.fetchall()
+    finally:
+        src_conn.close()
+
+    if not columns:
+        raise ValueError(
+            f"Исходная таблица {source_schema}.{source_table} не найдена "
+            "или нет прав на all_tab_columns"
+        )
+
+    col_defs = []
+    for col_name, data_type, data_length, data_precision, data_scale, nullable, char_used in columns:
+        type_str = _col_type_str(data_type, data_length, data_precision,
+                                 data_scale, char_used or "B")
+        null_str = "" if nullable == "Y" else " NOT NULL"
+        col_defs.append(f'  "{col_name}" {type_str}{null_str}')
+
+    ddl = (
+        f'CREATE TABLE "{target_schema.upper()}"."{stage_table.upper()}" (\n'
+        + ",\n".join(col_defs)
+        + "\n)"
+    )
+
+    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        with dst_conn.cursor() as cur:
+            try:
+                cur.execute(ddl)
+                dst_conn.commit()
+            except Exception as exc:
+                # ORA-00955: name is already used by an existing object
+                if "ORA-00955" in str(exc):
+                    return
+                raise
+    finally:
+        dst_conn.close()
+
+
+def drop_stage_table(dst_cfg: dict, target_schema: str, stage_table: str) -> None:
+    """Drop the stage table on the target Oracle (PURGE). Silent if not found."""
+    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        with dst_conn.cursor() as cur:
+            try:
+                cur.execute(
+                    f'DROP TABLE "{target_schema.upper()}"."{stage_table.upper()}" PURGE'
+                )
+                dst_conn.commit()
+            except Exception as exc:
+                if "ORA-00942" in str(exc):  # table or view does not exist
+                    return
+                raise
+    finally:
+        dst_conn.close()
+
+
+def count_stage(dst_cfg: dict, target_schema: str, stage_table: str) -> int:
+    """Return the row count of the stage table."""
+    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        with dst_conn.cursor() as cur:
+            cur.execute(
+                f'SELECT COUNT(*) FROM "{target_schema.upper()}"."{stage_table.upper()}"'
+            )
+            return int(cur.fetchone()[0])
+    finally:
+        dst_conn.close()
+
+
+def count_source_as_of_scn(
+    src_cfg: dict, source_schema: str, source_table: str, scn: int
+) -> int:
+    """Return the row count of the source table AS OF SCN."""
+    src_conn = open_oracle_conn(src_cfg)
+    try:
+        with src_conn.cursor() as cur:
+            cur.execute(
+                f'SELECT COUNT(*) FROM "{source_schema.upper()}"."{source_table.upper()}"'
+                f" AS OF SCN :scn",
+                {"scn": scn},
+            )
+            return int(cur.fetchone()[0])
+    finally:
+        src_conn.close()

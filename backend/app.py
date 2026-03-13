@@ -110,6 +110,18 @@ from routes.oracle_db import bp as oracle_bp
 oracle_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(oracle_bp)
 
+# ── Workers blueprint ─────────────────────────────────────────────────────────
+import routes.workers as workers_mod
+from routes.workers import bp as workers_bp
+
+workers_mod.init(
+    get_conn_fn=get_conn,
+    row_to_dict_fn=row_to_dict,
+    db_available_ref=_db_available,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(workers_bp)
+
 # ── Status poller ─────────────────────────────────────────────────────────────
 from services.status_poller import start_poller
 
@@ -120,6 +132,21 @@ start_poller(
     status_lock=_status_lock,
     broadcast_fn=broadcast,
 )
+
+# ── Migration orchestrator ────────────────────────────────────────────────────
+import services.debezium    as _debezium_mod
+import services.orchestrator as orchestrator_mod
+
+_debezium_mod.init(load_configs_fn=_load_cfg)
+orchestrator_mod.init(
+    get_conn_fn=get_conn,
+    load_configs_fn=_load_cfg,
+    broadcast_fn=broadcast,
+)
+if _db_available["value"]:
+    orchestrator_mod.start_orchestrator()
+else:
+    print("[orchestrator] skipped — DB unavailable")
 
 # ── SPA catch-all ─────────────────────────────────────────────────────────────
 

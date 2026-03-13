@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import type { MigrationSummary } from "../types/migration";
+import type { SSEEvent } from "../hooks/useSSE";
 import { PhaseBadge } from "./PhaseBadge";
 import { MigrationDetailPanel } from "./MigrationDetail";
 import { CreateMigrationModal } from "./CreateMigrationModal";
@@ -38,7 +39,7 @@ const ACTIVE_PHASES = new Set([
 ]);
 const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLED", "FAILED"]);
 
-export function MigrationList({ refreshSignal }: { refreshSignal?: number }) {
+export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: number; sseEvents?: SSEEvent[] }) {
   const [migrations,  setMigrations]  = useState<MigrationSummary[]>([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
@@ -55,6 +56,12 @@ export function MigrationList({ refreshSignal }: { refreshSignal?: number }) {
 
   useEffect(() => { load(); }, [load, refreshSignal]);
 
+  // Refresh on migration_phase SSE events
+  useEffect(() => {
+    if (!sseEvents || sseEvents.length === 0) return;
+    if (sseEvents[0].type === "migration_phase") load();
+  }, [sseEvents]); // eslint-disable-line
+
   // Auto-refresh every 10s
   useEffect(() => {
     const id = setInterval(load, 10_000);
@@ -70,16 +77,16 @@ export function MigrationList({ refreshSignal }: { refreshSignal?: number }) {
     setActionBusy(id);
     try {
       if (action === "run") {
-        await fetch(`/api/migrations/${id}/phase`, {
-          method: "PATCH",
+        await fetch(`/api/migrations/${id}/action`, {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to_phase: "NEW", actor_type: "USER", message: "Started by user" }),
+          body: JSON.stringify({ action: "run" }),
         });
       } else if (action === "stop") {
-        await fetch(`/api/migrations/${id}/phase`, {
-          method: "PATCH",
+        await fetch(`/api/migrations/${id}/action`, {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to_phase: "CANCELLING", actor_type: "USER", message: "Stopped by user" }),
+          body: JSON.stringify({ action: "cancel" }),
         });
       } else {
         await fetch(`/api/migrations/${id}`, { method: "DELETE" });
@@ -182,6 +189,7 @@ export function MigrationList({ refreshSignal }: { refreshSignal?: number }) {
           <MigrationDetailPanel
             migrationId={selected.migration_id}
             onClose={() => setSelectedId(null)}
+            sseEvents={sseEvents}
           />
         </div>
       )}

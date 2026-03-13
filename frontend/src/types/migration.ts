@@ -48,6 +48,16 @@ export interface Migration {
   error_text: string | null;
   failed_phase: string | null;
   retry_count: number;
+  // ── Progress / monitoring (added stage 1) ────────────────────────────────
+  total_rows: number | null;
+  total_chunks: number | null;
+  chunks_done: number;
+  chunks_failed: number;
+  validate_hash_sample: boolean;
+  validation_result: Record<string, unknown> | null;
+  connector_status: string | null;
+  kafka_lag: number | null;
+  kafka_lag_checked_at: string | null;
 }
 
 export interface MigrationSummary {

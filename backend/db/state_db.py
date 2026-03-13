@@ -156,9 +156,173 @@ def init_db() -> None:
                     ON migrations(state_changed_at DESC)
             """)
 
+            # ── New columns on migrations ─────────────────────────────────
+            for col_sql in [
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_rows           BIGINT",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_chunks         INTEGER",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_done          INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_failed        INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validate_hash_sample BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validation_result    JSONB",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS connector_status     VARCHAR(50)",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag            BIGINT",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at TIMESTAMPTZ",
+            ]:
+                cur.execute(col_sql)
+
+            # ── migration_chunks ──────────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS migration_chunks (
+                    chunk_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    migration_id    UUID NOT NULL REFERENCES migrations(migration_id) ON DELETE CASCADE,
+                    chunk_seq       INTEGER NOT NULL,
+                    rowid_start     VARCHAR(20) NOT NULL,
+                    rowid_end       VARCHAR(20) NOT NULL,
+                    status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                    rows_loaded     BIGINT NOT NULL DEFAULT 0,
+                    worker_id       VARCHAR(200),
+                    claimed_at      TIMESTAMPTZ,
+                    started_at      TIMESTAMPTZ,
+                    completed_at    TIMESTAMPTZ,
+                    error_text      TEXT,
+                    retry_count     INTEGER NOT NULL DEFAULT 0,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (migration_id, chunk_seq)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chunks_migration_status
+                    ON migration_chunks (migration_id, status)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chunks_pending
+                    ON migration_chunks (status, created_at)
+                    WHERE status = 'PENDING'
+            """)
+
+            # ── migration_cdc_state ───────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS migration_cdc_state (
+                    migration_id      UUID PRIMARY KEY REFERENCES migrations(migration_id) ON DELETE CASCADE,
+                    consumer_group    VARCHAR(200) NOT NULL DEFAULT '',
+                    topic             VARCHAR(200) NOT NULL DEFAULT '',
+                    total_lag         BIGINT NOT NULL DEFAULT 0,
+                    lag_by_partition  JSONB,
+                    last_event_scn    NUMERIC,
+                    last_event_ts     TIMESTAMPTZ,
+                    apply_rate_rps    NUMERIC(10,2),
+                    worker_id         VARCHAR(200),
+                    worker_heartbeat  TIMESTAMPTZ,
+                    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Migration DB helpers (used by orchestrator and routes)
+# ---------------------------------------------------------------------------
+
+def get_active_migrations(conn) -> list[dict]:
+    """Return all migrations in active (non-terminal) phases."""
+    _ACTIVE_PHASES = (
+        "NEW", "PREPARING", "SCN_FIXED",
+        "CONNECTOR_STARTING", "CDC_BUFFERING",
+        "CHUNKING", "BULK_LOADING", "BULK_LOADED",
+        "STAGE_VALIDATING", "STAGE_VALIDATED",
+        "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+        "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+        "STEADY_STATE",
+    )
+    placeholders = ",".join(["%s"] * len(_ACTIVE_PHASES))
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT * FROM migrations WHERE phase IN ({placeholders})",
+            _ACTIVE_PHASES,
+        )
+        return [row_to_dict(cur, r) for r in cur.fetchall()]
+
+
+def transition_phase(
+    conn,
+    migration_id: str,
+    to_phase: str,
+    *,
+    actor_type: str = "SYSTEM",
+    actor_id: str | None = None,
+    message: str | None = None,
+    error_code: str | None = None,
+    error_text: str | None = None,
+    extra_fields: dict | None = None,
+) -> str:
+    """
+    Transition a migration to *to_phase*.
+    Returns the previous phase.
+    Caller must commit/rollback the connection.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT phase FROM migrations WHERE migration_id = %s FOR UPDATE",
+            (migration_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ValueError(f"Migration {migration_id} not found")
+        from_phase = row[0]
+
+        fields: dict = {
+            "phase":            to_phase,
+            "state_changed_at": "NOW()",
+            "updated_at":       "NOW()",
+        }
+        if to_phase == "FAILED":
+            if error_code:
+                fields["error_code"] = error_code
+            if error_text:
+                fields["error_text"] = error_text
+            fields["failed_phase"] = from_phase
+        if extra_fields:
+            fields.update(extra_fields)
+
+        # Build SET clause — values that are the literal NOW() sentinel go in raw
+        set_parts, values = [], []
+        for k, v in fields.items():
+            if v == "NOW()":
+                set_parts.append(f"{k} = NOW()")
+            else:
+                set_parts.append(f"{k} = %s")
+                values.append(v)
+        values.append(migration_id)
+        cur.execute(
+            f"UPDATE migrations SET {', '.join(set_parts)} WHERE migration_id = %s",
+            values,
+        )
+        cur.execute("""
+            INSERT INTO migration_state_history
+                (migration_id, from_phase, to_phase, message, actor_type, actor_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (migration_id, from_phase, to_phase, message, actor_type, actor_id))
+    return from_phase
+
+
+def update_migration_fields(conn, migration_id: str, fields: dict) -> None:
+    """
+    Update arbitrary columns on a migration row.
+    Caller must commit the connection.
+    """
+    if not fields:
+        return
+    set_parts = [f"{k} = %s" for k in fields]
+    values = list(fields.values()) + [migration_id]
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE migrations SET {', '.join(set_parts)}, updated_at = NOW() "
+            f"WHERE migration_id = %s",
+            values,
+        )
 
 
 # ---------------------------------------------------------------------------

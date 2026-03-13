@@ -26,7 +26,7 @@ function useBackendHealth(): BackendStatus {
 }
 
 export default function App() {
-  const { status, serviceStatuses } = useSSE({ url: SSE_URL });
+  const { events, status, serviceStatuses } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth();
   const [activeTab, setActiveTab] = useState<Tab>("migrations");
   const [showSettings, setShowSettings] = useState(false);
@@ -94,7 +94,7 @@ export default function App() {
 
       {/* Tab content */}
       <div style={{ marginTop: 16 }}>
-        {activeTab === "migrations" && <MigrationList />}
+        {activeTab === "migrations" && <MigrationList sseEvents={events} />}
       </div>
     </div>
   );

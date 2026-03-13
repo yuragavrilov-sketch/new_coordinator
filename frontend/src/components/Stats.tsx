@@ -1,5 +1,8 @@
 import React from "react";
-import type { CdcEvent } from "../hooks/useSSE";
+
+interface CdcEvent {
+  operation: string; schema: string; table: string;
+}
 
 interface Props {
   events: CdcEvent[];
