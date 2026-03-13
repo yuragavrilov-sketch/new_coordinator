@@ -81,6 +81,12 @@ def open_oracle(connection_id: str, configs: dict):
 def claim_chunk(conn) -> Optional[dict]:
     """
     Atomically claim one PENDING chunk from a BULK_LOADING migration.
+
+    Fair scheduling: prefer the migration with the fewest currently active
+    (CLAIMED + RUNNING) chunks so workers spread evenly across all migrations.
+    Within the same active-count bucket, prefer the migration whose state
+    changed earliest (first-in-first-out across migrations).
+
     Returns a dict with chunk + migration context, or None if nothing available.
     """
     with conn.cursor() as cur:
@@ -93,10 +99,20 @@ def claim_chunk(conn) -> Optional[dict]:
             WHERE  chunk_id = (
                 SELECT c.chunk_id
                 FROM   migration_chunks c
-                JOIN   migrations       m ON m.migration_id = c.migration_id
+                JOIN   migrations m ON m.migration_id = c.migration_id
+                LEFT JOIN (
+                    SELECT migration_id,
+                           COUNT(*) FILTER (WHERE status IN ('CLAIMED','RUNNING'))
+                               AS active_count
+                    FROM   migration_chunks
+                    WHERE  status IN ('CLAIMED', 'RUNNING')
+                    GROUP BY migration_id
+                ) act ON act.migration_id = c.migration_id
                 WHERE  c.status = 'PENDING'
                   AND  m.phase  = 'BULK_LOADING'
-                ORDER BY c.created_at
+                ORDER BY COALESCE(act.active_count, 0) ASC,
+                         m.state_changed_at ASC,
+                         c.chunk_seq ASC
                 FOR UPDATE OF c SKIP LOCKED
                 LIMIT 1
             )

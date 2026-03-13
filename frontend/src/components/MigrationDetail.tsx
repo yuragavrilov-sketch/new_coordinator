@@ -248,7 +248,6 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
               gap: "5px 16px",
             }}>
               <InfoRow label="Chunk size"   value={detail.chunk_size?.toLocaleString()} />
-              <InfoRow label="Max workers"  value={detail.max_parallel_workers} />
               <InfoRow label="Total chunks" value={detail.total_chunks ?? "—"} />
               <InfoRow label="Chunks done"  value={detail.chunks_done} />
               <InfoRow label="Start SCN"    value={detail.start_scn} />

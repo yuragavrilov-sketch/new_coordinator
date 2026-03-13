@@ -117,7 +117,7 @@ def create_migration():
                         source_connection_id, target_connection_id,
                         source_schema, source_table, target_schema, target_table,
                         stage_table_name, connector_name, topic_prefix, consumer_group,
-                        chunk_size, max_parallel_workers, validate_hash_sample,
+                        chunk_size, validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
                         created_at, updated_at
@@ -126,7 +126,7 @@ def create_migration():
                         %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s, %s,
+                        %s, %s,
                         %s, %s,
                         %s, %s, %s,
                         %s, %s
@@ -140,7 +140,6 @@ def create_migration():
                     body.get("stage_table_name", ""), body.get("connector_name", ""),
                     body.get("topic_prefix", ""), body.get("consumer_group", ""),
                     body.get("chunk_size", 1_000_000),
-                    body.get("max_parallel_workers", 4),
                     body.get("validate_hash_sample", False),
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),

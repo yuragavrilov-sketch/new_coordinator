@@ -26,7 +26,6 @@ export interface Migration {
   consumer_group: string;
   chunk_strategy: string;
   chunk_size: number;
-  max_parallel_workers: number;
   apply_mode: string;
   source_pk_exists: boolean;
   source_uk_exists: boolean;
