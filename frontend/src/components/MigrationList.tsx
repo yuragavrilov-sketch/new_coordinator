@@ -1,9 +1,16 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import type { MigrationSummary } from "../types/migration";
 import type { SSEEvent } from "../hooks/useSSE";
 import { PhaseBadge } from "./PhaseBadge";
 import { MigrationDetailPanel } from "./MigrationDetail";
 import { CreateMigrationModal } from "./CreateMigrationModal";
+
+interface SpeedSnapshot { chunks_done: number; ts: number }
+
+function fmtSpeed(v: number): string {
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}k/s`;
+  return `${v.toFixed(v < 10 ? 1 : 0)}/s`;
+}
 
 function fmtTs(iso: string): string {
   try {
@@ -46,13 +53,36 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
   const [selectedId,  setSelectedId]  = useState<string | null>(null);
   const [showCreate,  setShowCreate]  = useState(false);
   const [actionBusy,  setActionBusy]  = useState<string | null>(null); // migration_id
+  const [speeds,      setSpeeds]      = useState<Record<string, { chunksSec: number; rowsSec: number }>>({});
+  const snapRef = useRef<Record<string, SpeedSnapshot>>({});
 
   const load = useCallback(() => {
     fetch("/api/migrations")
       .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
-      .then(data => { setMigrations(data); setLoading(false); setError(null); })
+      .then((data: MigrationSummary[]) => {
+        const now = Date.now();
+        const newSpeeds: Record<string, { chunksSec: number; rowsSec: number }> = {};
+        data.forEach(m => {
+          const prev = snapRef.current[m.migration_id];
+          if (prev && m.chunks_done > prev.chunks_done) {
+            const dt = (now - prev.ts) / 1000;
+            const deltaChunks = m.chunks_done - prev.chunks_done;
+            const chunksSec = deltaChunks / dt;
+            const rowsPerChunk = (m.total_rows && m.total_chunks)
+              ? m.total_rows / m.total_chunks : 0;
+            newSpeeds[m.migration_id] = { chunksSec, rowsSec: chunksSec * rowsPerChunk };
+          } else if (prev) {
+            newSpeeds[m.migration_id] = speeds[m.migration_id] ?? { chunksSec: 0, rowsSec: 0 };
+          }
+          snapRef.current[m.migration_id] = { chunks_done: m.chunks_done, ts: now };
+        });
+        setSpeeds(newSpeeds);
+        setMigrations(data);
+        setLoading(false);
+        setError(null);
+      })
       .catch(e => { setError(String(e)); setLoading(false); });
-  }, []);
+  }, []); // eslint-disable-line
 
   useEffect(() => { load(); }, [load, refreshSignal]);
 
@@ -176,6 +206,7 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
               selected={m.migration_id === selectedId}
               compact={!!selected}
               busy={actionBusy === m.migration_id}
+              speed={speeds[m.migration_id]}
               onClick={() => setSelectedId(id => id === m.migration_id ? null : m.migration_id)}
               onAction={handleAction}
             />
@@ -219,19 +250,25 @@ function ActionBtn({ icon, title, color, bg, disabled, onClick }: {
   );
 }
 
+const BULK_PHASES = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED"]);
+
 function MigrationRow({
-  m, selected, compact, busy, onClick, onAction,
+  m, selected, compact, busy, speed, onClick, onAction,
 }: {
   m: MigrationSummary;
   selected: boolean;
   compact: boolean;
   busy: boolean;
+  speed?: { chunksSec: number; rowsSec: number };
   onClick: () => void;
   onAction: (id: string, action: "run" | "stop" | "delete") => void;
 }) {
   const canRun    = m.phase === "DRAFT";
   const canStop   = ACTIVE_PHASES.has(m.phase);
   const canDelete = DELETABLE_PHASES.has(m.phase);
+
+  const showProgress = BULK_PHASES.has(m.phase) && m.total_chunks != null && m.total_chunks > 0;
+  const pct = showProgress ? Math.min(100, (m.chunks_done / m.total_chunks!) * 100) : 0;
 
   return (
     <div
@@ -289,6 +326,42 @@ function MigrationRow({
         <span style={{ color: "#334155", margin: "0 6px" }}>→</span>
         <span style={{ color: "#64748b" }}>{m.target_schema}.{m.target_table}</span>
       </div>
+
+      {/* Progress bar (bulk phases only) */}
+      {showProgress && (
+        <div style={{ marginBottom: 5 }}>
+          <div style={{
+            height: 4, borderRadius: 2,
+            background: "#1e293b", overflow: "hidden",
+          }}>
+            <div style={{
+              height: "100%", borderRadius: 2,
+              width: `${pct}%`,
+              background: m.chunks_failed > 0 ? "#dc2626" : "#3b82f6",
+              transition: "width 0.4s ease",
+            }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+            <span style={{ fontSize: 10, color: "#475569" }}>
+              {m.chunks_done}
+              {m.chunks_failed > 0 && <span style={{ color: "#ef4444" }}> / {m.chunks_failed} ✗</span>}
+              {" "}/ {m.total_chunks} чанков
+              {m.total_rows != null && (
+                <span style={{ color: "#334155" }}>
+                  {" "}· {m.total_rows.toLocaleString("ru-RU")} строк
+                </span>
+              )}
+            </span>
+            {speed && (speed.chunksSec > 0 || speed.rowsSec > 0) && (
+              <span style={{ fontSize: 10, color: "#64748b" }}>
+                {fmtSpeed(speed.chunksSec)} чанк
+                {speed.rowsSec > 0 && <span style={{ color: "#475569" }}> · {fmtSpeed(speed.rowsSec)} строк</span>}
+              </span>
+            )}
+            <span style={{ fontSize: 10, color: "#475569" }}>{pct.toFixed(1)}%</span>
+          </div>
+        </div>
+      )}
 
       {/* Error + meta */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -30,7 +30,8 @@ _LIST_COLS = """
     source_schema, source_table, target_schema, target_table,
     created_at, updated_at,
     error_code, error_text, failed_phase, retry_count,
-    description, created_by
+    description, created_by,
+    total_rows, total_chunks, chunks_done, chunks_failed
 """
 
 _state: dict = {}

@@ -76,6 +76,10 @@ export interface MigrationSummary {
   retry_count: number;
   description: string | null;
   created_by: string | null;
+  total_rows: number | null;
+  total_chunks: number | null;
+  chunks_done: number;
+  chunks_failed: number;
 }
 
 export interface StateHistoryEntry {
