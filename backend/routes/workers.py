@@ -157,3 +157,73 @@ def cdc_checkin():
     })
 
     return jsonify({"ok": True})
+
+
+@bp.post("/api/worker/cdc/claim")
+def cdc_claim():
+    """
+    Claim a CDC migration that needs a worker.
+    Returns migration details (200) or 204 if nothing needs a worker.
+
+    A migration is claimable when:
+    - phase IN (CDC_APPLY_STARTING, CDC_CATCHING_UP, STEADY_STATE)
+    - no worker heartbeat in the last 2 minutes (stale or never started)
+    """
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+
+    body      = request.get_json(force=True) or {}
+    worker_id = body.get("worker_id", "unknown")
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT m.migration_id,
+                       m.target_connection_id, m.target_schema, m.target_table,
+                       m.source_schema, m.source_table,
+                       m.topic_prefix, m.consumer_group,
+                       m.effective_key_columns_json
+                FROM   migrations m
+                LEFT JOIN migration_cdc_state cs ON cs.migration_id = m.migration_id
+                WHERE  m.phase IN ('CDC_APPLY_STARTING', 'CDC_CATCHING_UP', 'STEADY_STATE')
+                  AND  (
+                         cs.worker_heartbeat IS NULL
+                      OR cs.worker_heartbeat < NOW() - INTERVAL '2 minutes'
+                  )
+                ORDER BY m.state_changed_at
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row is None:
+                return "", 204
+
+            keys = [
+                "migration_id",
+                "target_connection_id", "target_schema", "target_table",
+                "source_schema", "source_table",
+                "topic_prefix", "consumer_group",
+                "effective_key_columns_json",
+            ]
+            migration = dict(zip(keys, row))
+
+        # Immediately register heartbeat so another worker won't claim it
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO migration_cdc_state
+                    (migration_id, consumer_group, topic,
+                     total_lag, worker_id, worker_heartbeat, updated_at)
+                SELECT migration_id, consumer_group, topic_prefix,
+                       0, %s, NOW(), NOW()
+                FROM   migrations
+                WHERE  migration_id = %s
+                ON CONFLICT (migration_id) DO UPDATE
+                    SET worker_id        = EXCLUDED.worker_id,
+                        worker_heartbeat = NOW(),
+                        updated_at       = NOW()
+            """, (worker_id, migration["migration_id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify(migration), 200
