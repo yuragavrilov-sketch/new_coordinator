@@ -1,6 +1,7 @@
 """Kafka Connect REST API client for Debezium Oracle connector management."""
 
 import json
+import os
 
 import requests
 
@@ -48,31 +49,77 @@ def create_connector(migration: dict, oracle_cfg: dict) -> dict:
     if status not in ("NOT_FOUND",):
         return {"name": connector_name, "already_existed": True, "state": status}
 
-    bootstrap = _kafka_bootstrap()
+    bootstrap   = _kafka_bootstrap()
+    topic_prefix = migration["topic_prefix"]
+    src_schema   = migration["source_schema"].upper()
+    src_table    = migration["source_table"].upper()
+    lob_enabled  = migration.get("lob_enabled", True)
+
     config = {
-        "connector.class": "io.debezium.connector.oracle.OracleConnector",
-        "tasks.max": "1",
+        "connector.class":              "io.debezium.connector.oracle.OracleConnector",
+        "tasks.max":                    "1",
+        "snapshot.mode":                "no_data",
+        "snapshot.locking.mode":        "none",
+        "log.mining.strategy":          "online_catalog",
+        "database.connection.adapter":  "logminer",
+        "log.mining.continuous.mine":   "true",
+        "heartbeat.interval.ms":        "30000",
 
         # Oracle source connection
+        "topic.prefix":      topic_prefix,
         "database.hostname": oracle_cfg.get("host", ""),
         "database.port":     str(oracle_cfg.get("port", 1521)),
         "database.user":     oracle_cfg.get("user", ""),
         "database.password": oracle_cfg.get("password", ""),
         "database.dbname":   oracle_cfg.get("service_name", ""),
 
-        # Kafka topic / snapshot
-        "topic.prefix":      migration["topic_prefix"],
-        "table.include.list": f"{migration['source_schema']}.{migration['source_table']}",
-        "snapshot.mode":     "no_data",
+        # Which table to capture
+        "table.include.list":    f"{src_schema}.{src_table}",
+
+        # Start position
         "log.mining.start.scn": str(int(migration["start_scn"])),
 
-        # Schema history (internal Kafka topic)
-        "schema.history.internal.kafka.bootstrap.servers": bootstrap,
-        "schema.history.internal.kafka.topic":
-            f"schema-changes.{connector_name}",
+        # Topic auto-creation
+        "topic.creation.default.replication.factor": os.getenv("DEBEZIUM_TOPIC_REPLICATION_FACTOR", "1"),
+        "topic.creation.default.partitions":         os.getenv("DEBEZIUM_TOPIC_PARTITIONS", "1"),
+        "topic.creation.default.cleanup.policy":     os.getenv("DEBEZIUM_TOPIC_CLEANUP_POLICY", "delete"),
+        "topic.creation.default.retention.ms":       os.getenv("DEBEZIUM_TOPIC_RETENTION_MS", "604800000"),
+        "topic.creation.default.compression.type":   os.getenv("DEBEZIUM_TOPIC_COMPRESSION_TYPE", "snappy"),
 
-        # Heartbeat to keep connector alive
-        "heartbeat.interval.ms": "10000",
+        # LOB handling
+        "lob.enabled":           "true" if lob_enabled else "false",
+        "lob.fetch.size":        os.getenv("DEBEZIUM_LOB_FETCH_SIZE", "0"),
+        "lob.fetch.buffer.size": os.getenv("DEBEZIUM_LOB_FETCH_BUFFER_SIZE", "0"),
+
+        # Schema history (internal Kafka topic, one per connector)
+        "schema.history.internal.kafka.bootstrap.servers": bootstrap,
+        "schema.history.internal.kafka.topic":             f"schema-changes.{connector_name}",
+        "include.schema.changes": "false",
+
+        # Message converters — JSON with schema envelope
+        "key.converter":                 "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable":  "true",
+        "value.converter":               "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": "true",
+
+        # Type handling
+        "decimal.handling.mode": "double",
+        "time.precision.mode":   "connect",
+
+        # Misc
+        "provide.transaction.metadata": "false",
+        "tombstones.on.delete":          "true",
+        "skipped.operations":            "none",
+
+        # Transforms: unwrap Debezium envelope → flat record, then route to canonical topic
+        "transforms":                              "unwrap,route",
+        "transforms.unwrap.type":                  "io.debezium.transforms.ExtractNewRecordState",
+        "transforms.unwrap.delete.handling.mode":  "rewrite",
+        "transforms.unwrap.add.fields":            "op,table,source.ts_ms",
+        "transforms.unwrap.add.fields.prefix":     "__",
+        "transforms.route.type":                   "io.debezium.transforms.ByLogicalTableRouter",
+        "transforms.route.topic.regex":            f"({topic_prefix}\\..*)",
+        "transforms.route.topic.replacement":      "$1",
     }
 
     url = f"{_base_url()}/connectors"
