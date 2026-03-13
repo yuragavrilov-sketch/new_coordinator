@@ -24,9 +24,32 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(__file__))
+# Load .env from the workers directory (if it exists) before anything else
+_HERE = Path(__file__).parent
+_env_file = _HERE / ".env"
+if _env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_file, override=False)   # override=False: OS env takes priority
+        print(f"[worker] loaded env from {_env_file}")
+    except ImportError:
+        # dotenv not installed — parse manually (key=value, skip comments/blanks)
+        with open(_env_file) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _, _v = _line.partition("=")
+                _k = _k.strip()
+                _v = _v.strip().strip('"').strip("'")
+                if _k and _k not in os.environ:   # don't override OS env
+                    os.environ[_k] = _v
+        print(f"[worker] loaded env from {_env_file} (manual parser)")
+
+sys.path.insert(0, str(_HERE))
 import common as db
 from common import WORKER_ID
 
