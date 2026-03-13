@@ -31,7 +31,7 @@ _LIST_COLS = """
     created_at, updated_at,
     error_code, error_text, failed_phase, retry_count,
     description, created_by,
-    total_rows, total_chunks, chunks_done, chunks_failed
+    total_rows, total_chunks, chunks_done, chunks_failed, rows_loaded
 """
 
 _state: dict = {}

@@ -185,9 +185,10 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
             cur.execute("""
                 UPDATE migrations
                 SET    chunks_done = chunks_done + 1,
+                       rows_loaded = rows_loaded + %s,
                        updated_at  = NOW()
                 WHERE  migration_id = %s
-            """, (row[0],))
+            """, (rows_loaded, row[0]))
     conn.commit()
 
 

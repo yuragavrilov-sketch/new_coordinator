@@ -80,6 +80,7 @@ export interface MigrationSummary {
   total_chunks: number | null;
   chunks_done: number;
   chunks_failed: number;
+  rows_loaded: number;
 }
 
 export interface StateHistoryEntry {

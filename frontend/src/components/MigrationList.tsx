@@ -5,7 +5,7 @@ import { PhaseBadge } from "./PhaseBadge";
 import { MigrationDetailPanel } from "./MigrationDetail";
 import { CreateMigrationModal } from "./CreateMigrationModal";
 
-interface SpeedSnapshot { chunks_done: number; ts: number }
+interface SpeedSnapshot { chunks_done: number; rows_loaded: number; ts: number }
 
 function fmtSpeed(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k/s`;
@@ -64,17 +64,15 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
         const newSpeeds: Record<string, { chunksSec: number; rowsSec: number }> = {};
         data.forEach(m => {
           const prev = snapRef.current[m.migration_id];
-          if (prev && m.chunks_done > prev.chunks_done) {
+          if (prev && (m.chunks_done > prev.chunks_done || m.rows_loaded > prev.rows_loaded)) {
             const dt = (now - prev.ts) / 1000;
-            const deltaChunks = m.chunks_done - prev.chunks_done;
-            const chunksSec = deltaChunks / dt;
-            const rowsPerChunk = (m.total_rows && m.total_chunks)
-              ? m.total_rows / m.total_chunks : 0;
-            newSpeeds[m.migration_id] = { chunksSec, rowsSec: chunksSec * rowsPerChunk };
+            const chunksSec = (m.chunks_done - prev.chunks_done) / dt;
+            const rowsSec   = (m.rows_loaded - prev.rows_loaded) / dt;
+            newSpeeds[m.migration_id] = { chunksSec, rowsSec };
           } else if (prev) {
             newSpeeds[m.migration_id] = speeds[m.migration_id] ?? { chunksSec: 0, rowsSec: 0 };
           }
-          snapRef.current[m.migration_id] = { chunks_done: m.chunks_done, ts: now };
+          snapRef.current[m.migration_id] = { chunks_done: m.chunks_done, rows_loaded: m.rows_loaded, ts: now };
         });
         setSpeeds(newSpeeds);
         setMigrations(data);
@@ -346,16 +344,17 @@ function MigrationRow({
               {m.chunks_done}
               {m.chunks_failed > 0 && <span style={{ color: "#ef4444" }}> / {m.chunks_failed} ✗</span>}
               {" "}/ {m.total_chunks} чанков
-              {m.total_rows != null && (
+              {m.rows_loaded > 0 && (
                 <span style={{ color: "#334155" }}>
-                  {" "}· {m.total_rows.toLocaleString("ru-RU")} строк
+                  {" "}· {m.rows_loaded.toLocaleString("ru-RU")} строк
                 </span>
               )}
             </span>
             {speed && (speed.chunksSec > 0 || speed.rowsSec > 0) && (
               <span style={{ fontSize: 10, color: "#64748b" }}>
-                {fmtSpeed(speed.chunksSec)} чанк
-                {speed.rowsSec > 0 && <span style={{ color: "#475569" }}> · {fmtSpeed(speed.rowsSec)} строк</span>}
+                {speed.chunksSec > 0 && <>{fmtSpeed(speed.chunksSec)} чанк</>}
+                {speed.chunksSec > 0 && speed.rowsSec > 0 && " · "}
+                {speed.rowsSec > 0 && <>{fmtSpeed(speed.rowsSec)} строк/с</>}
               </span>
             )}
             <span style={{ fontSize: 10, color: "#475569" }}>{pct.toFixed(1)}%</span>

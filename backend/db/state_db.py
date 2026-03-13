@@ -167,6 +167,7 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS connector_status     VARCHAR(50)",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag            BIGINT",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at TIMESTAMPTZ",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded          BIGINT NOT NULL DEFAULT 0",
             ]:
                 cur.execute(col_sql)
 
