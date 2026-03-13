@@ -343,6 +343,37 @@ function Section({
   );
 }
 
+function SyncObjResultBar({
+  result, type,
+}: {
+  result: { type: string; added: string[]; skipped: string[]; errors: {name: string; error: string}[] } | null;
+  type: string;
+}) {
+  if (!result || result.type !== type) return null;
+  return (
+    <div style={{ padding: "8px 14px", borderTop: "1px solid #1e293b", fontSize: 11 }}>
+      {result.added.length > 0 && (
+        <div style={{ color: "#22c55e", marginBottom: 3 }}>
+          ✓ Создано: {result.added.join(", ")}
+        </div>
+      )}
+      {result.errors.length > 0 && (
+        <div style={{ color: "#ef4444", marginBottom: 3 }}>
+          ✕ Ошибки: {result.errors.map(e => `${e.name}: ${e.error}`).join("; ")}
+        </div>
+      )}
+      {result.skipped.length > 0 && (
+        <div style={{ color: "#475569" }}>
+          — Пропущено (уже есть / не поддерживается): {result.skipped.join(", ")}
+        </div>
+      )}
+      {result.added.length === 0 && result.errors.length === 0 && (
+        <span style={{ color: "#475569" }}>Нет новых объектов</span>
+      )}
+    </div>
+  );
+}
+
 // ── Sub-tables ────────────────────────────────────────────────────────────────
 
 const TH: React.CSSProperties = {
@@ -668,6 +699,14 @@ export function TargetPrep() {
   const [syncBusy,   setSyncBusy]   = useState(false);
   const [syncResult, setSyncResult] = useState<{ added: {column: string; type: string}[]; warnings: {column: string; source_type: string; target_type: string}[] } | null>(null);
 
+  const [syncObjBusy,   setSyncObjBusy]   = useState<string | null>(null);
+  const [syncObjResult, setSyncObjResult] = useState<{
+    type: string;
+    added: string[];
+    skipped: string[];
+    errors: {name: string; error: string}[];
+  } | null>(null);
+
   // Load schemas once
   useEffect(() => {
     fetch("/api/db/source/schemas").then(r => r.json())
@@ -744,6 +783,34 @@ export function TargetPrep() {
     }
   }, [ddl, fetchDdl]);
 
+  const doSyncObjects = useCallback(async (type: "constraints" | "indexes" | "triggers") => {
+    if (!ddl) return;
+    setSyncObjBusy(type);
+    setSyncObjResult(null);
+    try {
+      const r = await fetch("/api/target-prep/sync-objects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          src_schema: ddl.source.schema,
+          src_table:  ddl.source.table,
+          tgt_schema: ddl.target.schema,
+          tgt_table:  ddl.target.table,
+          types: [type],
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Ошибка");
+      const section = d[type];
+      setSyncObjResult({ type, ...section });
+      await fetchDdl();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSyncObjBusy(null);
+    }
+  }, [ddl, fetchDdl]);
+
   const doAction = useCallback(async (action: string, objectName: string) => {
     if (!ddl) return;
     setBusy(p => ({ ...p, [objectName]: true }));
@@ -786,6 +853,28 @@ export function TargetPrep() {
 
   const colIssues  = colDiff.filter(r => r.state !== "ok").length;
   const canCompare = !!(srcSchema && srcTable && tgtSchema && tgtTable);
+
+  const missingIndexCount = useMemo(() => {
+    if (!ddl) return 0;
+    const tgtNames = new Set(ddl.target.indexes.map(i => i.name));
+    return ddl.source.indexes.filter(i => !tgtNames.has(i.name)).length;
+  }, [ddl]);
+
+  const missingConstraintCount = useMemo(() => {
+    if (!ddl) return 0;
+    const tgtKeys = new Set(
+      ddl.target.constraints.map(c => `${c.type_code}|${c.columns.join(",")}`)
+    );
+    return ddl.source.constraints.filter(
+      c => !tgtKeys.has(`${c.type_code}|${c.columns.join(",")}`)
+    ).length;
+  }, [ddl]);
+
+  const missingTriggerCount = useMemo(() => {
+    if (!ddl) return 0;
+    const tgtNames = new Set(ddl.target.triggers.map(t => t.name));
+    return ddl.source.triggers.filter(t => !tgtNames.has(t.name)).length;
+  }, [ddl]);
 
   return (
     <div style={{ animation: "fadeIn 0.2s ease-out" }}>
@@ -977,28 +1066,32 @@ export function TargetPrep() {
             count={ddl.target.indexes.length}
             status="info"
             bulkAction={
-              ddl.target.indexes.some(ix => ix.status === "VALID")
-                ? <BulkDangerBtn
-                    label="Отключить все (UNUSABLE)"
-                    onClick={() => {
-                      ddl.target.indexes
-                        .filter(ix => ix.status === "VALID")
-                        .forEach(ix => doAction("disable_index", ix.name));
-                    }}
+              <div style={{ display: "flex", gap: 6 }}>
+                {missingIndexCount > 0 && (
+                  <ActionBtn
+                    label={`Создать недостающие (${missingIndexCount})`}
+                    onClick={() => doSyncObjects("indexes")}
+                    busy={syncObjBusy === "indexes"}
+                    variant="success"
                   />
-                : ddl.target.indexes.some(ix => ix.status === "UNUSABLE")
-                  ? <BulkDangerBtn
-                      label="Перестроить все"
-                      onClick={() => {
-                        ddl.target.indexes
-                          .filter(ix => ix.status === "UNUSABLE")
-                          .forEach(ix => doAction("enable_index", ix.name));
-                      }}
-                    />
-                  : undefined
+                )}
+                {ddl.target.indexes.some(ix => ix.status === "VALID") && (
+                  <BulkDangerBtn
+                    label="Отключить все (UNUSABLE)"
+                    onClick={() => ddl.target.indexes.filter(ix => ix.status === "VALID").forEach(ix => doAction("disable_index", ix.name))}
+                  />
+                )}
+                {ddl.target.indexes.some(ix => ix.status === "UNUSABLE") && (
+                  <BulkDangerBtn
+                    label="Перестроить все"
+                    onClick={() => ddl.target.indexes.filter(ix => ix.status === "UNUSABLE").forEach(ix => doAction("enable_index", ix.name))}
+                  />
+                )}
+              </div>
             }
           >
             <IndexTable src={ddl.source.indexes} tgt={ddl.target.indexes} busy={busy} actErr={actErr} onAction={doAction} />
+            <SyncObjResultBar result={syncObjResult} type="indexes" />
           </Section>
 
           {/* Constraints */}
@@ -1007,19 +1100,26 @@ export function TargetPrep() {
             count={ddl.target.constraints.length}
             status="info"
             bulkAction={
-              ddl.target.constraints.some(c => c.status === "ENABLED" && c.type_code !== "P")
-                ? <BulkDangerBtn
-                    label="Отключить FK / UK / CHECK"
-                    onClick={() => {
-                      ddl.target.constraints
-                        .filter(c => c.status === "ENABLED" && c.type_code !== "P")
-                        .forEach(c => doAction("disable_constraint", c.name));
-                    }}
+              <div style={{ display: "flex", gap: 6 }}>
+                {missingConstraintCount > 0 && (
+                  <ActionBtn
+                    label={`Создать недостающие (${missingConstraintCount})`}
+                    onClick={() => doSyncObjects("constraints")}
+                    busy={syncObjBusy === "constraints"}
+                    variant="success"
                   />
-                : undefined
+                )}
+                {ddl.target.constraints.some(c => c.status === "ENABLED" && c.type_code !== "P") && (
+                  <BulkDangerBtn
+                    label="Отключить FK / UK / CHECK"
+                    onClick={() => ddl.target.constraints.filter(c => c.status === "ENABLED" && c.type_code !== "P").forEach(c => doAction("disable_constraint", c.name))}
+                  />
+                )}
+              </div>
             }
           >
             <ConstraintTable src={ddl.source.constraints} tgt={ddl.target.constraints} busy={busy} actErr={actErr} onAction={doAction} />
+            <SyncObjResultBar result={syncObjResult} type="constraints" />
           </Section>
 
           {/* Triggers */}
@@ -1028,19 +1128,26 @@ export function TargetPrep() {
             count={ddl.target.triggers.length}
             status="info"
             bulkAction={
-              ddl.target.triggers.some(t => t.status === "ENABLED")
-                ? <BulkDangerBtn
-                    label="Отключить все"
-                    onClick={() => {
-                      ddl.target.triggers
-                        .filter(t => t.status === "ENABLED")
-                        .forEach(t => doAction("disable_trigger", t.name));
-                    }}
+              <div style={{ display: "flex", gap: 6 }}>
+                {missingTriggerCount > 0 && (
+                  <ActionBtn
+                    label={`Создать недостающие (${missingTriggerCount})`}
+                    onClick={() => doSyncObjects("triggers")}
+                    busy={syncObjBusy === "triggers"}
+                    variant="success"
                   />
-                : undefined
+                )}
+                {ddl.target.triggers.some(t => t.status === "ENABLED") && (
+                  <BulkDangerBtn
+                    label="Отключить все"
+                    onClick={() => ddl.target.triggers.filter(t => t.status === "ENABLED").forEach(t => doAction("disable_trigger", t.name))}
+                  />
+                )}
+              </div>
             }
           >
             <TriggerTable src={ddl.source.triggers} tgt={ddl.target.triggers} busy={busy} actErr={actErr} onAction={doAction} />
+            <SyncObjResultBar result={syncObjResult} type="triggers" />
           </Section>
 
         </div>

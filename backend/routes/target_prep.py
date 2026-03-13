@@ -2,7 +2,8 @@
 
 from flask import Blueprint, jsonify, request
 from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action
-from services.oracle_stage import sync_target_columns
+from services.oracle_stage    import sync_target_columns
+from services.oracle_ddl_sync import sync_target_objects
 
 bp = Blueprint("target_prep", __name__)
 
@@ -86,6 +87,32 @@ def sync_columns():
     dst_cfg = configs.get("oracle_target", {})
     try:
         result = sync_target_columns(src_cfg, dst_cfg, src_schema, src_table, tgt_schema, tgt_table)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@bp.post("/api/target-prep/sync-objects")
+def sync_objects():
+    """Create missing indexes, constraints and/or triggers on target from source."""
+    data       = request.json or {}
+    src_schema = data.get("src_schema", "").strip().upper()
+    src_table  = data.get("src_table",  "").strip().upper()
+    tgt_schema = data.get("tgt_schema", "").strip().upper()
+    tgt_table  = data.get("tgt_table",  "").strip().upper()
+    # optional list: ["constraints", "indexes", "triggers"] — defaults to all
+    req_types  = data.get("types")
+
+    if not all([src_schema, src_table, tgt_schema, tgt_table]):
+        return jsonify({"error": "src_schema, src_table, tgt_schema, tgt_table required"}), 400
+
+    types = set(req_types) if req_types else None
+
+    configs = _state["load_configs"]()
+    src_cfg = configs.get("oracle_source", {})
+    dst_cfg = configs.get("oracle_target", {})
+    try:
+        result = sync_target_objects(src_cfg, dst_cfg, src_schema, src_table, tgt_schema, tgt_table, types)
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
