@@ -110,6 +110,13 @@ from routes.oracle_db import bp as oracle_bp
 oracle_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(oracle_bp)
 
+# ── Target preparation blueprint ──────────────────────────────────────────────
+import routes.target_prep as target_prep_mod
+from routes.target_prep import bp as target_prep_bp
+
+target_prep_mod.init(load_configs_fn=_load_cfg)
+app.register_blueprint(target_prep_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp
