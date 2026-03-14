@@ -248,6 +248,8 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_parallel_degree  INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_batch_size       INTEGER NOT NULL DEFAULT 500000",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_strategy        VARCHAR(32) NOT NULL DEFAULT 'STAGE'",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_total     INTEGER",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_done      INTEGER NOT NULL DEFAULT 0",
             ]:
                 cur.execute(col_sql)
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]
@@ -282,6 +284,12 @@ def init_db() -> None:
                     ON migration_chunks (status, created_at)
                     WHERE status = 'PENDING'
             """)
+            # chunk_type distinguishes bulk-load chunks from baseline-publish chunks
+            cur.execute(
+                "ALTER TABLE migration_chunks ADD COLUMN IF NOT EXISTS "
+                "chunk_type VARCHAR(10) NOT NULL DEFAULT 'BULK'"
+            )
+            print("[state_db]   column ok: migration_chunks.chunk_type")
 
             # ── migration_cdc_state ───────────────────────────────────────
             cur.execute("""
@@ -323,7 +331,7 @@ def get_active_migrations(conn) -> list[dict]:
         "CONNECTOR_STARTING", "CDC_BUFFERING",
         "CHUNKING", "BULK_LOADING", "BULK_LOADED",
         "STAGE_VALIDATING", "STAGE_VALIDATED",
-        "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+        "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
         "STAGE_DROPPING", "INDEXES_ENABLING",
         "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",

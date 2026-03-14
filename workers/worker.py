@@ -102,32 +102,25 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
     dst_conn.commit()
 
 
-def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    """BULK/DIRECT: read from source AS OF SCN, write to stage or target."""
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
     tgt_schema  = chunk["target_schema"]
     strategy    = chunk.get("migration_strategy", "STAGE")
-    # DIRECT: insert straight into target table; STAGE: insert into stage table
     dest_table  = chunk["target_table"] if strategy == "DIRECT" else chunk["stage_table"]
     start_scn   = int(chunk["start_scn"])
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
-    print(f"[bulk] chunk {chunk_id} seq={chunk['chunk_seq']}"
-          f" ({rowid_start}..{rowid_end}) scn={start_scn}"
-          f" strategy={strategy} dest={tgt_schema}.{dest_table}")
-
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
-
     try:
         with src_conn.cursor() as cur:
-            # arraysize controls how many rows are fetched per network round-trip
             cur.arraysize = BULK_BATCH_SIZE
             cur.prefetchrows = BULK_BATCH_SIZE + 1
-
             cur.execute(
                 f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                 f'AS OF SCN :p_scn '
@@ -135,7 +128,6 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
             )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
-
             while True:
                 rows = cur.fetchmany(BULK_BATCH_SIZE)
                 if not rows:
@@ -145,35 +137,77 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 rows_loaded += len(batch)
                 db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
                 print(f"  → {rows_loaded} rows")
+    finally:
+        for c in (src_conn, dst_conn):
+            try: c.close()
+            except Exception: pass
+    return rows_loaded
+
+
+def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    """BASELINE: INSERT INTO target SELECT * FROM stage WHERE ROWID BETWEEN ... (no SCN)."""
+    chunk_id    = chunk["chunk_id"]
+    tgt_schema  = chunk["target_schema"]
+    tgt_table   = chunk["target_table"]
+    stg_table   = chunk["stage_table"]
+    rowid_start = chunk["rowid_start"]
+    rowid_end   = chunk["rowid_end"]
+
+    dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
+    rows_loaded = 0
+    try:
+        with dst_conn.cursor() as cur:
+            cur.execute(
+                f'INSERT INTO "{tgt_schema.upper()}"."{tgt_table.upper()}" '
+                f'SELECT * FROM "{tgt_schema.upper()}"."{stg_table.upper()}" '
+                f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
+                {"rs": rowid_start, "re": rowid_end},
+            )
+            rows_loaded = cur.rowcount if cur.rowcount >= 0 else 0
+        dst_conn.commit()
+        db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
+    except Exception:
+        try: dst_conn.rollback()
+        except Exception: pass
+        raise
+    finally:
+        try: dst_conn.close()
+        except Exception: pass
+    return rows_loaded
+
+
+def process_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    chunk_id   = chunk["chunk_id"]
+    chunk_type = chunk.get("chunk_type", "BULK")
+
+    print(f"[worker] chunk {chunk_id} seq={chunk['chunk_seq']}"
+          f" type={chunk_type} ({chunk['rowid_start']}..{chunk['rowid_end']})")
+
+    try:
+        if chunk_type == "BASELINE":
+            rows_loaded = _process_baseline_chunk(chunk, pg_conn, configs)
+        else:
+            rows_loaded = _process_bulk_chunk(chunk, pg_conn, configs)
 
         db.complete_chunk(pg_conn, chunk_id, rows_loaded)
-        print(f"[bulk] chunk {chunk_id} DONE — {rows_loaded} rows")
+        print(f"[worker] chunk {chunk_id} DONE — {rows_loaded} rows")
 
     except Exception as exc:
         err = str(exc)
-        print(f"[bulk] chunk {chunk_id} FAILED: {err}")
+        print(f"[worker] chunk {chunk_id} FAILED: {err}")
         try:
-            # ORA-01555 ("snapshot too old") is non-retriable: retrying with the
-            # same SCN will always fail because undo data won't come back.
-            # Mark permanently failed so we don't waste retry attempts.
             if "ORA-01555" in err:
-                print(f"[bulk] chunk {chunk_id} permanent fail (ORA-01555 — undo retention too short)")
+                print(f"[worker] chunk {chunk_id} permanent fail (ORA-01555)")
                 db.fail_chunk_permanent(pg_conn, chunk_id, err)
             else:
                 db.fail_chunk(pg_conn, chunk_id, err)
         except Exception:
             pass
         raise
-    finally:
-        for c in (src_conn, dst_conn):
-            try:
-                c.close()
-            except Exception:
-                pass
 
 
 def bulk_loop() -> None:
-    """Main thread: continuously claim + process bulk chunks."""
+    """Main thread: continuously claim + process bulk/baseline chunks."""
     print(f"[bulk] loop started (worker_id={WORKER_ID})")
     pg = db.get_pg_conn_with_retry()
     try:
@@ -184,12 +218,11 @@ def bulk_loop() -> None:
                     time.sleep(BULK_POLL_INTERVAL)
                     continue
                 configs = db.load_configs(pg)
-                process_bulk_chunk(chunk, pg, configs)
+                process_chunk(chunk, pg, configs)
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
                 print(f"[bulk] error: {exc}")
-                # Reconnect on connection errors
                 try:
                     pg.close()
                 except Exception:

@@ -174,7 +174,7 @@ def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
 # Orchestrator helpers
 # ---------------------------------------------------------------------------
 
-def get_chunk_stats(conn, migration_id: str) -> dict:
+def get_chunk_stats(conn, migration_id: str, chunk_type: str = "BULK") -> dict:
     """
     Return counts per status for the migration's chunks.
     {total, pending, claimed, running, done, failed}
@@ -184,8 +184,9 @@ def get_chunk_stats(conn, migration_id: str) -> dict:
             SELECT status, COUNT(*)
             FROM   migration_chunks
             WHERE  migration_id = %s
+              AND  COALESCE(chunk_type, 'BULK') = %s
             GROUP BY status
-        """, (migration_id,))
+        """, (migration_id, chunk_type))
         counts = {row[0]: row[1] for row in cur.fetchall()}
     return {
         "total":   sum(counts.values()),
@@ -244,8 +245,8 @@ def save_chunks(conn, migration_id: str, chunks: list) -> None:
     conn.commit()
 
 
-def list_chunks(conn, migration_id: str) -> list[dict]:
-    """Return all chunks for a migration, ordered by chunk_seq."""
+def list_chunks(conn, migration_id: str, chunk_type: str = "BULK") -> list[dict]:
+    """Return chunks for a migration filtered by chunk_type, ordered by chunk_seq."""
     from db.state_db import row_to_dict
     with conn.cursor() as cur:
         cur.execute("""
@@ -253,9 +254,11 @@ def list_chunks(conn, migration_id: str) -> list[dict]:
                    rowid_start, rowid_end, status,
                    rows_loaded, worker_id,
                    claimed_at, started_at, completed_at,
-                   error_text, retry_count, created_at
+                   error_text, retry_count, created_at,
+                   COALESCE(chunk_type, 'BULK') AS chunk_type
             FROM   migration_chunks
             WHERE  migration_id = %s
+              AND  COALESCE(chunk_type, 'BULK') = %s
             ORDER BY chunk_seq
-        """, (migration_id,))
+        """, (migration_id, chunk_type))
         return [row_to_dict(cur, r) for r in cur.fetchall()]

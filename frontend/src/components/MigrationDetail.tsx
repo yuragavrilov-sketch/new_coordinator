@@ -81,7 +81,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 
 // ── Phase sets ────────────────────────────────────────────────────────────────
 
-const BULK_PHASES      = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED"]);
+const BULK_PHASES      = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED", "BASELINE_LOADING"]);
 const CONNECTOR_PHASES = new Set([
   "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
@@ -413,7 +413,11 @@ function OverviewTab({
         <ConnectorPanel migrationId={migrationId} sseEvents={sseEvents} />
       )}
       {BULK_PHASES.has(phase) && (
-        <BulkProgressPanel migrationId={migrationId} sseEvents={sseEvents} />
+        <BulkProgressPanel
+          migrationId={migrationId}
+          sseEvents={sseEvents}
+          chunkType={phase === "BASELINE_LOADING" ? "BASELINE" : "BULK"}
+        />
       )}
       {VALIDATION_PHASES.has(phase) && (
         <ValidationPanel migrationId={migrationId} />

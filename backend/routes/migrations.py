@@ -18,7 +18,7 @@ _VALID_PHASES = {
     "CONNECTOR_STARTING", "CDC_BUFFERING",
     "CHUNKING", "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
-    "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+    "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING", "INDEXES_ENABLING",
     "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
     "STEADY_STATE", "PAUSED",
@@ -427,14 +427,17 @@ def migration_action(migration_id: str):
 def get_migration_chunks(migration_id: str):
     if not _db_ok():
         return jsonify({"error": "DB unavailable"}), 503
+    chunk_type = request.args.get("chunk_type", "BULK").strip().upper()
+    if chunk_type not in ("BULK", "BASELINE"):
+        chunk_type = "BULK"
     try:
         conn = _state["get_conn"]()
         try:
-            chunks = job_queue.list_chunks(conn, migration_id)
-            stats  = job_queue.get_chunk_stats(conn, migration_id)
+            chunks = job_queue.list_chunks(conn, migration_id, chunk_type)
+            stats  = job_queue.get_chunk_stats(conn, migration_id, chunk_type)
         finally:
             conn.close()
-        return jsonify({"stats": stats, "chunks": chunks})
+        return jsonify({"stats": stats, "chunks": chunks, "chunk_type": chunk_type})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

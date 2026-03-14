@@ -116,6 +116,7 @@ def _dispatch(migration_id: str, phase: str, m: dict) -> None:
         "STAGE_VALIDATING":     _handle_stage_validating,
         "STAGE_VALIDATED":      _handle_stage_validated,
         "BASELINE_PUBLISHING":  _handle_baseline_publishing,
+        "BASELINE_LOADING":     _handle_baseline_loading,
         "BASELINE_PUBLISHED":   _handle_baseline_published,
         "STAGE_DROPPING":       _handle_stage_dropping,
         "INDEXES_ENABLING":     _handle_indexes_enabling,
@@ -461,31 +462,119 @@ def _handle_stage_validated(mid: str, m: dict) -> None:
 
 
 def _handle_baseline_publishing(mid: str, m: dict) -> None:
-    """TRUNCATE + INSERT APPEND in a dedicated thread."""
+    """
+    TRUNCATE target, chunk the stage table on the target Oracle, store
+    chunks (chunk_type='BASELINE') in migration_chunks, then move to
+    BASELINE_LOADING so workers pick them up.
+    """
     if _in_prog(mid):
         return
     _mark_in_prog(mid)
 
     def _run():
         try:
-            dst_cfg = _oracle_cfg(m["target_connection_id"])
-            rows = oracle_baseline.publish_baseline(
-                dst_cfg,
-                m["target_schema"],
-                m["target_table"],
-                m["stage_table_name"],
-                migration_id=m["migration_id"],
-                parallel_degree=int(m.get("baseline_parallel_degree") or 4),
-                chunk_size=int(m.get("baseline_batch_size") or 500_000),
+            dst_cfg    = _oracle_cfg(m["target_connection_id"])
+            tgt_schema = m["target_schema"]
+            tgt_table  = m["target_table"]
+            stg_table  = m["stage_table_name"]
+            chunk_size = int(m.get("baseline_batch_size") or 500_000)
+
+            # 1. TRUNCATE target table
+            conn = oracle_scn.open_oracle_conn(dst_cfg)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f'TRUNCATE TABLE "{tgt_schema.upper()}"."{tgt_table.upper()}"'
+                    )
+                conn.commit()
+                print(f"[orchestrator] TRUNCATE {tgt_schema}.{tgt_table} done")
+            finally:
+                conn.close()
+
+            # 2. Create BASELINE chunks from stage table on target
+            task_id = f"BAS_{m['migration_id']}"
+            chunks = oracle_chunker.create_chunks(
+                dst_cfg, tgt_schema, stg_table, chunk_size, task_id
             )
-            _transition(mid, "BASELINE_PUBLISHED",
-                        message=f"Вставлено {rows} строк в целевую таблицу")
+
+            if not chunks:
+                # Stage is empty — skip straight to BASELINE_PUBLISHED
+                _update(mid, {"baseline_chunks_total": 0, "baseline_chunks_done": 0})
+                _transition(mid, "BASELINE_PUBLISHED",
+                            message="Stage таблица пуста — целевая таблица обнулена")
+                return
+
+            # 3. Store as BASELINE chunks in migration_chunks
+            pg_conn = _state["get_conn"]()
+            try:
+                with pg_conn.cursor() as cur:
+                    for ch in chunks:
+                        cur.execute("""
+                            INSERT INTO migration_chunks
+                                (migration_id, chunk_seq, rowid_start, rowid_end, chunk_type)
+                            VALUES (%s, %s, %s, %s, 'BASELINE')
+                            ON CONFLICT (migration_id, chunk_seq) DO NOTHING
+                        """, (mid, ch.chunk_seq, ch.rowid_start, ch.rowid_end))
+                pg_conn.commit()
+            finally:
+                pg_conn.close()
+
+            _update(mid, {
+                "baseline_chunks_total": len(chunks),
+                "baseline_chunks_done":  0,
+            })
+            _transition(mid, "BASELINE_LOADING",
+                        message=f"Создано {len(chunks)} baseline-чанков, запуск воркеров")
         except Exception as exc:
             _fail(mid, str(exc), "BASELINE_PUBLISH_ERROR")
         finally:
             _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_baseline_loading(mid: str, m: dict) -> None:
+    """Monitor BASELINE chunk completion — analogous to _handle_bulk_loading."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT status, COUNT(*)
+                FROM   migration_chunks
+                WHERE  migration_id = %s AND chunk_type = 'BASELINE'
+                GROUP BY status
+            """, (mid,))
+            counts = {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+    total   = sum(counts.values())
+    done    = counts.get("DONE",    0)
+    failed  = counts.get("FAILED",  0)
+    active  = counts.get("CLAIMED", 0) + counts.get("RUNNING", 0) + counts.get("PENDING", 0)
+
+    _state["broadcast"]({
+        "type":                  "baseline_progress",
+        "migration_id":          mid,
+        "baseline_chunks_done":  done,
+        "baseline_chunks_total": total,
+        "ts":                    datetime.utcnow().isoformat() + "Z",
+    })
+
+    if total == 0:
+        return
+
+    _update(mid, {"baseline_chunks_done": done})
+
+    if done == total:
+        _transition(mid, "BASELINE_PUBLISHED",
+                    message=f"Все {total} baseline-чанков загружены")
+        return
+
+    if failed > 0 and active == 0 and (done + failed) == total:
+        _fail(mid,
+              f"Baseline loading завершился с ошибками: {failed}/{total} чанков не удалось",
+              "BASELINE_LOAD_FAILED")
 
 
 def _handle_baseline_published(mid: str, m: dict) -> None:

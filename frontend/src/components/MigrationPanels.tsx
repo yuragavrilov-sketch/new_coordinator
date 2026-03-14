@@ -66,16 +66,20 @@ interface ChunkRow {
 }
 
 export function BulkProgressPanel({
-  migrationId, sseEvents,
-}: { migrationId: string; sseEvents: SSEEvent[] }) {
+  migrationId, sseEvents, chunkType = "BULK",
+}: { migrationId: string; sseEvents: SSEEvent[]; chunkType?: "BULK" | "BASELINE" }) {
   const [stats,    setStats]    = useState<ChunkStats | null>(null);
   const [chunks,   setChunks]   = useState<ChunkRow[]>([]);
   const [loading,  setLoading]  = useState(true);
   const [showAll,  setShowAll]  = useState(false);
   const [retrying, setRetrying] = useState(false);
 
+  const isBaseline = chunkType === "BASELINE";
+  const accent     = isBaseline ? "#9333ea" : "#d97706";
+  const panelTitle = isBaseline ? "Baseline Load Progress" : "Bulk Load Progress";
+
   function load() {
-    fetch(`/api/migrations/${migrationId}/chunks`)
+    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => { setStats(d.stats); setChunks(d.chunks || []); setLoading(false); })
       .catch(() => setLoading(false));
@@ -99,7 +103,8 @@ export function BulkProgressPanel({
     if (!last) return;
     if (
       last.migration_id === migrationId &&
-      (last.type === "chunk_progress" || last.type === "migration_phase")
+      (last.type === "chunk_progress" || last.type === "migration_phase" ||
+       last.type === "baseline_progress")
     ) {
       load();
     }
@@ -119,7 +124,7 @@ export function BulkProgressPanel({
   const visible = showAll ? chunks : chunks.slice(0, 20);
 
   return (
-    <PanelWrap accent="#d97706" title="Bulk Load Progress">
+    <PanelWrap accent={accent} title={panelTitle}>
       {/* Progress bar */}
       <div style={{ marginBottom: 10 }}>
         <div style={{

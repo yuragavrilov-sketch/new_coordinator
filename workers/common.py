@@ -135,17 +135,22 @@ def claim_chunk(conn) -> Optional[dict]:
                 FROM   migration_chunks c
                 JOIN   migrations m ON m.migration_id = c.migration_id
                 WHERE  c.status = 'PENDING'
-                  AND  m.phase  = 'BULK_LOADING'
+                  AND  (
+                      (COALESCE(c.chunk_type, 'BULK') = 'BULK'     AND m.phase = 'BULK_LOADING')
+                   OR (c.chunk_type = 'BASELINE' AND m.phase = 'BASELINE_LOADING')
+                  )
                   AND  (
                       SELECT COUNT(*)
                       FROM   migration_chunks c2
                       WHERE  c2.migration_id = c.migration_id
+                        AND  c2.chunk_type   = c.chunk_type
                         AND  c2.status IN ('CLAIMED', 'RUNNING')
                   ) < GREATEST(COALESCE(m.max_parallel_workers, 1), 1)
                 ORDER BY (
                       SELECT COUNT(*)
                       FROM   migration_chunks c3
                       WHERE  c3.migration_id = c.migration_id
+                        AND  c3.chunk_type   = c.chunk_type
                         AND  c3.status IN ('CLAIMED', 'RUNNING')
                   ) ASC,
                   m.state_changed_at ASC,
@@ -159,14 +164,15 @@ def claim_chunk(conn) -> Optional[dict]:
                    claimed_at = NOW(),
                    started_at = NOW()
             WHERE  chunk_id = (SELECT chunk_id FROM candidate)
-            RETURNING chunk_id, migration_id, chunk_seq, rowid_start, rowid_end
+            RETURNING chunk_id, migration_id, chunk_seq, rowid_start, rowid_end,
+                      COALESCE(chunk_type, 'BULK')
         """, (WORKER_ID,))
         row = cur.fetchone()
         if not row:
             conn.rollback()
             return None
 
-        chunk_id, migration_id, chunk_seq, rowid_start, rowid_end = row
+        chunk_id, migration_id, chunk_seq, rowid_start, rowid_end, chunk_type = row
 
         cur.execute("""
             SELECT source_connection_id, target_connection_id,
@@ -191,6 +197,7 @@ def claim_chunk(conn) -> Optional[dict]:
         "chunk_id":             str(chunk_id),
         "migration_id":         str(migration_id),
         "chunk_seq":            chunk_seq,
+        "chunk_type":           chunk_type,
         "rowid_start":          rowid_start,
         "rowid_end":            rowid_end,
         "source_connection_id": src_conn_id,
@@ -223,17 +230,27 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
                    rows_loaded  = %s,
                    completed_at = NOW()
             WHERE  chunk_id     = %s
-            RETURNING migration_id
+            RETURNING migration_id, COALESCE(chunk_type, 'BULK')
         """, (rows_loaded, chunk_id))
         row = cur.fetchone()
         if row:
-            cur.execute("""
-                UPDATE migrations
-                SET    chunks_done = chunks_done + 1,
-                       rows_loaded = rows_loaded + %s,
-                       updated_at  = NOW()
-                WHERE  migration_id = %s
-            """, (rows_loaded, row[0]))
+            migration_id, chunk_type = row
+            if chunk_type == 'BASELINE':
+                cur.execute("""
+                    UPDATE migrations
+                    SET    baseline_chunks_done = baseline_chunks_done + 1,
+                           rows_loaded          = rows_loaded + %s,
+                           updated_at           = NOW()
+                    WHERE  migration_id = %s
+                """, (rows_loaded, migration_id))
+            else:
+                cur.execute("""
+                    UPDATE migrations
+                    SET    chunks_done  = chunks_done + 1,
+                           rows_loaded  = rows_loaded + %s,
+                           updated_at   = NOW()
+                    WHERE  migration_id = %s
+                """, (rows_loaded, migration_id))
     conn.commit()
 
 

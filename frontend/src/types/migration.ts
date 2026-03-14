@@ -3,7 +3,7 @@ export type MigrationPhase =
   | "CONNECTOR_STARTING" | "CDC_BUFFERING"
   | "CHUNKING" | "BULK_LOADING" | "BULK_LOADED"
   | "STAGE_VALIDATING" | "STAGE_VALIDATED"
-  | "BASELINE_PUBLISHING" | "BASELINE_PUBLISHED"
+  | "BASELINE_PUBLISHING" | "BASELINE_LOADING" | "BASELINE_PUBLISHED"
   | "STAGE_DROPPING" | "INDEXES_ENABLING"
   | "CDC_APPLY_STARTING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
   | "STEADY_STATE" | "PAUSED"
@@ -61,6 +61,8 @@ export interface Migration {
   rows_loaded: number;
   max_parallel_workers: number;
   migration_strategy: string;
+  baseline_chunks_total: number | null;
+  baseline_chunks_done: number;
 }
 
 export interface MigrationSummary {
@@ -122,6 +124,7 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   STAGE_VALIDATING:    { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
   STAGE_VALIDATED:     { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
   BASELINE_PUBLISHING: { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
+  BASELINE_LOADING:    { bg: "#3b1f6e", text: "#d8b4fe", border: "#9333ea" },
   BASELINE_PUBLISHED:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   STAGE_DROPPING:      { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
   INDEXES_ENABLING:    { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
@@ -147,7 +150,7 @@ export const ORDERED_PHASES: MigrationPhase[] = [
   "CONNECTOR_STARTING", "CDC_BUFFERING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
   "STAGE_VALIDATING", "STAGE_VALIDATED",
-  "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+  "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
   "STAGE_DROPPING", "INDEXES_ENABLING",
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
