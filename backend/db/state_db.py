@@ -235,16 +235,17 @@ def init_db() -> None:
 
             # ── Column migrations on migrations table (idempotent) ────────────
             for col_sql in [
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_rows           BIGINT",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_chunks         INTEGER",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_done          INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_failed        INTEGER NOT NULL DEFAULT 0",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validate_hash_sample BOOLEAN NOT NULL DEFAULT FALSE",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validation_result    JSONB",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS connector_status     VARCHAR(50)",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag            BIGINT",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at TIMESTAMPTZ",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded          BIGINT NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_rows                BIGINT",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_chunks              INTEGER",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_done               INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS chunks_failed             INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validate_hash_sample      BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS validation_result         JSONB",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS connector_status          VARCHAR(50)",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag                 BIGINT",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at      TIMESTAMPTZ",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded               BIGINT NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_parallel_degree  INTEGER NOT NULL DEFAULT 1",
             ]:
                 cur.execute(col_sql)
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]
