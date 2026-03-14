@@ -215,7 +215,7 @@ def reset_stale_chunks(conn, stale_minutes: int = _STALE_AFTER_MINUTES) -> int:
               AND  EXISTS (
                   SELECT 1 FROM migrations m
                   WHERE  m.migration_id = c.migration_id
-                    AND  m.phase = 'BULK_LOADING'
+                    AND  m.phase IN ('BULK_LOADING', 'BASELINE_LOADING')
               )
         """, (stale_minutes,))
         count = cur.rowcount
@@ -240,7 +240,7 @@ def save_chunks(conn, migration_id: str, chunks: list) -> None:
                 INSERT INTO migration_chunks
                     (migration_id, chunk_seq, rowid_start, rowid_end)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (migration_id, chunk_seq) DO NOTHING
+                ON CONFLICT (migration_id, chunk_type, chunk_seq) DO NOTHING
             """, (migration_id, seq, start, end))
     conn.commit()
 

@@ -291,6 +291,39 @@ def init_db() -> None:
             )
             print("[state_db]   column ok: migration_chunks.chunk_type")
 
+            # Fix unique constraint: (migration_id, chunk_seq) → (migration_id, chunk_type, chunk_seq)
+            # so BULK and BASELINE chunks with the same seq don't collide.
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'migration_chunks_migration_id_chunk_seq_key'
+                    ) THEN
+                        ALTER TABLE migration_chunks
+                            DROP CONSTRAINT migration_chunks_migration_id_chunk_seq_key;
+                        ALTER TABLE migration_chunks
+                            ADD CONSTRAINT migration_chunks_migration_id_chunk_type_chunk_seq_key
+                            UNIQUE (migration_id, chunk_type, chunk_seq);
+                        RAISE NOTICE 'migration_chunks unique constraint upgraded';
+                    END IF;
+                END$$
+            """)
+            # Ensure constraint exists even on fresh installs that never had the old one
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'migration_chunks_migration_id_chunk_type_chunk_seq_key'
+                    ) THEN
+                        ALTER TABLE migration_chunks
+                            ADD CONSTRAINT migration_chunks_migration_id_chunk_type_chunk_seq_key
+                            UNIQUE (migration_id, chunk_type, chunk_seq);
+                    END IF;
+                END$$
+            """)
+
             # ── migration_cdc_state ───────────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS migration_cdc_state (

@@ -501,7 +501,7 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                             INSERT INTO migration_chunks
                                 (migration_id, chunk_seq, rowid_start, rowid_end, chunk_type)
                             VALUES (%s, %s, %s, %s, 'BASELINE')
-                            ON CONFLICT (migration_id, chunk_seq) DO NOTHING
+                            ON CONFLICT (migration_id, chunk_type, chunk_seq) DO NOTHING
                         """, (mid, ch.chunk_seq, ch.rowid_start, ch.rowid_end))
                 pg_conn.commit()
             finally:
