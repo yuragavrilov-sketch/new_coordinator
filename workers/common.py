@@ -120,40 +120,45 @@ def claim_chunk(conn) -> Optional[dict]:
     """
     Atomically claim one PENDING chunk from a BULK_LOADING migration.
 
-    Fair scheduling: prefer the migration with the fewest currently active
-    (CLAIMED + RUNNING) chunks so workers spread evenly across all migrations.
-    Within the same active-count bucket, prefer the migration whose state
-    changed earliest (first-in-first-out across migrations).
+    Respects max_parallel_workers: skips any migration that already has
+    >= max_parallel_workers chunks in CLAIMED or RUNNING state.
+
+    Fair scheduling: among eligible migrations prefers the one with the
+    fewest active chunks, then earliest state_changed_at, then chunk_seq.
 
     Returns a dict with chunk + migration context, or None if nothing available.
     """
     with conn.cursor() as cur:
         cur.execute("""
+            WITH candidate AS (
+                SELECT c.chunk_id
+                FROM   migration_chunks c
+                JOIN   migrations m ON m.migration_id = c.migration_id
+                WHERE  c.status = 'PENDING'
+                  AND  m.phase  = 'BULK_LOADING'
+                  AND  (
+                      SELECT COUNT(*)
+                      FROM   migration_chunks c2
+                      WHERE  c2.migration_id = c.migration_id
+                        AND  c2.status IN ('CLAIMED', 'RUNNING')
+                  ) < GREATEST(COALESCE(m.max_parallel_workers, 1), 1)
+                ORDER BY (
+                      SELECT COUNT(*)
+                      FROM   migration_chunks c3
+                      WHERE  c3.migration_id = c.migration_id
+                        AND  c3.status IN ('CLAIMED', 'RUNNING')
+                  ) ASC,
+                  m.state_changed_at ASC,
+                  c.chunk_seq ASC
+                FOR UPDATE OF c SKIP LOCKED
+                LIMIT 1
+            )
             UPDATE migration_chunks
             SET    status     = 'CLAIMED',
                    worker_id  = %s,
                    claimed_at = NOW(),
                    started_at = NOW()
-            WHERE  chunk_id = (
-                SELECT c.chunk_id
-                FROM   migration_chunks c
-                JOIN   migrations m ON m.migration_id = c.migration_id
-                LEFT JOIN (
-                    SELECT migration_id,
-                           COUNT(*) FILTER (WHERE status IN ('CLAIMED','RUNNING'))
-                               AS active_count
-                    FROM   migration_chunks
-                    WHERE  status IN ('CLAIMED', 'RUNNING')
-                    GROUP BY migration_id
-                ) act ON act.migration_id = c.migration_id
-                WHERE  c.status = 'PENDING'
-                  AND  m.phase  = 'BULK_LOADING'
-                ORDER BY COALESCE(act.active_count, 0) ASC,
-                         m.state_changed_at ASC,
-                         c.chunk_seq ASC
-                FOR UPDATE OF c SKIP LOCKED
-                LIMIT 1
-            )
+            WHERE  chunk_id = (SELECT chunk_id FROM candidate)
             RETURNING chunk_id, migration_id, chunk_seq, rowid_start, rowid_end
         """, (WORKER_ID,))
         row = cur.fetchone()
