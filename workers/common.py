@@ -195,6 +195,32 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
     conn.commit()
 
 
+def fail_chunk_permanent(conn, chunk_id: str, error_text: str) -> None:
+    """Mark a chunk FAILED immediately, skipping retry logic.
+
+    Use for errors where retrying with the same parameters is pointless
+    (e.g. ORA-01555: snapshot too old — the SCN won't get newer on retry).
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE migration_chunks
+            SET    status       = 'FAILED',
+                   error_text   = %s,
+                   completed_at = NOW()
+            WHERE  chunk_id     = %s
+            RETURNING migration_id
+        """, (error_text[:2000], chunk_id))
+        row = cur.fetchone()
+        if row:
+            cur.execute("""
+                UPDATE migrations
+                SET    chunks_failed = chunks_failed + 1,
+                       updated_at    = NOW()
+                WHERE  migration_id  = %s
+            """, (row[0],))
+    conn.commit()
+
+
 def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
     with conn.cursor() as cur:
         cur.execute("""

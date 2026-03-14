@@ -150,7 +150,14 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
         err = str(exc)
         print(f"[bulk] chunk {chunk_id} FAILED: {err}")
         try:
-            db.fail_chunk(pg_conn, chunk_id, err)
+            # ORA-01555 ("snapshot too old") is non-retriable: retrying with the
+            # same SCN will always fail because undo data won't come back.
+            # Mark permanently failed so we don't waste retry attempts.
+            if "ORA-01555" in err:
+                print(f"[bulk] chunk {chunk_id} permanent fail (ORA-01555 — undo retention too short)")
+                db.fail_chunk_permanent(pg_conn, chunk_id, err)
+            else:
+                db.fail_chunk(pg_conn, chunk_id, err)
         except Exception:
             pass
         raise
