@@ -6,9 +6,10 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
-import services.debezium  as debezium
-import services.job_queue as job_queue
-import services.kafka_lag as kafka_lag_svc
+import services.debezium    as debezium
+import services.job_queue   as job_queue
+import services.kafka_lag   as kafka_lag_svc
+import services.oracle_stage as oracle_stage
 
 bp = Blueprint("migrations", __name__)
 
@@ -38,11 +39,12 @@ _LIST_COLS = """
 _state: dict = {}
 
 
-def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn):
+def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn, load_configs_fn=None):
     _state["get_conn"]      = get_conn_fn
     _state["row_to_dict"]   = row_to_dict_fn
     _state["db_available"]  = db_available_ref
     _state["broadcast"]     = broadcast_fn
+    _state["load_configs"]  = load_configs_fn
 
 
 def _db_ok() -> bool:
@@ -267,11 +269,16 @@ def delete_migration(migration_id: str):
                                  f"Допустимо: {', '.join(sorted(_DELETABLE_PHASES))}"
                     }), 409
                 cur.execute(
-                    "SELECT connector_name FROM migrations WHERE migration_id = %s",
+                    "SELECT connector_name, target_connection_id, "
+                    "       target_schema, stage_table_name "
+                    "FROM   migrations WHERE migration_id = %s",
                     (migration_id,),
                 )
                 crow = cur.fetchone()
-                connector_name = crow[0] if crow else None
+                connector_name      = crow[0] if crow else None
+                target_conn_id      = crow[1] if crow else None
+                target_schema       = crow[2] if crow else None
+                stage_table_name    = crow[3] if crow else None
                 cur.execute(
                     "DELETE FROM migration_state_history WHERE migration_id = %s",
                     (migration_id,),
@@ -289,6 +296,14 @@ def delete_migration(migration_id: str):
                 debezium.delete_connector(connector_name)
             except Exception as exc:
                 print(f"[delete_migration] connector delete failed (ignored): {exc}")
+        # Drop stage table on target Oracle best-effort
+        load_configs = _state.get("load_configs")
+        if load_configs and target_conn_id and target_schema and stage_table_name:
+            try:
+                dst_cfg = load_configs().get(target_conn_id, {})
+                oracle_stage.drop_stage_table(dst_cfg, target_schema, stage_table_name)
+            except Exception as exc:
+                print(f"[delete_migration] stage table drop failed (ignored): {exc}")
         return jsonify({"ok": True})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

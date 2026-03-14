@@ -100,6 +100,7 @@ mig_mod.init(
     row_to_dict_fn=row_to_dict,
     db_available_ref=_db_available,
     broadcast_fn=broadcast,
+    load_configs_fn=_load_cfg,
 )
 app.register_blueprint(mig_bp)
 
