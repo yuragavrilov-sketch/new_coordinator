@@ -39,12 +39,30 @@ from db.state_db import init_db, get_conn, row_to_dict, load_configs, save_confi
 
 _db_available = {"value": False}   # mutable dict — lets blueprints read live value
 
-try:
-    init_db()
-    _db_available["value"] = True
-    print("[db] PostgreSQL state DB ready")
-except Exception as _db_err:
-    print(f"[db] PostgreSQL unavailable ({_db_err}) — using in-memory config store")
+
+def _try_init_db() -> bool:
+    try:
+        init_db()
+        _db_available["value"] = True
+        print("[db] PostgreSQL state DB ready")
+        return True
+    except Exception as _e:
+        print(f"[db] PostgreSQL unavailable ({_e})")
+        return False
+
+
+def _db_retry_loop() -> None:
+    """Background thread: retry init_db every 5 s until success, then start orchestrator."""
+    import time
+    while not _try_init_db():
+        time.sleep(5)
+    # DB became available — start orchestrator if not already running
+    if not orchestrator_mod.is_running():
+        orchestrator_mod.start_orchestrator()
+
+
+if not _try_init_db():
+    print("[db] will retry in background")
 
 # ── Service checkers ──────────────────────────────────────────────────────────
 from services.checkers import check_oracle, check_kafka, check_kafka_connect
@@ -154,7 +172,8 @@ orchestrator_mod.init(
 if _db_available["value"]:
     orchestrator_mod.start_orchestrator()
 else:
-    print("[orchestrator] skipped — DB unavailable")
+    print("[orchestrator] skipped — DB unavailable, will start when DB reconnects")
+    threading.Thread(target=_db_retry_loop, daemon=True, name="db-retry").start()
 
 # ── SPA catch-all ─────────────────────────────────────────────────────────────
 

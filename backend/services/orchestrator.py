@@ -52,7 +52,19 @@ def init(get_conn_fn, load_configs_fn, broadcast_fn) -> None:
     _state["broadcast"]     = broadcast_fn
 
 
+_orchestrator_started = False
+
+
+def is_running() -> bool:
+    return _orchestrator_started
+
+
 def start_orchestrator() -> None:
+    global _orchestrator_started
+    if _orchestrator_started:
+        return
+    _orchestrator_started = True
+
     def _run():
         time.sleep(3)
         while True:
