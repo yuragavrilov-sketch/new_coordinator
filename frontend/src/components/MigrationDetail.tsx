@@ -15,6 +15,8 @@ interface Props {
   sseEvents?: SSEEvent[];
 }
 
+// ── Formatters ────────────────────────────────────────────────────────────────
+
 function fmtTs(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
@@ -24,6 +26,26 @@ function fmtTs(iso: string | null | undefined): string {
     });
   } catch { return iso ?? "—"; }
 }
+
+function fmtDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  if (ms < 1000) return `${ms} мс`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s} сек`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  if (m < 60) return `${m} мин ${rs > 0 ? ` ${rs} сек` : ""}`.trim();
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h} ч ${rm > 0 ? `${rm} мин` : ""}`.trim();
+}
+
+function fmtNum(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return n.toLocaleString("ru-RU");
+}
+
+// ── Shared small widgets ──────────────────────────────────────────────────────
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -46,7 +68,18 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-// ── Phase sets for panel visibility ──────────────────────────────────────────
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      color: "#475569", fontSize: 11, fontWeight: 700,
+      textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ── Phase sets ────────────────────────────────────────────────────────────────
 
 const BULK_PHASES      = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED"]);
 const CONNECTOR_PHASES = new Set([
@@ -64,12 +97,417 @@ const VALIDATION_PHASES = new Set([
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE",
 ]);
 
+const TERMINAL_PHASES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+
+// ── Statistics tab ────────────────────────────────────────────────────────────
+
+interface PhasePeriod {
+  phase: string;
+  startedAt: Date;
+  endedAt: Date | null;
+  durationMs: number;
+}
+
+function useNow(intervalMs = 5000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function StatTile({
+  label, value, sub, color,
+}: { label: string; value: React.ReactNode; sub?: string; color?: string }) {
+  return (
+    <div style={{
+      background: "#0a111f", border: "1px solid #1e293b",
+      borderRadius: 7, padding: "10px 14px", minWidth: 0,
+    }}>
+      <div style={{ fontSize: 11, color: "#475569", marginBottom: 4 }}>{label}</div>
+      <div style={{
+        fontSize: 20, fontWeight: 800, color: color ?? "#e2e8f0",
+        fontVariantNumeric: "tabular-nums", lineHeight: 1,
+      }}>
+        {value}
+      </div>
+      {sub && <div style={{ fontSize: 10, color: "#334155", marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function StatisticsTab({ detail }: { detail: MigrationDetail }) {
+  const now = useNow(5000);
+  const isTerminal = TERMINAL_PHASES.has(detail.phase);
+
+  // Build phase periods from history (history is newest-first → reverse)
+  const historyAsc = [...detail.history].reverse();
+  const periods: PhasePeriod[] = historyAsc.map((h, i) => {
+    const next = historyAsc[i + 1];
+    const startedAt = new Date(h.created_at);
+    const endedAt   = next ? new Date(next.created_at) : null;
+    const refNow    = isTerminal && endedAt == null
+      ? new Date(detail.state_changed_at).getTime()
+      : now;
+    const durationMs = endedAt
+      ? endedAt.getTime() - startedAt.getTime()
+      : refNow - startedAt.getTime();
+    return { phase: h.to_phase, startedAt, endedAt, durationMs };
+  });
+
+  const totalMs = periods.reduce((sum, p) => sum + p.durationMs, 0);
+  const maxMs   = Math.max(1, ...periods.map(p => p.durationMs));
+
+  // Key metrics
+  const startTime = detail.created_at
+    ? new Date(detail.created_at) : null;
+
+  const bulkPeriod  = periods.find(p => p.phase === "BULK_LOADING");
+  const bulkSec     = bulkPeriod ? bulkPeriod.durationMs / 1000 : null;
+  const rowsLoaded  = detail.rows_loaded ?? 0;
+  const rowsPerSec  = bulkSec && bulkSec > 0 && rowsLoaded > 0
+    ? Math.round(rowsLoaded / bulkSec) : null;
+
+  const chunkPct = detail.total_chunks && detail.total_chunks > 0
+    ? Math.round(((detail.chunks_done ?? 0) / detail.total_chunks) * 100) : null;
+
+  // Phase color map (reuse a small subset for the timeline bars)
+  const phaseBarColor = (phase: string): string => {
+    if (phase === "BULK_LOADING")         return "#d97706";
+    if (phase === "CDC_CATCHING_UP")      return "#ea580c";
+    if (phase === "STEADY_STATE")         return "#16a34a";
+    if (phase === "BASELINE_PUBLISHING")  return "#7c3aed";
+    if (phase === "FAILED")               return "#ef4444";
+    if (phase === "CANCELLED")            return "#64748b";
+    if (phase === "COMPLETED")            return "#22c55e";
+    return "#1d4ed8";
+  };
+
+  return (
+    <div>
+      {/* ── Total duration banner ── */}
+      <div style={{
+        background: "#0a111f", border: "1px solid #1e293b",
+        borderRadius: 7, padding: "10px 14px", marginBottom: 14,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexWrap: "wrap", gap: 8,
+      }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
+            Общая продолжительность
+          </div>
+          <div style={{
+            fontSize: 24, fontWeight: 800, color: "#e2e8f0",
+            fontVariantNumeric: "tabular-nums", lineHeight: 1.2, marginTop: 2,
+          }}>
+            {fmtDuration(totalMs)}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", fontSize: 11, color: "#475569", lineHeight: 1.8 }}>
+          <div>Начало: {fmtTs(detail.created_at)}</div>
+          <div>
+            {isTerminal
+              ? `Завершено: ${fmtTs(detail.state_changed_at)}`
+              : `Текущая фаза: ${fmtDuration(periods[periods.length - 1]?.durationMs ?? 0)}`}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Key metrics grid ── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
+        gap: 8, marginBottom: 14,
+      }}>
+        <StatTile
+          label="Строк загружено"
+          value={fmtNum(rowsLoaded)}
+          sub={rowsPerSec != null ? `~${fmtNum(rowsPerSec)} р/сек` : undefined}
+          color="#86efac"
+        />
+        {detail.total_chunks != null && (
+          <StatTile
+            label="Чанки"
+            value={`${detail.chunks_done ?? 0} / ${detail.total_chunks}`}
+            sub={chunkPct != null ? `${chunkPct}%` : undefined}
+            color={detail.chunks_failed ? "#fca5a5" : "#86efac"}
+          />
+        )}
+        {detail.chunks_failed != null && detail.chunks_failed > 0 && (
+          <StatTile
+            label="Ошибки чанков"
+            value={detail.chunks_failed}
+            color="#ef4444"
+          />
+        )}
+        {bulkPeriod && (
+          <StatTile
+            label="Время bulk load"
+            value={fmtDuration(bulkPeriod.durationMs)}
+            color="#fcd34d"
+          />
+        )}
+        {detail.start_scn && (
+          <StatTile
+            label="Start SCN"
+            value={<span style={{ fontSize: 13 }}>{detail.start_scn}</span>}
+            sub={detail.scn_fixed_at ? fmtTs(detail.scn_fixed_at) : undefined}
+          />
+        )}
+        {detail.kafka_lag != null && (
+          <StatTile
+            label="Kafka lag"
+            value={fmtNum(detail.kafka_lag)}
+            color={detail.kafka_lag === 0 ? "#22c55e" : detail.kafka_lag < 10000 ? "#fcd34d" : "#ef4444"}
+          />
+        )}
+      </div>
+
+      {/* ── Phase timeline ── */}
+      <SectionHeader>Продолжительность фаз</SectionHeader>
+      <div style={{
+        background: "#060e1a", border: "1px solid #1e293b",
+        borderRadius: 7, overflow: "hidden", marginBottom: 14,
+      }}>
+        {/* header */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "160px 1fr 110px 90px",
+          gap: "2px 10px",
+          padding: "5px 12px",
+          borderBottom: "1px solid #1e293b",
+          fontSize: 10, color: "#475569", fontWeight: 700,
+          textTransform: "uppercase", letterSpacing: 0.6,
+        }}>
+          <span>Фаза</span>
+          <span>Относительно</span>
+          <span style={{ textAlign: "right" }}>Начало</span>
+          <span style={{ textAlign: "right" }}>Длительность</span>
+        </div>
+
+        {periods.map((p, i) => {
+          const barPct = Math.max(1, Math.round((p.durationMs / maxMs) * 100));
+          const isCurrent = !p.endedAt;
+          const color = phaseBarColor(p.phase);
+          return (
+            <div key={i} style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr 110px 90px",
+              gap: "2px 10px",
+              padding: "5px 12px",
+              borderBottom: i < periods.length - 1 ? "1px solid #0f172a" : "none",
+              alignItems: "center",
+              background: isCurrent ? "#0d1e35" : "transparent",
+            }}>
+              {/* phase name */}
+              <span style={{
+                fontSize: 11, color: isCurrent ? "#e2e8f0" : "#94a3b8",
+                fontWeight: isCurrent ? 700 : 400,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {isCurrent && (
+                  <span style={{
+                    display: "inline-block", width: 6, height: 6, borderRadius: "50%",
+                    background: "#22c55e", marginRight: 5,
+                    boxShadow: "0 0 4px #22c55e",
+                  }} />
+                )}
+                {p.phase}
+              </span>
+
+              {/* bar */}
+              <div style={{ height: 6, background: "#1e293b", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{
+                  width: `${barPct}%`, height: "100%",
+                  background: color,
+                  opacity: isCurrent ? 1 : 0.6,
+                  borderRadius: 3,
+                  transition: "width 1s",
+                }} />
+              </div>
+
+              {/* start time */}
+              <span style={{
+                fontSize: 10, color: "#475569", textAlign: "right", whiteSpace: "nowrap",
+              }}>
+                {p.startedAt.toLocaleTimeString("ru-RU")}
+              </span>
+
+              {/* duration */}
+              <span style={{
+                fontSize: 11, color: isCurrent ? "#fcd34d" : "#64748b",
+                textAlign: "right", whiteSpace: "nowrap",
+                fontVariantNumeric: "tabular-nums",
+              }}>
+                {fmtDuration(p.durationMs)}
+                {isCurrent && <span style={{ color: "#22c55e", marginLeft: 3 }}>▶</span>}
+              </span>
+            </div>
+          );
+        })}
+
+        {periods.length === 0 && (
+          <div style={{ padding: "12px 16px", color: "#334155", fontSize: 12 }}>
+            Нет данных о переходах
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── History tab ───────────────────────────────────────────────────────────────
+
+function HistoryTab({ history }: { history: StateHistoryEntry[] }) {
+  return (
+    <div>
+      <SectionHeader>История состояний ({history.length})</SectionHeader>
+      {history.length === 0 ? (
+        <div style={{ color: "#334155", fontSize: 12 }}>Нет записей</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {history.map((h, i) => (
+            <HistoryRow key={h.id} entry={h} isFirst={i === 0} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Overview tab ──────────────────────────────────────────────────────────────
+
+function OverviewTab({
+  detail, migrationId, sseEvents, phase,
+}: {
+  detail: MigrationDetail;
+  migrationId: string;
+  sseEvents: SSEEvent[];
+  phase: string;
+}) {
+  return (
+    <>
+      {/* Error block */}
+      {detail.error_code && (
+        <div style={{
+          background: "#450a0a", border: "1px solid #7f1d1d",
+          borderRadius: 6, padding: "8px 12px", marginBottom: 14, fontSize: 12,
+        }}>
+          <span style={{ color: "#fca5a5", fontWeight: 700 }}>{detail.error_code}</span>
+          {detail.failed_phase && (
+            <span style={{ color: "#94a3b8", marginLeft: 8 }}>
+              в фазе {detail.failed_phase}
+            </span>
+          )}
+          {detail.error_text && (
+            <div style={{ color: "#fca5a5", marginTop: 4, opacity: 0.85 }}>
+              {detail.error_text}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Phase-specific panels */}
+      {CONNECTOR_PHASES.has(phase) && (
+        <ConnectorPanel migrationId={migrationId} sseEvents={sseEvents} />
+      )}
+      {BULK_PHASES.has(phase) && (
+        <BulkProgressPanel migrationId={migrationId} sseEvents={sseEvents} />
+      )}
+      {VALIDATION_PHASES.has(phase) && (
+        <ValidationPanel migrationId={migrationId} />
+      )}
+      {LAG_PHASES.has(phase) && (
+        <KafkaLagPanel migrationId={migrationId} sseEvents={sseEvents} />
+      )}
+
+      {/* Info grids */}
+      <InfoGrid title="Основное">
+        <InfoRow label="ID" value={
+          <span style={{ fontFamily: "monospace", fontSize: 11 }}>
+            {detail.migration_id}
+          </span>
+        } />
+        <InfoRow label="Создана"       value={fmtTs(detail.created_at)} />
+        <InfoRow label="Автор"         value={detail.created_by} />
+        <InfoRow label="Описание"      value={detail.description} />
+        <InfoRow label="Фаза изменена" value={fmtTs(detail.state_changed_at)} />
+        <InfoRow label="Обновлена"     value={fmtTs(detail.updated_at)} />
+        <InfoRow label="Повторов"      value={
+          detail.retry_count > 0
+            ? <span style={{ color: "#f59e0b" }}>{detail.retry_count}</span>
+            : "0"
+        } />
+      </InfoGrid>
+
+      <InfoGrid title="Источник → Цель">
+        <InfoRow label="Source connection" value={detail.source_connection_id} />
+        <InfoRow label="Source table"      value={`${detail.source_schema}.${detail.source_table}`} />
+        <InfoRow label="Target connection" value={detail.target_connection_id} />
+        <InfoRow label="Target table"      value={`${detail.target_schema}.${detail.target_table}`} />
+        <InfoRow label="Stage table"       value={detail.stage_table_name} />
+      </InfoGrid>
+
+      <InfoGrid title="Коннектор / Kafka">
+        <InfoRow label="Connector"      value={detail.connector_name} />
+        <InfoRow label="Topic prefix"   value={detail.topic_prefix} />
+        <InfoRow label="Consumer group" value={detail.consumer_group} />
+      </InfoGrid>
+
+      <InfoGrid title="Параметры загрузки">
+        <InfoRow label="Chunk size"         value={detail.chunk_size?.toLocaleString()} />
+        <InfoRow label="Max workers"        value={detail.max_parallel_workers} />
+        <InfoRow label="Total rows"         value={detail.total_rows != null ? fmtNum(detail.total_rows) : "—"} />
+        <InfoRow label="Total chunks"       value={detail.total_chunks ?? "—"} />
+        <InfoRow label="Chunks done"        value={detail.chunks_done} />
+        <InfoRow label="Rows loaded"        value={fmtNum(detail.rows_loaded)} />
+        <InfoRow label="Start SCN"          value={detail.start_scn} />
+        <InfoRow label="SCN fixed at"       value={fmtTs(detail.scn_fixed_at)} />
+        <InfoRow label="Hash/sample validate" value={
+          detail.validate_hash_sample ? "включено" : "выключено"
+        } />
+      </InfoGrid>
+
+      <InfoGrid title="Ключ">
+        <InfoRow label="Key type"    value={detail.effective_key_type} />
+        <InfoRow label="Key source"  value={detail.effective_key_source} />
+        <InfoRow label="Key columns" value={
+          <span style={{ fontFamily: "monospace", fontSize: 11 }}>
+            {detail.effective_key_columns_json}
+          </span>
+        } />
+        <InfoRow label="PK exists"   value={detail.source_pk_exists ? "да" : "нет"} />
+        <InfoRow label="UK exists"   value={detail.source_uk_exists ? "да" : "нет"} />
+      </InfoGrid>
+    </>
+  );
+}
+
+function InfoGrid({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, marginBottom: 16 }}>
+      <SectionHeader>{title}</SectionHeader>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(160px, auto) 1fr",
+        gap: "5px 16px",
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
+type Tab = "overview" | "stats" | "history";
+
 export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: Props) {
-  const [detail,  setDetail]  = useState<MigrationDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [detail,    setDetail]    = useState<MigrationDetail | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
 
   function loadDetail() {
     fetch(`/api/migrations/${migrationId}`)
@@ -84,7 +522,6 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
     loadDetail();
   }, [migrationId]);
 
-  // Reload when a migration_phase event arrives for this migration
   useEffect(() => {
     const last = sseEvents[0];
     if (last?.type === "migration_phase" && last.migration_id === migrationId) {
@@ -93,6 +530,12 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
   }, [sseEvents]); // eslint-disable-line
 
   const phase = detail?.phase ?? "";
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "overview", label: "Обзор" },
+    { id: "stats",    label: "Статистика" },
+    { id: "history",  label: `История${detail ? ` (${detail.history.length})` : ""}` },
+  ];
 
   return (
     <div style={{
@@ -106,23 +549,46 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
     }}>
       {/* Header */}
       <div style={{
-        padding: "12px 16px",
+        padding: "12px 16px 0",
         borderBottom: "1px solid #1e293b",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
         background: "#0a111f",
       }}>
-        {detail && <PhaseBadge phase={detail.phase} />}
-        <span style={{ fontWeight: 700, fontSize: 14, color: "#e2e8f0", flex: 1 }}>
-          {detail?.migration_name ?? "Загрузка..."}
-        </span>
-        <button onClick={onClose} style={{
-          background: "none", border: "none", color: "#475569",
-          cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px",
-        }}>✕</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          {detail && <PhaseBadge phase={detail.phase} />}
+          <span style={{ fontWeight: 700, fontSize: 14, color: "#e2e8f0", flex: 1 }}>
+            {detail?.migration_name ?? "Загрузка..."}
+          </span>
+          <button onClick={onClose} style={{
+            background: "none", border: "none", color: "#475569",
+            cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px",
+          }}>✕</button>
+        </div>
+
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: 0 }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: `2px solid ${activeTab === tab.id ? "#3b82f6" : "transparent"}`,
+                color: activeTab === tab.id ? "#93c5fd" : "#475569",
+                fontSize: 12,
+                fontWeight: activeTab === tab.id ? 700 : 400,
+                cursor: "pointer",
+                padding: "4px 14px 8px",
+                transition: "color 0.15s, border-color 0.15s",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
+      {/* Body */}
       {loading && (
         <div style={{ padding: 24, color: "#475569", fontSize: 13 }}>Загрузка...</div>
       )}
@@ -132,179 +598,27 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
 
       {detail && !loading && (
         <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-
-          {/* Error block */}
-          {detail.error_code && (
-            <div style={{
-              background: "#450a0a", border: "1px solid #7f1d1d",
-              borderRadius: 6, padding: "8px 12px", marginBottom: 14, fontSize: 12,
-            }}>
-              <span style={{ color: "#fca5a5", fontWeight: 700 }}>{detail.error_code}</span>
-              {detail.failed_phase && (
-                <span style={{ color: "#94a3b8", marginLeft: 8 }}>
-                  в фазе {detail.failed_phase}
-                </span>
-              )}
-              {detail.error_text && (
-                <div style={{ color: "#fca5a5", marginTop: 4, opacity: 0.85 }}>
-                  {detail.error_text}
-                </div>
-              )}
-            </div>
+          {activeTab === "overview" && (
+            <OverviewTab
+              detail={detail}
+              migrationId={migrationId}
+              sseEvents={sseEvents}
+              phase={phase}
+            />
           )}
-
-          {/* ── Phase-specific panels ── */}
-          {CONNECTOR_PHASES.has(phase) && (
-            <ConnectorPanel migrationId={migrationId} sseEvents={sseEvents} />
+          {activeTab === "stats" && (
+            <StatisticsTab detail={detail} />
           )}
-          {BULK_PHASES.has(phase) && (
-            <BulkProgressPanel migrationId={migrationId} sseEvents={sseEvents} />
+          {activeTab === "history" && (
+            <HistoryTab history={detail.history} />
           )}
-          {VALIDATION_PHASES.has(phase) && (
-            <ValidationPanel migrationId={migrationId} />
-          )}
-          {LAG_PHASES.has(phase) && (
-            <KafkaLagPanel migrationId={migrationId} sseEvents={sseEvents} />
-          )}
-
-          {/* ── Info grid ── */}
-          <div style={{ fontSize: 12, marginBottom: 16 }}>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
-            }}>
-              Основное
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(160px, auto) 1fr",
-              gap: "5px 16px",
-            }}>
-              <InfoRow label="ID" value={
-                <span style={{ fontFamily: "monospace", fontSize: 11 }}>
-                  {detail.migration_id}
-                </span>
-              } />
-              <InfoRow label="Создана"       value={fmtTs(detail.created_at)} />
-              <InfoRow label="Автор"         value={detail.created_by} />
-              <InfoRow label="Описание"      value={detail.description} />
-              <InfoRow label="Фаза изменена" value={fmtTs(detail.state_changed_at)} />
-              <InfoRow label="Повторов"      value={
-                detail.retry_count > 0
-                  ? <span style={{ color: "#f59e0b" }}>{detail.retry_count}</span>
-                  : "0"
-              } />
-            </div>
-          </div>
-
-          <div style={{ fontSize: 12, marginBottom: 16 }}>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
-            }}>
-              Источник → Цель
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(160px, auto) 1fr",
-              gap: "5px 16px",
-            }}>
-              <InfoRow label="Source connection" value={detail.source_connection_id} />
-              <InfoRow label="Source table"      value={`${detail.source_schema}.${detail.source_table}`} />
-              <InfoRow label="Target connection" value={detail.target_connection_id} />
-              <InfoRow label="Target table"      value={`${detail.target_schema}.${detail.target_table}`} />
-              <InfoRow label="Stage table"       value={detail.stage_table_name} />
-            </div>
-          </div>
-
-          <div style={{ fontSize: 12, marginBottom: 16 }}>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
-            }}>
-              Коннектор / Kafka
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(160px, auto) 1fr",
-              gap: "5px 16px",
-            }}>
-              <InfoRow label="Connector"     value={detail.connector_name} />
-              <InfoRow label="Topic prefix"  value={detail.topic_prefix} />
-              <InfoRow label="Consumer group" value={detail.consumer_group} />
-            </div>
-          </div>
-
-          <div style={{ fontSize: 12, marginBottom: 16 }}>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
-            }}>
-              Параметры загрузки
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(160px, auto) 1fr",
-              gap: "5px 16px",
-            }}>
-              <InfoRow label="Chunk size"   value={detail.chunk_size?.toLocaleString()} />
-              <InfoRow label="Total chunks" value={detail.total_chunks ?? "—"} />
-              <InfoRow label="Chunks done"  value={detail.chunks_done} />
-              <InfoRow label="Start SCN"    value={detail.start_scn} />
-              <InfoRow label="SCN fixed at" value={fmtTs(detail.scn_fixed_at)} />
-              <InfoRow label="Hash/sample validate" value={
-                detail.validate_hash_sample ? "включено" : "выключено"
-              } />
-            </div>
-          </div>
-
-          <div style={{ fontSize: 12, marginBottom: 16 }}>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8,
-            }}>
-              Ключ
-            </div>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(160px, auto) 1fr",
-              gap: "5px 16px",
-            }}>
-              <InfoRow label="Key type"   value={detail.effective_key_type} />
-              <InfoRow label="Key source" value={detail.effective_key_source} />
-              <InfoRow label="Key columns" value={
-                <span style={{ fontFamily: "monospace", fontSize: 11 }}>
-                  {detail.effective_key_columns_json}
-                </span>
-              } />
-              <InfoRow label="PK exists" value={detail.source_pk_exists ? "да" : "нет"} />
-              <InfoRow label="UK exists" value={detail.source_uk_exists ? "да" : "нет"} />
-            </div>
-          </div>
-
-          {/* State history */}
-          <div>
-            <div style={{
-              color: "#475569", fontSize: 11, fontWeight: 700,
-              textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10,
-            }}>
-              История состояний ({detail.history.length})
-            </div>
-            {detail.history.length === 0 ? (
-              <div style={{ color: "#334155", fontSize: 12 }}>Нет записей</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                {detail.history.map((h, i) => (
-                  <HistoryRow key={h.id} entry={h} isFirst={i === 0} />
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>
   );
 }
+
+// ── HistoryRow ────────────────────────────────────────────────────────────────
 
 function HistoryRow({ entry, isFirst }: { entry: StateHistoryEntry; isFirst: boolean }) {
   const [expanded, setExpanded] = useState(isFirst);
