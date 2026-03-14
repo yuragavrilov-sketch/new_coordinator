@@ -450,7 +450,7 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 m["target_schema"],
                 m["target_table"],
                 m["stage_table_name"],
-                parallel_degree=int(m.get("max_parallel_workers") or 4),
+                parallel_degree=int(m.get("max_parallel_workers") or 1),
             )
             _transition(mid, "BASELINE_PUBLISHED",
                         message=f"Вставлено {rows} строк в целевую таблицу")

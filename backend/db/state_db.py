@@ -168,8 +168,13 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag            BIGINT",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at TIMESTAMPTZ",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded          BIGINT NOT NULL DEFAULT 0",
+                # migration_cdc_state columns (table created below, these are for upgrades)
+                "ALTER TABLE migration_cdc_state ADD COLUMN IF NOT EXISTS rows_applied BIGINT NOT NULL DEFAULT 0",
             ]:
-                cur.execute(col_sql)
+                try:
+                    cur.execute(col_sql)
+                except Exception:
+                    pass  # table may not exist yet on first run — created below
 
             # ── migration_chunks ──────────────────────────────────────────
             cur.execute("""
@@ -212,6 +217,7 @@ def init_db() -> None:
                     last_event_scn    NUMERIC,
                     last_event_ts     TIMESTAMPTZ,
                     apply_rate_rps    NUMERIC(10,2),
+                    rows_applied      BIGINT NOT NULL DEFAULT 0,
                     worker_id         VARCHAR(200),
                     worker_heartbeat  TIMESTAMPTZ,
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -235,6 +241,7 @@ def get_active_migrations(conn) -> list[dict]:
         "CHUNKING", "BULK_LOADING", "BULK_LOADED",
         "STAGE_VALIDATING", "STAGE_VALIDATED",
         "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+        "STAGE_DROPPING", "INDEXES_ENABLING",
         "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",
     )

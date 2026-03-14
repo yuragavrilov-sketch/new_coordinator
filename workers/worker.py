@@ -439,8 +439,6 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                     total_lag = _calc_lag(consumer, consumer_group, bootstrap)
                     db.cdc_checkin(pg, migration_id, total_lag, rows_applied)
                     print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied}")
-                    if total_lag == 0:
-                        db.trigger_lag_zero(pg, migration_id)
                 except Exception as exc:
                     print(f"[cdc:{tag}] checkin error: {exc}")
                     # Reconnect pg on error

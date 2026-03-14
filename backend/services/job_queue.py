@@ -20,66 +20,72 @@ _STALE_AFTER_MINUTES = 10
 def claim_chunk(conn, worker_id: str) -> Optional[dict]:
     """
     Atomically claim one PENDING chunk for *worker_id*.
+
+    Uses a single CTE to select candidate + update in one round-trip so
+    there is no window where a chunk can be left in CLAIMED without a worker.
+    Also respects max_parallel_workers per migration.
+
     Returns a dict with chunk + migration context, or None if nothing available.
     """
     with conn.cursor() as cur:
-        # Lock one PENDING chunk that belongs to a BULK_LOADING migration
         cur.execute("""
-            UPDATE migration_chunks
-            SET    status     = 'CLAIMED',
-                   worker_id  = %s,
-                   claimed_at = NOW(),
-                   started_at = NOW()
-            WHERE  chunk_id = (
+            WITH candidate AS (
                 SELECT c.chunk_id
                 FROM   migration_chunks c
-                JOIN   migrations       m ON m.migration_id = c.migration_id
+                JOIN   migrations m ON m.migration_id = c.migration_id
                 WHERE  c.status = 'PENDING'
                   AND  m.phase  = 'BULK_LOADING'
+                  AND  (
+                      SELECT COUNT(*)
+                      FROM   migration_chunks c2
+                      WHERE  c2.migration_id = c.migration_id
+                        AND  c2.status IN ('CLAIMED', 'RUNNING')
+                  ) < GREATEST(COALESCE(m.max_parallel_workers, 1), 1)
                 ORDER BY c.created_at
                 FOR UPDATE OF c SKIP LOCKED
                 LIMIT 1
+            ),
+            updated AS (
+                UPDATE migration_chunks
+                SET    status     = 'CLAIMED',
+                       worker_id  = %s,
+                       claimed_at = NOW(),
+                       started_at = NOW()
+                WHERE  chunk_id = (SELECT chunk_id FROM candidate)
+                RETURNING chunk_id, migration_id, chunk_seq, rowid_start, rowid_end
             )
-            RETURNING chunk_id, migration_id, chunk_seq,
-                      rowid_start, rowid_end
+            SELECT u.chunk_id, u.migration_id, u.chunk_seq, u.rowid_start, u.rowid_end,
+                   m.source_connection_id, m.target_connection_id,
+                   m.source_schema, m.source_table,
+                   m.target_schema, m.stage_table_name,
+                   m.start_scn
+            FROM   updated u
+            JOIN   migrations m ON m.migration_id = u.migration_id
         """, (worker_id,))
         row = cur.fetchone()
         if not row:
+            conn.commit()
             return None
-
-        chunk_id, migration_id, chunk_seq, rowid_start, rowid_end = row
-
-        # Fetch migration context needed by the worker
-        cur.execute("""
-            SELECT source_connection_id, target_connection_id,
-                   source_schema, source_table,
-                   target_schema, stage_table_name,
-                   start_scn
-            FROM   migrations
-            WHERE  migration_id = %s
-        """, (migration_id,))
-        mrow = cur.fetchone()
-        if not mrow:
-            return None
-        (src_conn_id, dst_conn_id,
+        (chunk_id, migration_id, chunk_seq, rowid_start, rowid_end,
+         src_conn_id, dst_conn_id,
          src_schema, src_table,
          tgt_schema, stage_table,
-         start_scn) = mrow
+         start_scn) = row
 
     conn.commit()
     return {
-        "chunk_id":            str(chunk_id),
-        "migration_id":        str(migration_id),
-        "chunk_seq":           chunk_seq,
-        "rowid_start":         rowid_start,
-        "rowid_end":           rowid_end,
+        "chunk_id":             str(chunk_id),
+        "migration_id":         str(migration_id),
+        "chunk_seq":            chunk_seq,
+        "rowid_start":          rowid_start,
+        "rowid_end":            rowid_end,
         "source_connection_id": src_conn_id,
         "target_connection_id": dst_conn_id,
-        "source_schema":       src_schema,
-        "source_table":        src_table,
-        "target_schema":       tgt_schema,
-        "stage_table":         stage_table,
-        "start_scn":           str(start_scn),
+        "source_schema":        src_schema,
+        "source_table":         src_table,
+        "target_schema":        tgt_schema,
+        "stage_table":          stage_table,
+        "start_scn":            str(start_scn),
     }
 
 
@@ -111,9 +117,10 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
             cur.execute("""
                 UPDATE migrations
                 SET    chunks_done = chunks_done + 1,
+                       rows_loaded = rows_loaded + %s,
                        updated_at  = NOW()
                 WHERE  migration_id = %s
-            """, (row[0],))
+            """, (rows_loaded, row[0],))
     conn.commit()
 
 

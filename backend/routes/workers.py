@@ -8,9 +8,14 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 
+import os
+
 import services.job_queue as job_queue
 
 bp = Blueprint("workers", __name__)
+
+# Must match workers/common.py CDC_HEARTBEAT_STALE_MINUTES
+_CDC_HEARTBEAT_STALE_MINUTES = int(os.environ.get("CDC_HEARTBEAT_STALE_MINUTES", "2"))
 
 _state: dict = {}
 
@@ -189,11 +194,11 @@ def cdc_claim():
                 WHERE  m.phase IN ('CDC_APPLY_STARTING', 'CDC_CATCHING_UP', 'STEADY_STATE')
                   AND  (
                          cs.worker_heartbeat IS NULL
-                      OR cs.worker_heartbeat < NOW() - INTERVAL '2 minutes'
+                      OR cs.worker_heartbeat < NOW() - make_interval(mins => %s)
                   )
                 ORDER BY m.state_changed_at
                 LIMIT 1
-            """)
+            """, (_CDC_HEARTBEAT_STALE_MINUTES,))
             row = cur.fetchone()
             if row is None:
                 return "", 204

@@ -18,6 +18,9 @@ STATE_DB_DSN = os.environ.get(
 WORKER_ID = os.environ.get("WORKER_ID", f"{socket.gethostname()}:{os.getpid()}")
 
 _MAX_RETRIES   = 3
+# How long without a heartbeat before a CDC worker is considered stale.
+# Must match the value used in backend/routes/workers.py.
+CDC_HEARTBEAT_STALE_MINUTES = int(os.environ.get("CDC_HEARTBEAT_STALE_MINUTES", "2"))
 _STALE_MINUTES = 10
 
 
@@ -256,12 +259,12 @@ def claim_cdc_migration(conn) -> Optional[dict]:
             WHERE  m.phase IN ('CDC_APPLY_STARTING', 'CDC_CATCHING_UP', 'STEADY_STATE')
               AND  (
                      cs.worker_heartbeat IS NULL
-                  OR cs.worker_heartbeat < NOW() - INTERVAL '2 minutes'
+                  OR cs.worker_heartbeat < NOW() - make_interval(mins => %s)
               )
             ORDER BY m.state_changed_at
             LIMIT 1
             FOR UPDATE OF m SKIP LOCKED
-        """)
+        """, (CDC_HEARTBEAT_STALE_MINUTES,))
         row = cur.fetchone()
         if row is None:
             conn.rollback()
@@ -302,17 +305,18 @@ def cdc_checkin(conn, migration_id: str, total_lag: int,
         cur.execute("""
             INSERT INTO migration_cdc_state
                 (migration_id, consumer_group, topic,
-                 total_lag, worker_id, worker_heartbeat, updated_at)
+                 total_lag, rows_applied, worker_id, worker_heartbeat, updated_at)
             SELECT migration_id, consumer_group, topic_prefix,
-                   %s, %s, NOW(), NOW()
+                   %s, %s, %s, NOW(), NOW()
             FROM   migrations
             WHERE  migration_id = %s
             ON CONFLICT (migration_id) DO UPDATE
                 SET total_lag        = EXCLUDED.total_lag,
+                    rows_applied     = EXCLUDED.rows_applied,
                     worker_id        = EXCLUDED.worker_id,
                     worker_heartbeat = NOW(),
                     updated_at       = NOW()
-        """, (total_lag, WORKER_ID, migration_id))
+        """, (total_lag, rows_applied, WORKER_ID, migration_id))
 
         # Mirror lag onto migrations table so UI can read it
         cur.execute("""
