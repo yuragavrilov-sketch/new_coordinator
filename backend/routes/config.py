@@ -49,6 +49,24 @@ def get_status():
         return jsonify(dict(_state["service_status"]))
 
 
+@bp.post("/api/config/<service>/test")
+def test_config_route(service: str):
+    """Test a connection using the provided config without saving it."""
+    if service not in _ALLOWED:
+        return jsonify({"error": f"Unknown service: {service}"}), 400
+    body = request.get_json(force=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+    checker = _state["checkers"].get(service)
+    if not checker:
+        return jsonify({"status": "unknown", "message": "No checker available for this service"}), 200
+    try:
+        status, message = checker(body)
+    except Exception as exc:
+        status, message = "down", str(exc)[:200]
+    return jsonify({"status": status, "message": message})
+
+
 def _check_and_broadcast(service: str) -> None:
     checker = _state["checkers"][service]
     cfg = _state["load_configs"]().get(service, {})

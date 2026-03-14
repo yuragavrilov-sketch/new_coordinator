@@ -21,6 +21,7 @@ interface FormData {
   consumer_group: string;
   stage_table_name: string;
   chunk_size: number;
+  max_parallel_workers: number;
   validate_hash_sample: boolean;
   effective_key_type: string;
   effective_key_columns: string[];
@@ -300,6 +301,7 @@ const INIT: FormData = {
   target_schema: "", target_table: "",
   connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "",
   chunk_size: 1_000_000,
+  max_parallel_workers: 1,
   validate_hash_sample: false,
   effective_key_type: "", effective_key_columns: [], selected_uk_index: 0,
 };
@@ -312,6 +314,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
   const [submitting,   setSubmit]    = useState(false);
   const [submitErr,    setSubmitErr] = useState("");
   const [fieldErrs,    setFieldErrs] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [dupWarning,   setDupWarning] = useState<string | null>(null);
   const nameTouched = useRef(false);
 
   const setF = useCallback((up: Partial<FormData>) =>
@@ -365,6 +368,33 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     });
   }, [form.source_schema, form.source_table, form.target_schema, form.target_table, setF]);
 
+  // ── Duplicate detection ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!form.source_schema || !form.source_table || !form.target_schema || !form.target_table) {
+      setDupWarning(null);
+      return;
+    }
+    fetch("/api/migrations")
+      .then(r => r.json())
+      .then((data: {
+        migration_name: string; phase: string;
+        source_schema: string; source_table: string;
+        target_schema: string; target_table: string;
+      }[]) => {
+        const dup = data.find(m =>
+          m.source_schema === form.source_schema && m.source_table === form.source_table &&
+          m.target_schema === form.target_schema && m.target_table === form.target_table &&
+          m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
+        );
+        setDupWarning(dup
+          ? `Уже есть активная миграция "${dup.migration_name}" (${dup.phase}) для этой пары`
+          : null
+        );
+      })
+      .catch(() => setDupWarning(null));
+  }, [form.source_schema, form.source_table, form.target_schema, form.target_table]);
+
   // ── Auto-suggest target schema from source ───────────────────────────────
 
   const onSourceSchema = useCallback((v: string) => {
@@ -417,6 +447,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       topic_prefix:               form.topic_prefix.trim(),
       consumer_group:             form.consumer_group.trim(),
       chunk_size:                 form.chunk_size,
+      max_parallel_workers:       form.max_parallel_workers,
       validate_hash_sample:       form.validate_hash_sample,
       source_pk_exists:           (tableInfo?.pk_columns.length ?? 0) > 0,
       source_uk_exists:           (tableInfo?.uk_constraints.length ?? 0) > 0,
@@ -546,11 +577,17 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   onChange={v => setF({ stage_table_name: v })} />
               </Field>
             </div>
-            <Field label="Chunk size" required error={fieldErrs.chunk_size}
-              hint="Количество строк на чанк (рекомендуется 500k–2M)">
-              <input style={S.input} type="number" value={form.chunk_size} min={1}
-                onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
-            </Field>
+            <div style={S.row2}>
+              <Field label="Chunk size" required error={fieldErrs.chunk_size}
+                hint="Строк на чанк (рекомендуется 500k–2M)">
+                <input style={S.input} type="number" value={form.chunk_size} min={1}
+                  onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
+              </Field>
+              <Field label="Макс. воркеров" hint="Параллельных воркеров (1–16)">
+                <input style={S.input} type="number" value={form.max_parallel_workers} min={1} max={16}
+                  onChange={e => setF({ max_parallel_workers: Math.max(1, Math.min(16, parseInt(e.target.value) || 1)) })} />
+              </Field>
+            </div>
             <Field label="Валидация stage">
               <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                 <input type="checkbox"
@@ -677,6 +714,16 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
               />
             </Field>
           </Section>
+
+          {/* Duplicate warning */}
+          {dupWarning && (
+            <div style={{
+              background: "#451a03", border: "1px solid #92400e", borderRadius: 6,
+              padding: "10px 14px", fontSize: 12, color: "#fcd34d",
+            }}>
+              ⚠ {dupWarning}
+            </div>
+          )}
 
           {/* Submit error */}
           {submitErr && (

@@ -357,7 +357,19 @@ function HistoryRow({ entry, isFirst }: { entry: StateHistoryEntry; isFirst: boo
           fontSize: 11,
           borderTop: "1px solid #1e293b",
           whiteSpace: "pre-wrap",
+          position: "relative",
         }}>
+          <button
+            onClick={() => navigator.clipboard?.writeText(entry.message!)}
+            title="Копировать"
+            style={{
+              position: "absolute", top: 4, right: 8,
+              background: "none", border: "none", color: "#334155",
+              cursor: "pointer", fontSize: 11, padding: 2,
+            }}
+          >
+            ⎘
+          </button>
           {entry.message}
         </div>
       )}

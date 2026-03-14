@@ -90,9 +90,11 @@ export function SettingsModal({ onClose }: Props) {
     kafka:         { ...KAFKA_DEFAULT },
     kafka_connect: { ...CONNECT_DEFAULT },
   });
-  const [saving, setSaving] = useState(false);
-  const [saved,  setSaved]  = useState(false);
-  const [error,  setError]  = useState<string | null>(null);
+  const [saving,      setSaving]      = useState(false);
+  const [saved,       setSaved]       = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [testing,     setTesting]     = useState(false);
+  const [testResult,  setTestResult]  = useState<{ status: string; message: string } | null>(null);
 
   useEffect(() => {
     fetch("/api/config")
@@ -108,9 +110,28 @@ export function SettingsModal({ onClose }: Props) {
       .catch(() => setError("Не удалось загрузить конфиги"));
   }, []);
 
+  async function testConnection() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await fetch(`/api/config/${activeTab}/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(configs[activeTab]),
+      });
+      const d = await r.json();
+      setTestResult(d);
+    } catch (e: unknown) {
+      setTestResult({ status: "down", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   async function saveActive() {
     setSaving(true);
     setError(null);
+    setTestResult(null);
     const body = configs[activeTab];
     try {
       const r = await fetch(`/api/config/${activeTab}`, {
@@ -183,7 +204,10 @@ export function SettingsModal({ onClose }: Props) {
         {/* Tab bar */}
         <div style={tabBarStyle}>
           {TABS.map(({ key, label }) => (
-            <button key={key} style={tabStyle(activeTab === key)} onClick={() => setActiveTab(key)}>
+            <button key={key} style={tabStyle(activeTab === key)} onClick={() => {
+              setActiveTab(key);
+              setTestResult(null);
+            }}>
               {label}
             </button>
           ))}
@@ -243,8 +267,20 @@ export function SettingsModal({ onClose }: Props) {
           </div>
         )}
 
-        {/* Save button */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+        {/* Test result */}
+        {testResult && (
+          <div style={{
+            background: testResult.status === "up" ? "#052e16" : "#450a0a",
+            color:      testResult.status === "up" ? "#86efac" : "#fca5a5",
+            border:     `1px solid ${testResult.status === "up" ? "#16a34a" : "#7f1d1d"}`,
+            borderRadius: 6, padding: "8px 12px", marginTop: 8, fontSize: 12,
+          }}>
+            {testResult.status === "up" ? "✓ " : "✗ "}{testResult.message}
+          </div>
+        )}
+
+        {/* Save / Test buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
           <button
             onClick={saveActive}
             disabled={saving}
@@ -257,7 +293,20 @@ export function SettingsModal({ onClose }: Props) {
           >
             {saving ? "Saving…" : saved ? "✓ Saved" : "Save"}
           </button>
-          <span style={{ fontSize: 11, color: "#475569" }}>
+          {(activeTab === "oracle_source" || activeTab === "oracle_target") && (
+            <button
+              onClick={testConnection}
+              disabled={testing}
+              style={{
+                background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
+                color: "#94a3b8", padding: "8px 16px", fontSize: 13,
+                cursor: testing ? "wait" : "pointer", fontWeight: 600,
+              }}
+            >
+              {testing ? "Проверка…" : "Тест подключения"}
+            </button>
+          )}
+          <span style={{ fontSize: 11, color: "#475569", marginLeft: 4 }}>
             {TABS.find((t) => t.key === activeTab)?.label}
           </span>
         </div>

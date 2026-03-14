@@ -68,16 +68,27 @@ interface ChunkRow {
 export function BulkProgressPanel({
   migrationId, sseEvents,
 }: { migrationId: string; sseEvents: SSEEvent[] }) {
-  const [stats,   setStats]   = useState<ChunkStats | null>(null);
-  const [chunks,  setChunks]  = useState<ChunkRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAll, setShowAll] = useState(false);
+  const [stats,    setStats]    = useState<ChunkStats | null>(null);
+  const [chunks,   setChunks]   = useState<ChunkRow[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [showAll,  setShowAll]  = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   function load() {
     fetch(`/api/migrations/${migrationId}/chunks`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => { setStats(d.stats); setChunks(d.chunks || []); setLoading(false); })
       .catch(() => setLoading(false));
+  }
+
+  async function retryFailed() {
+    setRetrying(true);
+    try {
+      await fetch(`/api/migrations/${migrationId}/retry-chunks`, { method: "POST" });
+      load();
+    } finally {
+      setRetrying(false);
+    }
   }
 
   useEffect(() => { load(); }, [migrationId]);
@@ -130,7 +141,7 @@ export function BulkProgressPanel({
       </div>
 
       {/* Stats row */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8, alignItems: "flex-end" }}>
         {[
           { label: "Ожидают",   value: stats.pending, color: "#64748b" },
           { label: "Активны",   value: active,        color: "#fcd34d" },
@@ -142,6 +153,20 @@ export function BulkProgressPanel({
             <div style={{ fontSize: 10, color: "#475569" }}>{s.label}</div>
           </div>
         ))}
+        {stats.failed > 0 && (
+          <button
+            onClick={retryFailed}
+            disabled={retrying}
+            style={{
+              marginLeft: "auto",
+              background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 5,
+              color: "#fca5a5", fontSize: 10, padding: "4px 10px",
+              cursor: retrying ? "not-allowed" : "pointer", fontWeight: 700,
+            }}
+          >
+            {retrying ? "…" : `↺ Повторить ошибки (${stats.failed})`}
+          </button>
+        )}
       </div>
 
       {/* Chunk table (compact) */}
@@ -262,6 +287,7 @@ interface LagData {
   worker_id: string | null;
   worker_heartbeat: string | null;
   updated_at: string | null;
+  rows_applied: number | null;
 }
 
 function fmtTs(iso: string | null | undefined): string {
@@ -345,6 +371,13 @@ export function KafkaLagPanel({
         </div>
       )}
 
+      {data.rows_applied !== null && data.rows_applied > 0 && (
+        <Row label="Применено строк" value={
+          <span style={{ color: "#86efac", fontVariantNumeric: "tabular-nums" }}>
+            {data.rows_applied.toLocaleString()}
+          </span>
+        } />
+      )}
       <Row label="Worker"    value={data.worker_id ?? "—"} />
       <Row label="Heartbeat" value={fmtTs(data.worker_heartbeat)} />
       <Row label="Обновлено" value={fmtTs(data.updated_at)} />

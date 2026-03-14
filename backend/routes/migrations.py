@@ -119,7 +119,7 @@ def create_migration():
                         source_connection_id, target_connection_id,
                         source_schema, source_table, target_schema, target_table,
                         stage_table_name, connector_name, topic_prefix, consumer_group,
-                        chunk_size, validate_hash_sample,
+                        chunk_size, max_parallel_workers, validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
                         created_at, updated_at
@@ -128,7 +128,7 @@ def create_migration():
                         %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
-                        %s, %s,
+                        %s, %s, %s,
                         %s, %s,
                         %s, %s, %s,
                         %s, %s
@@ -142,6 +142,7 @@ def create_migration():
                     body.get("stage_table_name", ""), body.get("connector_name", ""),
                     body.get("topic_prefix", ""), body.get("consumer_group", ""),
                     body.get("chunk_size", 1_000_000),
+                    max(1, min(16, int(body.get("max_parallel_workers", 1) or 1))),
                     body.get("validate_hash_sample", False),
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
@@ -442,7 +443,7 @@ def get_migration_lag(migration_id: str):
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT total_lag, lag_by_partition, worker_id,
-                           worker_heartbeat, updated_at
+                           worker_heartbeat, updated_at, rows_applied
                     FROM   migration_cdc_state
                     WHERE  migration_id = %s
                 """, (migration_id,))
@@ -453,14 +454,61 @@ def get_migration_lag(migration_id: str):
         if not row:
             return jsonify({"total_lag": None, "message": "CDC state not yet initialised"})
 
-        total_lag, lag_by_partition, worker_id, heartbeat, updated_at = row
+        total_lag, lag_by_partition, worker_id, heartbeat, updated_at, rows_applied = row
         return jsonify({
             "total_lag":        int(total_lag or 0),
             "lag_by_partition": lag_by_partition,
             "worker_id":        worker_id,
             "worker_heartbeat": heartbeat.isoformat() + "Z" if heartbeat else None,
             "updated_at":       updated_at.isoformat() + "Z" if updated_at else None,
+            "rows_applied":     int(rows_applied or 0),
         })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/api/migrations/<migration_id>/retry-chunks")
+def retry_failed_chunks(migration_id: str):
+    """Reset all FAILED chunks back to PENDING so workers will retry them."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    try:
+        conn = _state["get_conn"]()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT phase FROM migrations WHERE migration_id = %s",
+                    (migration_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Not found"}), 404
+
+                cur.execute("""
+                    UPDATE migration_chunks
+                    SET    status       = 'PENDING',
+                           worker_id   = NULL,
+                           claimed_at  = NULL,
+                           started_at  = NULL,
+                           completed_at = NULL,
+                           error_text  = NULL,
+                           retry_count = 0
+                    WHERE  migration_id = %s
+                      AND  status       = 'FAILED'
+                """, (migration_id,))
+                reset_count = cur.rowcount
+
+                # Reset the migration's failed-chunk counter
+                cur.execute("""
+                    UPDATE migrations
+                    SET    chunks_failed = 0,
+                           updated_at   = NOW()
+                    WHERE  migration_id = %s
+                """, (migration_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True, "reset": reset_count})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

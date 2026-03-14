@@ -26,8 +26,65 @@ function useBackendHealth(): BackendStatus {
   return s;
 }
 
+const ACTIVE_PHASES_SET = new Set([
+  "NEW", "PREPARING", "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "CHUNKING", "BULK_LOADING", "BULK_LOADED",
+  "STAGE_VALIDATING", "STAGE_VALIDATED",
+  "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
+  "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+  "STEADY_STATE",
+]);
+
+function SystemStats() {
+  const [stats, setStats] = useState<{ active: number; total: number; rows: number } | null>(null);
+
+  useEffect(() => {
+    const load = () => {
+      fetch("/api/migrations")
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then((data: { phase: string; rows_loaded: number }[]) => {
+          const active = data.filter(m => ACTIVE_PHASES_SET.has(m.phase)).length;
+          const rows   = data.reduce((acc, m) => acc + (m.rows_loaded || 0), 0);
+          setStats({ active, total: data.length, rows });
+        })
+        .catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!stats) return null;
+
+  return (
+    <div style={{
+      display: "flex", gap: 16, fontSize: 11, color: "#475569",
+      alignItems: "center",
+    }}>
+      <span>
+        Активных:{" "}
+        <strong style={{ color: stats.active > 0 ? "#22c55e" : "#475569" }}>
+          {stats.active}
+        </strong>
+      </span>
+      <span>
+        Всего:{" "}
+        <strong style={{ color: "#64748b" }}>{stats.total}</strong>
+      </span>
+      {stats.rows > 0 && (
+        <span>
+          Строк:{" "}
+          <strong style={{ color: "#64748b" }}>
+            {stats.rows.toLocaleString("ru-RU")}
+          </strong>
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  const { events, status, serviceStatuses } = useSSE({ url: SSE_URL });
+  const { events, status, serviceStatuses, reconnect } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth();
   const [activeTab, setActiveTab] = useState<Tab>("migrations");
   const [showSettings, setShowSettings] = useState(false);
@@ -71,7 +128,8 @@ export default function App() {
         <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: "#e2e8f0" }}>
           DB Migration
         </h1>
-        <StatusBadge status={status} />
+        <StatusBadge status={status} onReconnect={reconnect} />
+        <SystemStats />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button onClick={() => setShowSettings(true)} style={btnStyle("#1e293b")} title="Connection settings">
             ⚙ Настройки

@@ -8,7 +8,13 @@ const colors: Record<SSEStatus, string> = {
   closed:     "#6b7280",
 };
 
-export function StatusBadge({ status }: { status: SSEStatus }) {
+export function StatusBadge({
+  status,
+  onReconnect,
+}: {
+  status: SSEStatus;
+  onReconnect?: () => void;
+}) {
   return (
     <span
       style={{
@@ -35,6 +41,24 @@ export function StatusBadge({ status }: { status: SSEStatus }) {
         }}
       />
       {status}
+      {(status === "error" || status === "closed") && onReconnect && (
+        <button
+          onClick={onReconnect}
+          title="Переподключиться"
+          style={{
+            background: "none",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            padding: "0 2px",
+            fontSize: 14,
+            lineHeight: 1,
+            opacity: 0.8,
+          }}
+        >
+          ↺
+        </button>
+      )}
     </span>
   );
 }

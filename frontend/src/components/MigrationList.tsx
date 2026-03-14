@@ -46,6 +46,18 @@ const ACTIVE_PHASES = new Set([
 ]);
 const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
 
+type FilterKey = "all" | "active" | "done" | "error" | "draft";
+
+const FILTER_LABELS: { key: FilterKey; label: string }[] = [
+  { key: "all",    label: "Все"         },
+  { key: "active", label: "Активные"    },
+  { key: "done",   label: "Завершённые" },
+  { key: "error",  label: "Ошибки"      },
+  { key: "draft",  label: "Черновики"   },
+];
+
+const DONE_PHASES = new Set(["COMPLETED", "STEADY_STATE"]);
+
 export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: number; sseEvents?: SSEEvent[] }) {
   const [migrations,  setMigrations]  = useState<MigrationSummary[]>([]);
   const [loading,     setLoading]     = useState(true);
@@ -54,6 +66,8 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
   const [showCreate,  setShowCreate]  = useState(false);
   const [actionBusy,  setActionBusy]  = useState<string | null>(null); // migration_id
   const [speeds,      setSpeeds]      = useState<Record<string, { chunksSec: number; rowsSec: number }>>({});
+  const [filter,      setFilter]      = useState<FilterKey>("all");
+  const [search,      setSearch]      = useState("");
   const snapRef = useRef<Record<string, SpeedSnapshot>>({});
 
   const load = useCallback(() => {
@@ -95,6 +109,22 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
     const id = setInterval(load, 10_000);
     return () => clearInterval(id);
   }, [load]);
+
+  const visible = migrations.filter(m => {
+    if (filter === "active") return ACTIVE_PHASES.has(m.phase);
+    if (filter === "done")   return DONE_PHASES.has(m.phase);
+    if (filter === "error")  return m.phase === "FAILED" || !!m.error_code;
+    if (filter === "draft")  return m.phase === "DRAFT";
+    return true;
+  }).filter(m => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      m.migration_name.toLowerCase().includes(q) ||
+      `${m.source_schema}.${m.source_table}`.toLowerCase().includes(q) ||
+      `${m.target_schema}.${m.target_table}`.toLowerCase().includes(q)
+    );
+  });
 
   const selected = migrations.find(m => m.migration_id === selectedId) ?? null;
 
@@ -149,41 +179,77 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
       }}>
         {/* Toolbar */}
         <div style={{
-          padding: "10px 14px",
+          padding: "8px 14px",
           borderBottom: "1px solid #1e293b",
           display: "flex",
-          alignItems: "center",
-          gap: 8,
+          flexDirection: "column",
+          gap: 6,
         }}>
-          <span style={{ fontWeight: 700, fontSize: 13, color: "#94a3b8" }}>
-            Миграции
-          </span>
-          {migrations.length > 0 && (
-            <span style={{
-              background: "#1e293b", color: "#64748b",
-              borderRadius: 10, fontSize: 11, padding: "1px 7px", fontWeight: 600,
-            }}>{migrations.length}</span>
-          )}
-          <button
-            onClick={() => setShowCreate(true)}
-            style={{
-              marginLeft: "auto", background: "#1d4ed8", border: "none",
-              borderRadius: 5, color: "#fff", fontSize: 11, padding: "4px 10px",
-              cursor: "pointer", fontWeight: 700,
-            }}
-          >
-            + Добавить
-          </button>
-          <button
-            onClick={load}
-            style={{
-              background: "none", border: "1px solid #1e293b",
-              borderRadius: 5, color: "#475569", fontSize: 11, padding: "3px 8px",
-              cursor: "pointer",
-            }}
-          >
-            ↺ обновить
-          </button>
+          {/* Row 1: title + action buttons */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: "#94a3b8" }}>
+              Миграции
+            </span>
+            {migrations.length > 0 && (
+              <span style={{
+                background: "#1e293b", color: "#64748b",
+                borderRadius: 10, fontSize: 11, padding: "1px 7px", fontWeight: 600,
+              }}>{migrations.length}</span>
+            )}
+            <button
+              onClick={() => setShowCreate(true)}
+              style={{
+                marginLeft: "auto", background: "#1d4ed8", border: "none",
+                borderRadius: 5, color: "#fff", fontSize: 11, padding: "4px 10px",
+                cursor: "pointer", fontWeight: 700,
+              }}
+            >
+              + Добавить
+            </button>
+            <button
+              onClick={load}
+              style={{
+                background: "none", border: "1px solid #1e293b",
+                borderRadius: 5, color: "#475569", fontSize: 11, padding: "3px 8px",
+                cursor: "pointer",
+              }}
+            >
+              ↺
+            </button>
+          </div>
+          {/* Row 2: filter pills + search */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {FILTER_LABELS.map(({ key, label }) => {
+              const count = key === "all" ? migrations.length
+                : key === "active" ? migrations.filter(m => ACTIVE_PHASES.has(m.phase)).length
+                : key === "done"   ? migrations.filter(m => DONE_PHASES.has(m.phase)).length
+                : key === "error"  ? migrations.filter(m => m.phase === "FAILED" || !!m.error_code).length
+                : migrations.filter(m => m.phase === "DRAFT").length;
+              if (count === 0 && key !== "all") return null;
+              const active = filter === key;
+              return (
+                <button key={key} onClick={() => setFilter(key)} style={{
+                  background: active ? "#1e3a5f" : "none",
+                  border: `1px solid ${active ? "#3b82f6" : "#1e293b"}`,
+                  borderRadius: 12, color: active ? "#93c5fd" : "#475569",
+                  fontSize: 10, padding: "2px 8px", cursor: "pointer", fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}>
+                  {label} {count > 0 && <span style={{ opacity: 0.7 }}>{count}</span>}
+                </button>
+              );
+            })}
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Поиск…"
+              style={{
+                marginLeft: "auto", background: "#1e293b", border: "1px solid #334155",
+                borderRadius: 5, color: "#e2e8f0", padding: "3px 8px",
+                fontSize: 11, width: 120, outline: "none",
+              }}
+            />
+          </div>
         </div>
 
         {/* Content */}
@@ -196,8 +262,8 @@ export function MigrationList({ refreshSignal, sseEvents }: { refreshSignal?: nu
               Ошибка загрузки: {error}
             </div>
           )}
-          {!loading && !error && migrations.length === 0 && <EmptyState />}
-          {!loading && !error && migrations.map(m => (
+          {!loading && !error && visible.length === 0 && <EmptyState />}
+          {!loading && !error && visible.map(m => (
             <MigrationRow
               key={m.migration_id}
               m={m}

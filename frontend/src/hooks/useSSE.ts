@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type SSEStatus = "connecting" | "connected" | "error" | "closed";
 
@@ -71,9 +71,11 @@ export function useSSE({ url, maxEvents = 200 }: UseSSEOptions) {
   const [events,          setEvents]          = useState<SSEEvent[]>([]);
   const [status,          setStatus]          = useState<SSEStatus>("connecting");
   const [serviceStatuses, setServiceStatuses] = useState<ServiceStatuses>(DEFAULT_STATUSES);
+  const [trigger,         setTrigger]         = useState(0); // bump to force reconnect
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
+    setStatus("connecting");
     const es = new EventSource(url);
     sourceRef.current = es;
 
@@ -111,9 +113,14 @@ export function useSSE({ url, maxEvents = 200 }: UseSSEOptions) {
 
     return () => {
       es.close();
-      setStatus("closed");
+      sourceRef.current = null;
     };
-  }, [url, maxEvents]);
+  }, [url, maxEvents, trigger]); // eslint-disable-line
 
-  return { events, status, serviceStatuses };
+  const reconnect = useCallback(() => {
+    sourceRef.current?.close();
+    setTrigger(t => t + 1);
+  }, []);
+
+  return { events, status, serviceStatuses, reconnect };
 }
