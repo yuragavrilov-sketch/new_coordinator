@@ -33,7 +33,8 @@ _LIST_COLS = """
     created_at, updated_at,
     error_code, error_text, failed_phase, retry_count,
     description, created_by,
-    total_rows, total_chunks, chunks_done, chunks_failed, rows_loaded
+    total_rows, total_chunks, chunks_done, chunks_failed, rows_loaded,
+    migration_strategy
 """
 
 _state: dict = {}
@@ -115,6 +116,10 @@ def create_migration():
         conn = _state["get_conn"]()
         try:
             with conn.cursor() as cur:
+                strategy = body.get("migration_strategy", "STAGE").strip().upper()
+                if strategy not in ("STAGE", "DIRECT"):
+                    strategy = "STAGE"
+
                 cur.execute("""
                     INSERT INTO migrations (
                         migration_id, migration_name, phase, state_changed_at,
@@ -124,6 +129,7 @@ def create_migration():
                         chunk_size, max_parallel_workers, validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
+                        migration_strategy,
                         created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s,
@@ -133,6 +139,7 @@ def create_migration():
                         %s, %s, %s,
                         %s, %s,
                         %s, %s, %s,
+                        %s,
                         %s, %s
                     )
                 """, (
@@ -149,6 +156,7 @@ def create_migration():
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
                     body.get("effective_key_columns_json", "[]"),
+                    strategy,
                     now, now,
                 ))
                 cur.execute("""

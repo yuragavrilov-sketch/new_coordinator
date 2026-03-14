@@ -239,8 +239,9 @@ def _handle_preparing(mid: str, m: dict) -> None:
 
     def _run():
         try:
-            src_cfg = _oracle_cfg(m["source_connection_id"])
-            dst_cfg = _oracle_cfg(m["target_connection_id"])
+            src_cfg  = _oracle_cfg(m["source_connection_id"])
+            dst_cfg  = _oracle_cfg(m["target_connection_id"])
+            strategy = (m.get("migration_strategy") or "STAGE").upper()
 
             # Check supplemental logging (warn, don't block)
             try:
@@ -256,12 +257,17 @@ def _handle_preparing(mid: str, m: dict) -> None:
             except Exception as exc:
                 print(f"[orchestrator] supplemental logging check failed: {exc}")
 
-            # Create stage table (idempotent)
-            oracle_stage.create_stage_table(
-                src_cfg, dst_cfg,
-                m["source_schema"], m["source_table"],
-                m["target_schema"], m["stage_table_name"],
-            )
+            if strategy == "STAGE":
+                # Create stage table (idempotent)
+                oracle_stage.create_stage_table(
+                    src_cfg, dst_cfg,
+                    m["source_schema"], m["source_table"],
+                    m["target_schema"], m["stage_table_name"],
+                )
+                stage_msg = "Stage table создана, "
+            else:
+                # DIRECT strategy — no stage table
+                stage_msg = "Прямая загрузка (без stage), "
 
             # Fix SCN
             scn = oracle_scn.get_current_scn(src_cfg)
@@ -271,7 +277,7 @@ def _handle_preparing(mid: str, m: dict) -> None:
                 "scn_fixed_at": datetime.utcnow(),
             })
             _transition(mid, "SCN_FIXED",
-                        message=f"Stage table создана, start_scn={scn}")
+                        message=f"{stage_msg}start_scn={scn}")
         except Exception as exc:
             _fail(mid, str(exc), "PREPARING_ERROR")
         finally:
@@ -416,7 +422,13 @@ def _handle_bulk_loading(mid: str, m: dict) -> None:
 
 
 def _handle_bulk_loaded(mid: str, m: dict) -> None:
-    _transition(mid, "STAGE_VALIDATING")
+    strategy = (m.get("migration_strategy") or "STAGE").upper()
+    if strategy == "DIRECT":
+        # Skip stage validate / publish / drop — data is already in the target table
+        _transition(mid, "INDEXES_ENABLING",
+                    message="DIRECT стратегия: данные загружены напрямую, включение индексов")
+    else:
+        _transition(mid, "STAGE_VALIDATING")
 
 
 def _handle_stage_validating(mid: str, m: dict) -> None:

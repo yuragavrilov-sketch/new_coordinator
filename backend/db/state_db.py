@@ -247,6 +247,7 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded               BIGINT NOT NULL DEFAULT 0",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_parallel_degree  INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_batch_size       INTEGER NOT NULL DEFAULT 500000",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_strategy        VARCHAR(32) NOT NULL DEFAULT 'STAGE'",
             ]:
                 cur.execute(col_sql)
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]

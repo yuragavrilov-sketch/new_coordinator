@@ -107,13 +107,16 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
     tgt_schema  = chunk["target_schema"]
-    stage       = chunk["stage_table"]
+    strategy    = chunk.get("migration_strategy", "STAGE")
+    # DIRECT: insert straight into target table; STAGE: insert into stage table
+    dest_table  = chunk["target_table"] if strategy == "DIRECT" else chunk["stage_table"]
     start_scn   = int(chunk["start_scn"])
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
     print(f"[bulk] chunk {chunk_id} seq={chunk['chunk_seq']}"
-          f" ({rowid_start}..{rowid_end}) scn={start_scn}")
+          f" ({rowid_start}..{rowid_end}) scn={start_scn}"
+          f" strategy={strategy} dest={tgt_schema}.{dest_table}")
 
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
@@ -131,7 +134,7 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
                 {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
             )
-            insert_sql, bind_names = _build_insert(cur.description, tgt_schema, stage)
+            insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
 
             while True:
                 rows = cur.fetchmany(BULK_BATCH_SIZE)
