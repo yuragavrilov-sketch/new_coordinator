@@ -172,7 +172,7 @@ def process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
 def bulk_loop() -> None:
     """Main thread: continuously claim + process bulk chunks."""
     print(f"[bulk] loop started (worker_id={WORKER_ID})")
-    pg = db.get_pg_conn()
+    pg = db.get_pg_conn_with_retry()
     try:
         while True:
             try:
@@ -484,7 +484,7 @@ def cdc_manager(stop_event: threading.Event) -> None:
     active: dict = {}
     print(f"[cdc_manager] started (scan every {CDC_SCAN_INTERVAL}s)")
 
-    pg = db.get_pg_conn()
+    pg = db.get_pg_conn_with_retry()
     try:
         while not stop_event.is_set():
             # Reap dead threads

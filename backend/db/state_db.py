@@ -5,12 +5,22 @@ import os
 from datetime import datetime
 import decimal
 
+import re
+
 import psycopg2
 
 PG_DSN = os.environ.get(
     "STATE_DB_DSN",
     "postgresql://postgres:postgres@localhost:5432/migration_state",
 )
+
+
+def _masked_dsn(dsn: str) -> str:
+    """Replace password in DSN URL with ***."""
+    return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+
+
+print(f"[state_db] DSN = {_masked_dsn(PG_DSN)}")
 
 # In-memory fallback
 _mem_configs: dict = {
@@ -22,7 +32,11 @@ _mem_configs: dict = {
 
 
 def get_conn():
-    return psycopg2.connect(PG_DSN)
+    try:
+        return psycopg2.connect(PG_DSN)
+    except Exception as exc:
+        print(f"[state_db] connection FAILED ({_masked_dsn(PG_DSN)}): {exc}")
+        raise
 
 
 # ---------------------------------------------------------------------------

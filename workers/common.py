@@ -8,6 +8,9 @@ import os
 import socket
 from typing import Optional
 
+import re
+import time
+
 import psycopg2
 import psycopg2.extras
 
@@ -16,6 +19,13 @@ STATE_DB_DSN = os.environ.get(
     "postgresql://postgres:postgres@localhost:5432/migration_state",
 )
 WORKER_ID = os.environ.get("WORKER_ID", f"{socket.gethostname()}:{os.getpid()}")
+
+
+def _masked_dsn(dsn: str) -> str:
+    return re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", dsn)
+
+
+print(f"[state_db] DSN = {_masked_dsn(STATE_DB_DSN)}")
 
 _MAX_RETRIES   = 3
 # How long without a heartbeat before a CDC worker is considered stale.
@@ -30,7 +40,32 @@ _STALE_MINUTES = 10
 
 def get_pg_conn():
     """Open a new PostgreSQL connection to the state DB."""
-    return psycopg2.connect(STATE_DB_DSN)
+    try:
+        conn = psycopg2.connect(STATE_DB_DSN)
+        return conn
+    except Exception as exc:
+        print(f"[state_db] connection FAILED ({_masked_dsn(STATE_DB_DSN)}): {exc}")
+        raise
+
+
+def get_pg_conn_with_retry(retries: int = 0) -> "psycopg2.connection":
+    """Connect to state DB, retrying indefinitely (retries=0) or N times.
+
+    Logs each failed attempt so container logs show progress.
+    """
+    attempt = 1
+    while True:
+        try:
+            conn = psycopg2.connect(STATE_DB_DSN)
+            if attempt > 1:
+                print(f"[state_db] connected after {attempt} attempt(s)")
+            return conn
+        except Exception as exc:
+            print(f"[state_db] attempt #{attempt} FAILED ({_masked_dsn(STATE_DB_DSN)}): {exc}")
+            if retries and attempt >= retries:
+                raise
+            attempt += 1
+            time.sleep(5)
 
 
 # ---------------------------------------------------------------------------

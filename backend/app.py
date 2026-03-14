@@ -54,7 +54,10 @@ def _try_init_db() -> bool:
 def _db_retry_loop() -> None:
     """Background thread: retry init_db every 5 s until success, then start orchestrator."""
     import time
+    attempt = 1
     while not _try_init_db():
+        print(f"[db] retry #{attempt} in 5 s...")
+        attempt += 1
         time.sleep(5)
     # DB became available — start orchestrator if not already running
     if not orchestrator_mod.is_running():
@@ -62,7 +65,7 @@ def _db_retry_loop() -> None:
 
 
 if not _try_init_db():
-    print("[db] will retry in background")
+    print("[db] will retry in background every 5 s")
 
 # ── Service checkers ──────────────────────────────────────────────────────────
 from services.checkers import check_oracle, check_kafka, check_kafka_connect
