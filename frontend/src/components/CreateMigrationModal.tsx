@@ -32,12 +32,14 @@ interface FormData {
 
 function toSnake(s: string) { return s.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase(); }
 
+function shortId() { return Math.random().toString(36).slice(2, 8); }
+
 function autoFields(ss: string, st: string) {
-  const s = toSnake(ss), t = toSnake(st);
+  const s = toSnake(ss), t = toSnake(st), id = shortId();
   return {
-    connector_name:   `${s}_${t}_connector`,
-    topic_prefix:     `${s}.${t}`,
-    consumer_group:   `${s}_${t}_cg`,
+    connector_name:   `${s}_${t}_${id}_connector`,
+    topic_prefix:     `${s}.${t}.${id}`,
+    consumer_group:   `${s}_${t}_${id}_cg`,
     stage_table_name: `STG_${ss.toUpperCase()}_${st.toUpperCase()}`,
   };
 }

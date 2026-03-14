@@ -267,6 +267,12 @@ def delete_migration(migration_id: str):
                                  f"Допустимо: {', '.join(sorted(_DELETABLE_PHASES))}"
                     }), 409
                 cur.execute(
+                    "SELECT connector_name FROM migrations WHERE migration_id = %s",
+                    (migration_id,),
+                )
+                crow = cur.fetchone()
+                connector_name = crow[0] if crow else None
+                cur.execute(
                     "DELETE FROM migration_state_history WHERE migration_id = %s",
                     (migration_id,),
                 )
@@ -277,6 +283,12 @@ def delete_migration(migration_id: str):
             conn.commit()
         finally:
             conn.close()
+        # Delete Debezium connector best-effort (after DB commit so row is gone)
+        if connector_name:
+            try:
+                debezium.delete_connector(connector_name)
+            except Exception as exc:
+                print(f"[delete_migration] connector delete failed (ignored): {exc}")
         return jsonify({"ok": True})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
