@@ -499,9 +499,153 @@ function InfoGrid({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
+// ── Errors tab ────────────────────────────────────────────────────────────────
+
+interface FailedChunk {
+  chunk_id: string;
+  chunk_seq: number;
+  error_text: string | null;
+  retry_count: number;
+  rowid_start: string;
+  rowid_end: string;
+}
+
+function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migrationId: string }) {
+  const [chunks,  setChunks]  = useState<FailedChunk[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/migrations/${migrationId}/chunks`)
+      .then(r => r.json())
+      .then(d => {
+        const failed = ((d.chunks ?? []) as FailedChunk[]).filter(
+          c => (c as any).status === "FAILED" && c.error_text
+        );
+        setChunks(failed);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [migrationId]);
+
+  const hasMigError = !!(detail.error_code || detail.error_text);
+
+  if (!hasMigError && !loading && chunks.length === 0) {
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", padding: "40px 0", gap: 8,
+      }}>
+        <div style={{ fontSize: 24 }}>✓</div>
+        <div style={{ color: "#22c55e", fontSize: 13, fontWeight: 600 }}>Ошибок нет</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* ── Migration-level error ── */}
+      {hasMigError && (
+        <div>
+          <SectionHeader>Ошибка миграции</SectionHeader>
+          <div style={{
+            background: "#1a0808", border: "1px solid #7f1d1d",
+            borderRadius: 7, padding: 14,
+          }}>
+            {detail.error_code && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Код</div>
+                <span style={{
+                  fontFamily: "monospace", fontSize: 13, color: "#fca5a5",
+                  fontWeight: 700, background: "#2d0a0a",
+                  border: "1px solid #7f1d1d", borderRadius: 4, padding: "2px 8px",
+                }}>
+                  {detail.error_code}
+                </span>
+              </div>
+            )}
+            {detail.failed_phase && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Фаза</div>
+                <span style={{ fontSize: 13, color: "#f87171" }}>{detail.failed_phase}</span>
+              </div>
+            )}
+            {detail.error_text && (
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Подробности</div>
+                <pre style={{
+                  margin: 0, fontFamily: "monospace", fontSize: 12, color: "#fca5a5",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  background: "#0f0404", borderRadius: 5, padding: "10px 12px",
+                  maxHeight: 320, overflowY: "auto",
+                  border: "1px solid #3b0f0f",
+                }}>
+                  {detail.error_text}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Failed chunks ── */}
+      {loading ? (
+        <div style={{ color: "#475569", fontSize: 12 }}>Загрузка ошибок чанков…</div>
+      ) : chunks.length > 0 && (
+        <div>
+          <SectionHeader>Ошибки чанков ({chunks.length})</SectionHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {chunks.map(c => (
+              <div key={c.chunk_id} style={{
+                background: "#0a0812", border: "1px solid #3b1515",
+                borderRadius: 6, overflow: "hidden",
+              }}>
+                {/* chunk header */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "6px 12px",
+                  background: "#120610", borderBottom: "1px solid #2d1010",
+                }}>
+                  <span style={{ fontSize: 12, color: "#fca5a5", fontWeight: 700 }}>
+                    Chunk #{c.chunk_seq}
+                  </span>
+                  <span style={{
+                    fontSize: 10, color: "#475569", fontFamily: "monospace",
+                    flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {c.rowid_start} … {c.rowid_end}
+                  </span>
+                  {c.retry_count > 0 && (
+                    <span style={{
+                      fontSize: 10, color: "#fbbf24", background: "#451a03",
+                      border: "1px solid #78350f", borderRadius: 3, padding: "1px 7px",
+                      flexShrink: 0,
+                    }}>
+                      {c.retry_count} повтор(а)
+                    </span>
+                  )}
+                </div>
+                {/* error text */}
+                <pre style={{
+                  margin: 0, fontFamily: "monospace", fontSize: 11, color: "#fca5a5",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  padding: "8px 12px", maxHeight: 180, overflowY: "auto",
+                }}>
+                  {c.error_text}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "stats" | "history";
+type Tab = "overview" | "stats" | "errors" | "history";
 
 export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: Props) {
   const [detail,    setDetail]    = useState<MigrationDetail | null>(null);
@@ -531,9 +675,30 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
 
   const phase = detail?.phase ?? "";
 
-  const tabs: { id: Tab; label: string }[] = [
+  const errorCount = detail
+    ? (detail.error_code ? 1 : 0) + (detail.chunks_failed ?? 0)
+    : 0;
+
+  const tabs: { id: Tab; label: React.ReactNode }[] = [
     { id: "overview", label: "Обзор" },
     { id: "stats",    label: "Статистика" },
+    {
+      id: "errors",
+      label: (
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          Ошибки
+          {errorCount > 0 && (
+            <span style={{
+              fontSize: 10, fontWeight: 700,
+              background: "#7f1d1d", color: "#fca5a5",
+              borderRadius: 10, padding: "0 5px", lineHeight: "16px",
+            }}>
+              {errorCount}
+            </span>
+          )}
+        </span>
+      ),
+    },
     { id: "history",  label: `История${detail ? ` (${detail.history.length})` : ""}` },
   ];
 
@@ -608,6 +773,9 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           )}
           {activeTab === "stats" && (
             <StatisticsTab detail={detail} />
+          )}
+          {activeTab === "errors" && (
+            <ErrorsTab detail={detail} migrationId={migrationId} />
           )}
           {activeTab === "history" && (
             <HistoryTab history={detail.history} />
