@@ -58,6 +58,9 @@ export interface Migration {
   connector_status: string | null;
   kafka_lag: number | null;
   kafka_lag_checked_at: string | null;
+  rows_loaded: number;
+  max_parallel_workers: number;
+  migration_strategy: string;
 }
 
 export interface MigrationSummary {
