@@ -68,9 +68,26 @@ def validate_stage(
             sample_keys = cur.fetchall()
 
         if not sample_keys:
+            # Stage is empty — only OK if the source was also empty at the SCN
+            with src_conn.cursor() as _cur:
+                _cur.execute(
+                    f'SELECT COUNT(*) FROM "{source_schema.upper()}"."{source_table.upper()}"'
+                    f" AS OF SCN :scn",
+                    {"scn": scn},
+                )
+                src_count = int(_cur.fetchone()[0])
+            if src_count > 0:
+                return ValidationResult(
+                    ok=False,
+                    message=(
+                        f"Stage таблица пуста, но источник содержит "
+                        f"{src_count} строк (AS OF SCN {scn}) — bulk load неполный"
+                    ),
+                    details={"stage_rows": 0, "source_rows": src_count},
+                )
             return ValidationResult(
                 ok=True,
-                message="Stage таблица пуста — нечего проверять",
+                message="Stage таблица пуста — источник тоже пуст",
                 details={"sample_size": 0},
             )
 

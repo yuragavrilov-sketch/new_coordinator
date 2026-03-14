@@ -510,6 +510,11 @@ def retry_failed_chunks(migration_id: str):
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"error": "Not found"}), 404
+                if row[0] not in ("BULK_LOADING", "FAILED"):
+                    return jsonify({
+                        "error": f"Повтор чанков недоступен в фазе {row[0]}. "
+                                 "Допустимо: BULK_LOADING, FAILED"
+                    }), 409
 
                 cur.execute("""
                     UPDATE migration_chunks

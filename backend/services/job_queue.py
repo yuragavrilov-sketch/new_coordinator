@@ -204,16 +204,23 @@ def reset_stale_chunks(conn, stale_minutes: int = _STALE_AFTER_MINUTES) -> int:
     """
     with conn.cursor() as cur:
         cur.execute("""
-            UPDATE migration_chunks
+            UPDATE migration_chunks c
             SET    status     = 'PENDING',
                    worker_id  = NULL,
                    claimed_at = NULL,
                    started_at = NULL
-            WHERE  status IN ('CLAIMED', 'RUNNING')
-              AND  claimed_at < NOW() - INTERVAL '%s minutes'
+            WHERE  c.status IN ('CLAIMED', 'RUNNING')
+              AND  c.claimed_at < NOW() - INTERVAL '%s minutes'
+              AND  EXISTS (
+                  SELECT 1 FROM migrations m
+                  WHERE  m.migration_id = c.migration_id
+                    AND  m.phase = 'BULK_LOADING'
+              )
         """, (stale_minutes,))
         count = cur.rowcount
     conn.commit()
+    if count:
+        print(f"[job_queue] reset {count} stale chunk(s) to PENDING")
     return count
 
 
