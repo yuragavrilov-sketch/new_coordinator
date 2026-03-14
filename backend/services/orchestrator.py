@@ -479,19 +479,7 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
             stg_table  = m["stage_table_name"]
             chunk_size = int(m.get("baseline_batch_size") or 500_000)
 
-            # 1. TRUNCATE target table
-            conn = oracle_scn.open_oracle_conn(dst_cfg)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        f'TRUNCATE TABLE "{tgt_schema.upper()}"."{tgt_table.upper()}"'
-                    )
-                conn.commit()
-                print(f"[orchestrator] TRUNCATE {tgt_schema}.{tgt_table} done")
-            finally:
-                conn.close()
-
-            # 2. Create BASELINE chunks from stage table on target
+            # Create BASELINE chunks from stage table on target
             task_id = f"BAS_{m['migration_id']}"
             chunks = oracle_chunker.create_chunks(
                 dst_cfg, tgt_schema, stg_table, chunk_size, task_id
