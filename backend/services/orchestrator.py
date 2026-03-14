@@ -463,6 +463,7 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 m["target_table"],
                 m["stage_table_name"],
                 parallel_degree=int(m.get("baseline_parallel_degree") or 1),
+                batch_size=int(m.get("baseline_batch_size") or 500_000),
             )
             _transition(mid, "BASELINE_PUBLISHED",
                         message=f"Вставлено {rows} строк в целевую таблицу")
