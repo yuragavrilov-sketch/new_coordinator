@@ -60,7 +60,8 @@ def publish_baseline(
             f'INSERT /*+ APPEND_VALUES */ INTO {tgt} ({col_list}) '
             f'VALUES ({", ".join(bind_names)})'
         )
-        select_sql = f"SELECT {col_list} FROM {stg} ORDER BY ROWID"
+        # No ORDER BY — full scan in physical order, avoids sort → no TEMP usage
+        select_sql = f"SELECT {col_list} FROM {stg}"
 
         rows_inserted = 0
         with conn.cursor() as src_cur:
