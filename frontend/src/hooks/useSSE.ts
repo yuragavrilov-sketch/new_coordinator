@@ -47,11 +47,20 @@ export interface KafkaLagEvent {
   ts: string;
 }
 
+export interface BaselineProgressEvent {
+  type: "baseline_progress";
+  migration_id: string;
+  baseline_chunks_done: number;
+  baseline_chunks_total: number;
+  ts: string;
+}
+
 export type SSEEvent =
   | MigrationPhaseEvent
   | ChunkProgressEvent
   | ConnectorStatusEvent
-  | KafkaLagEvent;
+  | KafkaLagEvent
+  | BaselineProgressEvent;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 
@@ -98,7 +107,8 @@ export function useSSE({ url, maxEvents = 200 }: UseSSEOptions) {
           parsed.type === "migration_phase"  ||
           parsed.type === "chunk_progress"   ||
           parsed.type === "connector_status" ||
-          parsed.type === "kafka_lag"
+          parsed.type === "kafka_lag"        ||
+          parsed.type === "baseline_progress"
         ) {
           setEvents((prev) => [parsed as SSEEvent, ...prev].slice(0, maxEvents));
         }
