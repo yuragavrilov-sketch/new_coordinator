@@ -65,6 +65,7 @@ def row_to_dict(cursor, row: tuple) -> dict:
 # ---------------------------------------------------------------------------
 
 def init_db() -> None:
+    print("[state_db] running schema init / migrations...")
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -170,7 +171,7 @@ def init_db() -> None:
                     ON migrations(state_changed_at DESC)
             """)
 
-            # ── New columns on migrations ─────────────────────────────────
+            # ── Column migrations on migrations table (idempotent) ────────────
             for col_sql in [
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_rows           BIGINT",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_chunks         INTEGER",
@@ -182,13 +183,10 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag            BIGINT",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS kafka_lag_checked_at TIMESTAMPTZ",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded          BIGINT NOT NULL DEFAULT 0",
-                # migration_cdc_state columns (table created below, these are for upgrades)
-                "ALTER TABLE migration_cdc_state ADD COLUMN IF NOT EXISTS rows_applied BIGINT NOT NULL DEFAULT 0",
             ]:
-                try:
-                    cur.execute(col_sql)
-                except Exception:
-                    pass  # table may not exist yet on first run — created below
+                cur.execute(col_sql)
+                col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]
+                print(f"[state_db]   column ok: migrations.{col_name}")
 
             # ── migration_chunks ──────────────────────────────────────────
             cur.execute("""
@@ -237,8 +235,14 @@ def init_db() -> None:
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            # Column migrations for migration_cdc_state (upgrades from older schema)
+            cur.execute(
+                "ALTER TABLE migration_cdc_state ADD COLUMN IF NOT EXISTS rows_applied BIGINT NOT NULL DEFAULT 0"
+            )
+            print("[state_db]   column ok: migration_cdc_state.rows_applied")
 
         conn.commit()
+        print("[state_db] schema init complete")
     finally:
         conn.close()
 
