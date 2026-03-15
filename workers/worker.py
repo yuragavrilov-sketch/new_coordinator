@@ -167,10 +167,16 @@ def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> int:
     rows_loaded = 0
     try:
         with dst_conn.cursor() as cur:
+            # Enable parallel DML for this session so the PARALLEL hint is honoured.
+            cur.execute("ALTER SESSION ENABLE PARALLEL DML")
+            # APPEND   — direct-path insert (skips buffer cache, skips redo when
+            #            the table is in NOLOGGING mode set by baseline_publishing).
+            # PARALLEL — Oracle may spawn parallel servers for both the INSERT and
+            #            the SELECT scan of the stage table.
             cur.execute(
-                f'INSERT INTO {tgt} '
-                f'SELECT * FROM {stg} '
-                f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
+                f'INSERT /*+ APPEND PARALLEL(tgt, DEFAULT) */ INTO {tgt} tgt '
+                f'SELECT /*+ PARALLEL(stg, DEFAULT) */ * FROM {stg} stg '
+                f'WHERE stg.ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
                 {"rs": rowid_start, "re": rowid_end},
             )
             rows_loaded = cur.rowcount if cur.rowcount >= 0 else 0
@@ -181,8 +187,8 @@ def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> int:
             try:
                 with dst_conn.cursor() as cur:
                     cur.execute(
-                        f'SELECT COUNT(*) FROM {stg} '
-                        f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
+                        f'SELECT COUNT(*) FROM {stg} stg '
+                        f'WHERE stg.ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
                         {"rs": rowid_start, "re": rowid_end},
                     )
                     rows_loaded = cur.fetchone()[0]

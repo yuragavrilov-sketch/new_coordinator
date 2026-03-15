@@ -245,6 +245,20 @@ def execute_target_action(conn, action: str, schema: str, table: str, object_nam
     conn.commit()
 
 
+def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
+    """Switch the target table between NOLOGGING and LOGGING mode.
+
+    NOLOGGING before baseline load skips redo generation for direct-path
+    inserts (APPEND hint), dramatically reducing I/O.  Restore to LOGGING
+    afterwards so normal DML is protected.
+    """
+    s, t = schema.upper(), table.upper()
+    mode = "NOLOGGING" if nologging else "LOGGING"
+    with conn.cursor() as cur:
+        cur.execute(f'ALTER TABLE "{s}"."{t}" {mode}')
+    conn.commit()
+
+
 def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -> list[str]:
     """Mark indexes on *table* as UNUSABLE so Oracle skips index maintenance
     during the subsequent bulk INSERT (SKIP_UNUSABLE_INDEXES = TRUE is the
@@ -325,7 +339,7 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
         for idx in info["indexes"]:
             if idx["status"] != "VALID":
                 try:
-                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD')
+                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
                     enabled["indexes"].append(idx["name"])
                 except Exception as exc:
                     errors["indexes"].append({"name": idx["name"], "error": str(exc)})

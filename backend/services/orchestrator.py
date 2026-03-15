@@ -505,6 +505,11 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 )
                 if disabled_trg:
                     print(f"[baseline_publishing] disabled triggers: {disabled_trg}")
+
+                # Switch to NOLOGGING so direct-path INSERTs (APPEND hint) skip
+                # redo generation.  Restored to LOGGING in INDEXES_ENABLING.
+                oracle_browser.set_table_logging(conn, tgt_schema, tgt_table, nologging=True)
+                print(f"[baseline_publishing] set NOLOGGING on {tgt_quoted}")
             finally:
                 conn.close()
 
@@ -632,6 +637,12 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
             dst_cfg = _oracle_cfg(m["target_connection_id"])
             conn = oracle_scn.open_oracle_conn(dst_cfg)
             try:
+                # Restore LOGGING before rebuilding indexes — indexes themselves
+                # are rebuilt NOLOGGING (inside enable_all_disabled_objects), but
+                # the table should return to protected mode for ongoing CDC DML.
+                oracle_browser.set_table_logging(
+                    conn, m["target_schema"], m["target_table"], nologging=False,
+                )
                 result = oracle_browser.enable_all_disabled_objects(
                     conn, m["target_schema"], m["target_table"],
                 )
