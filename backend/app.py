@@ -172,6 +172,10 @@ orchestrator_mod.init(
     load_configs_fn=_load_cfg,
     broadcast_fn=broadcast,
 )
+# Wire manual trigger into migrations routes (late binding — orchestrator must be
+# initialised first so trigger_indexes_enabling can reference _state["get_conn"]).
+mig_mod._state["enable_indexes"] = orchestrator_mod.trigger_indexes_enabling
+
 if _db_available["value"]:
     orchestrator_mod.start_orchestrator()
 else:

@@ -798,6 +798,55 @@ function ErrorsTab({ detail }: { detail: MigrationDetail }) {
   );
 }
 
+// ── EnableIndexesButton ───────────────────────────────────────────────────────
+
+function EnableIndexesButton({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+  const [busy,  setBusy]  = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  async function handleClick() {
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/enable-indexes`, { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        style={{
+          background: busy ? "#1e3a5f" : "#1d4ed8",
+          color: busy ? "#64748b" : "#e2e8f0",
+          border: "1px solid #2563eb",
+          borderRadius: 5,
+          padding: "5px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Запуск..." : "Включить индексы"}
+      </button>
+      {errMsg && (
+        <span style={{ fontSize: 11, color: "#fca5a5" }}>{errMsg}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "stats" | "chunks" | "errors" | "history";
@@ -895,6 +944,9 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           <span style={{ fontWeight: 700, fontSize: 14, color: "#e2e8f0", flex: 1 }}>
             {detail?.migration_name ?? "Загрузка..."}
           </span>
+          {phase === "INDEXES_ENABLING" && (
+            <EnableIndexesButton migrationId={migrationId} onDone={loadDetail} />
+          )}
           <button onClick={onClose} style={{
             background: "none", border: "none", color: "#475569",
             cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px",

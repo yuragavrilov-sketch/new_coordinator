@@ -40,12 +40,14 @@ _LIST_COLS = """
 _state: dict = {}
 
 
-def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn, load_configs_fn=None):
-    _state["get_conn"]      = get_conn_fn
-    _state["row_to_dict"]   = row_to_dict_fn
-    _state["db_available"]  = db_available_ref
-    _state["broadcast"]     = broadcast_fn
-    _state["load_configs"]  = load_configs_fn
+def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn,
+         load_configs_fn=None, enable_indexes_fn=None):
+    _state["get_conn"]        = get_conn_fn
+    _state["row_to_dict"]     = row_to_dict_fn
+    _state["db_available"]    = db_available_ref
+    _state["broadcast"]       = broadcast_fn
+    _state["load_configs"]    = load_configs_fn
+    _state["enable_indexes"]  = enable_indexes_fn
 
 
 def _db_ok() -> bool:
@@ -581,6 +583,24 @@ def retry_failed_chunks(migration_id: str):
         finally:
             conn.close()
         return jsonify({"ok": True, "reset": reset_count})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/api/migrations/<migration_id>/enable-indexes")
+def enable_indexes(migration_id: str):
+    """Manually trigger INDEXES_ENABLING work (rebuild indexes, re-enable constraints
+    and triggers).  Migration must be in INDEXES_ENABLING phase."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("enable_indexes")
+    if fn is None:
+        return jsonify({"error": "enable_indexes not wired"}), 500
+    try:
+        fn(migration_id)
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
