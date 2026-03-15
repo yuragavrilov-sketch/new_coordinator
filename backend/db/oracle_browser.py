@@ -260,20 +260,24 @@ def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
 
 
 def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -> list[str]:
-    """Mark indexes on *table* as UNUSABLE so Oracle skips index maintenance
-    during the subsequent bulk INSERT (SKIP_UNUSABLE_INDEXES = TRUE is the
-    Oracle session default, so the INSERT proceeds without touching the index
-    structures).  Indexes are rebuilt by enable_all_disabled_objects afterwards.
+    """Mark non-unique indexes on *table* as UNUSABLE so Oracle skips index
+    maintenance during the subsequent bulk INSERT.
 
-    skip_pk=True (default): leave the primary-key index VALID so that
-    ORA-00001 is still raised for PK violations during the INSERT,
-    which the baseline worker already handles gracefully.
+    SKIP_UNUSABLE_INDEXES = TRUE (Oracle session default) causes the INSERT to
+    bypass UNUSABLE indexes — but ONLY for non-unique indexes.  Oracle always
+    enforces unique indexes regardless of that setting; marking a unique index
+    UNUSABLE causes ORA-26026 on INSERT (ORA-12801 with parallel DML).
+
+    Therefore only non-unique, non-PK indexes are marked UNUSABLE here.
+    PK and unique indexes are left VALID so Oracle can still enforce
+    uniqueness / catch PK violations during the load.
 
     Returns the list of index names that were marked UNUSABLE.
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
 
+    # Collect index names that back a PK constraint (skip_pk=True)
     pk_index_names: set[str] = set()
     if skip_pk:
         for con in info["constraints"]:
@@ -284,6 +288,10 @@ def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -
     with conn.cursor() as cur:
         for idx in info["indexes"]:
             if idx["status"] != "VALID":
+                continue
+            # Always skip unique indexes — SKIP_UNUSABLE_INDEXES does not apply
+            # to them and marking them UNUSABLE raises ORA-26026 on INSERT.
+            if idx["unique"]:
                 continue
             if skip_pk and idx["name"].upper() in pk_index_names:
                 continue
