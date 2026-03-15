@@ -508,10 +508,12 @@ function InfoGrid({ title, children }: { title: string; children: React.ReactNod
 interface FailedChunk {
   chunk_id: string;
   chunk_seq: number;
+  chunk_type: string;
   error_text: string | null;
   retry_count: number;
   rowid_start: string;
   rowid_end: string;
+  status: string;
 }
 
 function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migrationId: string }) {
@@ -520,13 +522,16 @@ function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migration
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/migrations/${migrationId}/chunks`)
-      .then(r => r.json())
-      .then(d => {
-        const failed = ((d.chunks ?? []) as FailedChunk[]).filter(
-          c => (c as any).status === "FAILED" && c.error_text
-        );
-        setChunks(failed);
+    Promise.all([
+      fetch(`/api/migrations/${migrationId}/chunks?chunk_type=BULK`).then(r => r.json()),
+      fetch(`/api/migrations/${migrationId}/chunks?chunk_type=BASELINE`).then(r => r.json()),
+    ])
+      .then(([bulk, baseline]) => {
+        const all = [
+          ...((bulk.chunks     ?? []) as FailedChunk[]),
+          ...((baseline.chunks ?? []) as FailedChunk[]),
+        ];
+        setChunks(all.filter(c => c.status === "FAILED" && c.error_text));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -613,6 +618,14 @@ function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migration
                 }}>
                   <span style={{ fontSize: 12, color: "#fca5a5", fontWeight: 700 }}>
                     Chunk #{c.chunk_seq}
+                  </span>
+                  <span style={{
+                    fontSize: 10, color: c.chunk_type === "BASELINE" ? "#a78bfa" : "#60a5fa",
+                    background: c.chunk_type === "BASELINE" ? "#1e1030" : "#0c1a30",
+                    border: `1px solid ${c.chunk_type === "BASELINE" ? "#4c1d95" : "#1e3a5f"}`,
+                    borderRadius: 3, padding: "1px 6px", flexShrink: 0,
+                  }}>
+                    {c.chunk_type ?? "BULK"}
                   </span>
                   <span style={{
                     fontSize: 10, color: "#475569", fontFamily: "monospace",
