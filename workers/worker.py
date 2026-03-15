@@ -144,8 +144,15 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     return rows_loaded
 
 
-def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> None:
-    """BASELINE: INSERT INTO target SELECT * FROM stage WHERE ROWID BETWEEN ... (no SCN)."""
+def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> int:
+    """BASELINE: INSERT INTO target SELECT * FROM stage WHERE ROWID BETWEEN ... (no SCN).
+
+    Oracle commit and PG progress update are intentionally separated:
+    if PG fails after Oracle commits, the exception propagates without
+    attempting to rollback an already-committed Oracle transaction.
+    If the chunk is retried after a partial commit, ORA-00001 is caught
+    and treated as idempotent success (rows already present from prior attempt).
+    """
     chunk_id    = chunk["chunk_id"]
     tgt_schema  = chunk["target_schema"]
     tgt_table   = chunk["target_table"]
@@ -153,26 +160,47 @@ def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
+    tgt = f'"{tgt_schema.upper()}"."{tgt_table.upper()}"'
+    stg = f'"{tgt_schema.upper()}"."{stg_table.upper()}"'
+
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
     try:
         with dst_conn.cursor() as cur:
             cur.execute(
-                f'INSERT INTO "{tgt_schema.upper()}"."{tgt_table.upper()}" '
-                f'SELECT * FROM "{tgt_schema.upper()}"."{stg_table.upper()}" '
+                f'INSERT INTO {tgt} '
+                f'SELECT * FROM {stg} '
                 f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
                 {"rs": rowid_start, "re": rowid_end},
             )
             rows_loaded = cur.rowcount if cur.rowcount >= 0 else 0
         dst_conn.commit()
-        db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
-    except Exception:
-        try: dst_conn.rollback()
-        except Exception: pass
-        raise
+    except Exception as exc:
+        if "ORA-00001" in str(exc):
+            # Rows already committed by a previous attempt — count from stage and treat as done
+            try:
+                with dst_conn.cursor() as cur:
+                    cur.execute(
+                        f'SELECT COUNT(*) FROM {stg} '
+                        f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)',
+                        {"rs": rowid_start, "re": rowid_end},
+                    )
+                    rows_loaded = cur.fetchone()[0]
+                print(f"[worker] chunk {chunk_id} ORA-00001 — already committed, "
+                      f"treating as done ({rows_loaded} rows)")
+            except Exception:
+                rows_loaded = 0
+        else:
+            try: dst_conn.rollback()
+            except Exception: pass
+            raise
     finally:
         try: dst_conn.close()
         except Exception: pass
+
+    # Oracle committed — update PG outside try/except so a PG failure here
+    # does NOT trigger rollback of the already-committed Oracle transaction.
+    db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
     return rows_loaded
 
 
