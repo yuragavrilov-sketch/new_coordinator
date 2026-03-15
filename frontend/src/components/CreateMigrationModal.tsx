@@ -23,6 +23,7 @@ interface FormData {
   stage_table_name: string;
   chunk_size: number;
   max_parallel_workers: number;
+  baseline_parallel_degree: number;
   validate_hash_sample: boolean;
   effective_key_type: string;
   effective_key_columns: string[];
@@ -306,6 +307,7 @@ const INIT: FormData = {
   connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "",
   chunk_size: 1_000_000,
   max_parallel_workers: 1,
+  baseline_parallel_degree: 4,
   validate_hash_sample: false,
   effective_key_type: "", effective_key_columns: [], selected_uk_index: 0,
 };
@@ -454,6 +456,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       consumer_group:             form.consumer_group.trim(),
       chunk_size:                 form.chunk_size,
       max_parallel_workers:       form.max_parallel_workers,
+      baseline_parallel_degree:   form.baseline_parallel_degree,
       validate_hash_sample:       form.validate_hash_sample,
       source_pk_exists:           (tableInfo?.pk_columns.length ?? 0) > 0,
       source_uk_exists:           (tableInfo?.uk_constraints.length ?? 0) > 0,
@@ -624,9 +627,13 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                 <input style={S.input} type="number" value={form.chunk_size} min={1}
                   onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
               </Field>
-              <Field label="Макс. воркеров" hint="Параллельных воркеров (1–16)">
+              <Field label="Воркеры (bulk)" hint="Параллельных воркеров для bulk-загрузки (1–16)">
                 <input style={S.input} type="number" value={form.max_parallel_workers} min={1} max={16}
                   onChange={e => setF({ max_parallel_workers: Math.max(1, Math.min(16, parseInt(e.target.value) || 1)) })} />
+              </Field>
+              <Field label="Воркеры (baseline)" hint="Параллельных воркеров для baseline-загрузки (1–32)">
+                <input style={S.input} type="number" value={form.baseline_parallel_degree} min={1} max={32}
+                  onChange={e => setF({ baseline_parallel_degree: Math.max(1, Math.min(32, parseInt(e.target.value) || 4)) })} />
               </Field>
             </div>
             <Field label="Валидация stage">

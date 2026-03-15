@@ -118,10 +118,12 @@ def open_oracle(connection_id: str, configs: dict):
 
 def claim_chunk(conn) -> Optional[dict]:
     """
-    Atomically claim one PENDING chunk from a BULK_LOADING migration.
+    Atomically claim one PENDING chunk (BULK or BASELINE).
 
-    Respects max_parallel_workers: skips any migration that already has
-    >= max_parallel_workers chunks in CLAIMED or RUNNING state.
+    Respects per-type parallelism limits:
+      BULK     chunks → max_parallel_workers
+      BASELINE chunks → baseline_parallel_degree
+    Skips any migration that already has >= limit chunks in CLAIMED/RUNNING state.
 
     Fair scheduling: among eligible migrations prefers the one with the
     fewest active chunks, then earliest state_changed_at, then chunk_seq.
@@ -145,7 +147,11 @@ def claim_chunk(conn) -> Optional[dict]:
                       WHERE  c2.migration_id = c.migration_id
                         AND  c2.chunk_type   = c.chunk_type
                         AND  c2.status IN ('CLAIMED', 'RUNNING')
-                  ) < GREATEST(COALESCE(m.max_parallel_workers, 1), 1)
+                  ) < GREATEST(
+                      CASE WHEN COALESCE(c.chunk_type, 'BULK') = 'BASELINE'
+                           THEN COALESCE(m.baseline_parallel_degree, 1)
+                           ELSE COALESCE(m.max_parallel_workers, 1)
+                      END, 1)
                 ORDER BY (
                       SELECT COUNT(*)
                       FROM   migration_chunks c3

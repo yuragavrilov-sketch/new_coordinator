@@ -60,6 +60,8 @@ export interface Migration {
   kafka_lag_checked_at: string | null;
   rows_loaded: number;
   max_parallel_workers: number;
+  baseline_parallel_degree: number;
+  baseline_batch_size: number;
   migration_strategy: string;
   baseline_chunks_total: number | null;
   baseline_chunks_done: number;

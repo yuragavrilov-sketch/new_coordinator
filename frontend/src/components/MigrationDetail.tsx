@@ -456,8 +456,9 @@ function OverviewTab({
       </InfoGrid>
 
       <InfoGrid title="Параметры загрузки">
-        <InfoRow label="Chunk size"         value={detail.chunk_size?.toLocaleString()} />
-        <InfoRow label="Max workers"        value={detail.max_parallel_workers} />
+        <InfoRow label="Chunk size"              value={detail.chunk_size?.toLocaleString()} />
+        <InfoRow label="Воркеры bulk"            value={detail.max_parallel_workers} />
+        <InfoRow label="Воркеры baseline"        value={detail.baseline_parallel_degree} />
         <InfoRow label="Total rows"         value={detail.total_rows != null ? fmtNum(detail.total_rows) : "—"} />
         <InfoRow label="Total chunks"       value={detail.total_chunks ?? "—"} />
         <InfoRow label="Chunks done"        value={detail.chunks_done} />
