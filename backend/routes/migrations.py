@@ -507,9 +507,20 @@ def get_migration_lag(migration_id: str):
 
 @bp.post("/api/migrations/<migration_id>/retry-chunks")
 def retry_failed_chunks(migration_id: str):
-    """Reset all FAILED chunks back to PENDING so workers will retry them."""
+    """Reset FAILED chunks back to PENDING so workers will retry them.
+
+    Optional query param: chunk_type=BULK|BASELINE (default: reset all failed chunks).
+    Allowed phases: BULK_LOADING, BASELINE_LOADING, FAILED.
+    """
     if not _db_ok():
         return jsonify({"error": "DB unavailable"}), 503
+
+    chunk_type = request.args.get("chunk_type", "").strip().upper()
+    if chunk_type not in ("BULK", "BASELINE"):
+        chunk_type = ""  # reset all types
+
+    _ALLOWED = {"BULK_LOADING", "BASELINE_LOADING", "FAILED"}
+
     try:
         conn = _state["get_conn"]()
         try:
@@ -521,24 +532,39 @@ def retry_failed_chunks(migration_id: str):
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"error": "Not found"}), 404
-                if row[0] not in ("BULK_LOADING", "FAILED"):
+                if row[0] not in _ALLOWED:
                     return jsonify({
                         "error": f"Повтор чанков недоступен в фазе {row[0]}. "
-                                 "Допустимо: BULK_LOADING, FAILED"
+                                 f"Допустимо: {', '.join(sorted(_ALLOWED))}"
                     }), 409
 
-                cur.execute("""
-                    UPDATE migration_chunks
-                    SET    status       = 'PENDING',
-                           worker_id   = NULL,
-                           claimed_at  = NULL,
-                           started_at  = NULL,
-                           completed_at = NULL,
-                           error_text  = NULL,
-                           retry_count = 0
-                    WHERE  migration_id = %s
-                      AND  status       = 'FAILED'
-                """, (migration_id,))
+                if chunk_type:
+                    cur.execute("""
+                        UPDATE migration_chunks
+                        SET    status        = 'PENDING',
+                               worker_id    = NULL,
+                               claimed_at   = NULL,
+                               started_at   = NULL,
+                               completed_at = NULL,
+                               error_text   = NULL,
+                               retry_count  = 0
+                        WHERE  migration_id = %s
+                          AND  status       = 'FAILED'
+                          AND  COALESCE(chunk_type, 'BULK') = %s
+                    """, (migration_id, chunk_type))
+                else:
+                    cur.execute("""
+                        UPDATE migration_chunks
+                        SET    status        = 'PENDING',
+                               worker_id    = NULL,
+                               claimed_at   = NULL,
+                               started_at   = NULL,
+                               completed_at = NULL,
+                               error_text   = NULL,
+                               retry_count  = 0
+                        WHERE  migration_id = %s
+                          AND  status       = 'FAILED'
+                    """, (migration_id,))
                 reset_count = cur.rowcount
 
                 # Reset the migration's failed-chunk counter

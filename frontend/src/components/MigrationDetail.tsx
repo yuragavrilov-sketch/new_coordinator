@@ -159,10 +159,6 @@ function StatisticsTab({ detail }: { detail: MigrationDetail }) {
   const totalMs = periods.reduce((sum, p) => sum + p.durationMs, 0);
   const maxMs   = Math.max(1, ...periods.map(p => p.durationMs));
 
-  // Key metrics
-  const startTime = detail.created_at
-    ? new Date(detail.created_at) : null;
-
   const bulkPeriod  = periods.find(p => p.phase === "BULK_LOADING");
   const bulkSec     = bulkPeriod ? bulkPeriod.durationMs / 1000 : null;
   const rowsLoaded  = detail.rows_loaded ?? 0;
@@ -503,43 +499,247 @@ function InfoGrid({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
-// ── Errors tab ────────────────────────────────────────────────────────────────
+// ── Chunks tab ────────────────────────────────────────────────────────────────
 
-interface FailedChunk {
+interface ChunkRow {
   chunk_id: string;
   chunk_seq: number;
-  chunk_type: string;
-  error_text: string | null;
-  retry_count: number;
   rowid_start: string;
   rowid_end: string;
   status: string;
+  rows_loaded: number;
+  worker_id: string | null;
+  error_text: string | null;
+  retry_count: number;
 }
 
-function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migrationId: string }) {
-  const [chunks,  setChunks]  = useState<FailedChunk[]>([]);
-  const [loading, setLoading] = useState(false);
+interface ChunkStats {
+  total: number; pending: number; claimed: number;
+  running: number; done: number; failed: number;
+}
+
+function ChunksSection({
+  migrationId, chunkType, sseEvents,
+}: { migrationId: string; chunkType: "BULK" | "BASELINE"; sseEvents: SSEEvent[] }) {
+  const [stats,         setStats]         = useState<ChunkStats | null>(null);
+  const [chunks,        setChunks]        = useState<ChunkRow[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [retrying,      setRetrying]      = useState(false);
+  const [retryError,    setRetryError]    = useState<string | null>(null);
+  const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+
+  const isBaseline = chunkType === "BASELINE";
+  const accent     = isBaseline ? "#9333ea" : "#d97706";
+
+  function load() {
+    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { setStats(d.stats); setChunks(d.chunks ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+
+  async function retryFailed() {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const r = await fetch(
+        `/api/migrations/${migrationId}/retry-chunks?chunk_type=${chunkType}`,
+        { method: "POST" },
+      );
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setRetryError(d.error ?? "Ошибка сервера");
+      } else {
+        load();
+      }
+    } catch {
+      setRetryError("Сетевая ошибка");
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  useEffect(() => { load(); }, [migrationId]); // eslint-disable-line
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      fetch(`/api/migrations/${migrationId}/chunks?chunk_type=BULK`).then(r => r.json()),
-      fetch(`/api/migrations/${migrationId}/chunks?chunk_type=BASELINE`).then(r => r.json()),
-    ])
-      .then(([bulk, baseline]) => {
-        const all = [
-          ...((bulk.chunks     ?? []) as FailedChunk[]),
-          ...((baseline.chunks ?? []) as FailedChunk[]),
-        ];
-        setChunks(all.filter(c => c.status === "FAILED" && c.error_text));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [migrationId, detail.chunks_failed]); // eslint-disable-line
+    const last = sseEvents[0];
+    if (!last || last.migration_id !== migrationId) return;
+    if (
+      last.type === "chunk_progress" ||
+      last.type === "baseline_progress" ||
+      last.type === "migration_phase"
+    ) load();
+  }, [sseEvents]); // eslint-disable-line
 
+  const hdr = (
+    <div style={{
+      padding: "6px 12px", background: "#0a111f",
+      borderBottom: `1px solid ${accent}30`,
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+    }}>
+      <span style={{
+        fontSize: 11, fontWeight: 700, color: accent,
+        textTransform: "uppercase", letterSpacing: 0.8,
+      }}>
+        {chunkType}
+      </span>
+      {stats && (
+        <span style={{ fontSize: 11, color: "#475569" }}>{stats.total} чанков</span>
+      )}
+    </div>
+  );
+
+  if (loading) return (
+    <div style={{ border: `1px solid ${accent}30`, borderRadius: 7, overflow: "hidden", marginBottom: 14 }}>
+      {hdr}
+      <div style={{ padding: "10px 12px", background: "#060e1a", color: "#334155", fontSize: 12 }}>
+        Загрузка…
+      </div>
+    </div>
+  );
+
+  if (!stats || stats.total === 0) return (
+    <div style={{ border: `1px solid ${accent}20`, borderRadius: 7, overflow: "hidden", marginBottom: 14 }}>
+      {hdr}
+      <div style={{ padding: "10px 12px", background: "#060e1a", color: "#334155", fontSize: 12 }}>
+        Нет чанков
+      </div>
+    </div>
+  );
+
+  const pct    = Math.round((stats.done / stats.total) * 100);
+  const active = stats.claimed + stats.running;
+
+  return (
+    <div style={{ border: `1px solid ${accent}40`, borderRadius: 7, overflow: "hidden", marginBottom: 14 }}>
+      {hdr}
+      <div style={{ padding: "10px 12px", background: "#060e1a" }}>
+
+        {/* Progress bar */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ background: "#1e293b", borderRadius: 4, height: 6, overflow: "hidden" }}>
+            <div style={{
+              width: `${pct}%`, height: "100%",
+              background: stats.failed > 0 ? "#ef4444" : "#22c55e",
+              transition: "width 0.4s",
+            }} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between",
+                        fontSize: 11, color: "#64748b", marginTop: 3 }}>
+            <span>{stats.done} / {stats.total}</span>
+            <span style={{ color: pct === 100 ? "#22c55e" : "#fcd34d", fontWeight: 700 }}>{pct}%</span>
+          </div>
+        </div>
+
+        {/* Stats row + retry button */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10, alignItems: "flex-end" }}>
+          {([
+            { label: "Ожидают", value: stats.pending, color: "#64748b" },
+            { label: "Активны", value: active,         color: "#fcd34d" },
+            { label: "Готово",  value: stats.done,     color: "#22c55e" },
+            { label: "Ошибки",  value: stats.failed,   color: "#ef4444" },
+          ] as const).map(s => (
+            <div key={s.label} style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: 10, color: "#475569" }}>{s.label}</div>
+            </div>
+          ))}
+          {stats.failed > 0 && (
+            <button
+              onClick={retryFailed}
+              disabled={retrying}
+              style={{
+                marginLeft: "auto",
+                background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 5,
+                color: "#fca5a5", fontSize: 10, padding: "4px 10px",
+                cursor: retrying ? "not-allowed" : "pointer", fontWeight: 700,
+              }}
+            >
+              {retrying ? "…" : `↺ Повторить (${stats.failed})`}
+            </button>
+          )}
+        </div>
+
+        {retryError && (
+          <div style={{ color: "#fca5a5", fontSize: 11, marginBottom: 8 }}>{retryError}</div>
+        )}
+
+        {/* Chunk table */}
+        <div style={{ maxHeight: 320, overflowY: "auto" }}>
+          <div style={{
+            display: "grid", gridTemplateColumns: "36px 72px 1fr 64px 52px",
+            gap: "2px 8px", fontSize: 10, color: "#475569",
+            paddingBottom: 3, marginBottom: 3, borderBottom: "1px solid #1e293b",
+          }}>
+            <span>#</span><span>Статус</span><span>Worker</span>
+            <span style={{ textAlign: "right" }}>Строки</span>
+            <span style={{ textAlign: "right" }}>Попыт.</span>
+          </div>
+          {chunks.map(c => (
+            <React.Fragment key={c.chunk_id}>
+              <div
+                onClick={() => c.status === "FAILED" && c.error_text &&
+                  setExpandedChunk(expandedChunk === c.chunk_id ? null : c.chunk_id)}
+                style={{
+                  display: "grid", gridTemplateColumns: "36px 72px 1fr 64px 52px",
+                  gap: "1px 8px", fontSize: 10, padding: "2px 0",
+                  borderBottom: "1px solid #0f172a",
+                  color: c.status === "FAILED"   ? "#fca5a5"
+                       : c.status === "DONE"     ? "#86efac"
+                       : c.status === "RUNNING"  ? "#fcd34d"
+                       : "#64748b",
+                  cursor: c.status === "FAILED" && c.error_text ? "pointer" : "default",
+                  userSelect: "none",
+                }}
+              >
+                <span>{c.chunk_seq}</span>
+                <span>{c.status}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis",
+                               whiteSpace: "nowrap", color: "#334155" }}>
+                  {c.worker_id?.split(":")[0] ?? "—"}
+                </span>
+                <span style={{ textAlign: "right" }}>
+                  {c.rows_loaded > 0 ? c.rows_loaded.toLocaleString() : "—"}
+                </span>
+                <span style={{ textAlign: "right" }}>
+                  {c.retry_count > 0 ? c.retry_count : "—"}
+                </span>
+              </div>
+              {expandedChunk === c.chunk_id && c.error_text && (
+                <pre style={{
+                  margin: "2px 0 4px",
+                  fontFamily: "monospace", fontSize: 10, color: "#fca5a5",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  background: "#0f0404", border: "1px solid #3b0f0f",
+                  borderRadius: 4, padding: "6px 10px",
+                  maxHeight: 150, overflowY: "auto",
+                }}>
+                  {c.error_text}
+                </pre>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChunksTab({ migrationId, sseEvents }: { migrationId: string; sseEvents: SSEEvent[] }) {
+  return (
+    <div>
+      <ChunksSection migrationId={migrationId} chunkType="BULK"     sseEvents={sseEvents} />
+      <ChunksSection migrationId={migrationId} chunkType="BASELINE" sseEvents={sseEvents} />
+    </div>
+  );
+}
+
+// ── Errors tab ────────────────────────────────────────────────────────────────
+
+function ErrorsTab({ detail }: { detail: MigrationDetail }) {
   const hasMigError = !!(detail.error_code || detail.error_text);
 
-  if (!hasMigError && !loading && chunks.length === 0) {
+  if (!hasMigError) {
     return (
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center",
@@ -553,116 +753,53 @@ function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migration
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* ── Migration-level error ── */}
-      {hasMigError && (
-        <div>
-          <SectionHeader>Ошибка миграции</SectionHeader>
-          <div style={{
-            background: "#1a0808", border: "1px solid #7f1d1d",
-            borderRadius: 7, padding: 14,
-          }}>
-            {detail.error_code && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Код</div>
-                <span style={{
-                  fontFamily: "monospace", fontSize: 13, color: "#fca5a5",
-                  fontWeight: 700, background: "#2d0a0a",
-                  border: "1px solid #7f1d1d", borderRadius: 4, padding: "2px 8px",
-                }}>
-                  {detail.error_code}
-                </span>
-              </div>
-            )}
-            {detail.failed_phase && (
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Фаза</div>
-                <span style={{ fontSize: 13, color: "#f87171" }}>{detail.failed_phase}</span>
-              </div>
-            )}
-            {detail.error_text && (
-              <div>
-                <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Подробности</div>
-                <pre style={{
-                  margin: 0, fontFamily: "monospace", fontSize: 12, color: "#fca5a5",
-                  whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  background: "#0f0404", borderRadius: 5, padding: "10px 12px",
-                  maxHeight: 320, overflowY: "auto",
-                  border: "1px solid #3b0f0f",
-                }}>
-                  {detail.error_text}
-                </pre>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Failed chunks ── */}
-      {loading ? (
-        <div style={{ color: "#475569", fontSize: 12 }}>Загрузка ошибок чанков…</div>
-      ) : chunks.length > 0 && (
-        <div>
-          <SectionHeader>Ошибки чанков ({chunks.length})</SectionHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {chunks.map(c => (
-              <div key={c.chunk_id} style={{
-                background: "#0a0812", border: "1px solid #3b1515",
-                borderRadius: 6, overflow: "hidden",
+      <div>
+        <SectionHeader>Ошибка миграции</SectionHeader>
+        <div style={{
+          background: "#1a0808", border: "1px solid #7f1d1d",
+          borderRadius: 7, padding: 14,
+        }}>
+          {detail.error_code && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Код</div>
+              <span style={{
+                fontFamily: "monospace", fontSize: 13, color: "#fca5a5",
+                fontWeight: 700, background: "#2d0a0a",
+                border: "1px solid #7f1d1d", borderRadius: 4, padding: "2px 8px",
               }}>
-                {/* chunk header */}
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "6px 12px",
-                  background: "#120610", borderBottom: "1px solid #2d1010",
-                }}>
-                  <span style={{ fontSize: 12, color: "#fca5a5", fontWeight: 700 }}>
-                    Chunk #{c.chunk_seq}
-                  </span>
-                  <span style={{
-                    fontSize: 10, color: c.chunk_type === "BASELINE" ? "#a78bfa" : "#60a5fa",
-                    background: c.chunk_type === "BASELINE" ? "#1e1030" : "#0c1a30",
-                    border: `1px solid ${c.chunk_type === "BASELINE" ? "#4c1d95" : "#1e3a5f"}`,
-                    borderRadius: 3, padding: "1px 6px", flexShrink: 0,
-                  }}>
-                    {c.chunk_type ?? "BULK"}
-                  </span>
-                  <span style={{
-                    fontSize: 10, color: "#475569", fontFamily: "monospace",
-                    flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {c.rowid_start} … {c.rowid_end}
-                  </span>
-                  {c.retry_count > 0 && (
-                    <span style={{
-                      fontSize: 10, color: "#fbbf24", background: "#451a03",
-                      border: "1px solid #78350f", borderRadius: 3, padding: "1px 7px",
-                      flexShrink: 0,
-                    }}>
-                      {c.retry_count} повтор(а)
-                    </span>
-                  )}
-                </div>
-                {/* error text */}
-                <pre style={{
-                  margin: 0, fontFamily: "monospace", fontSize: 11, color: "#fca5a5",
-                  whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  padding: "8px 12px", maxHeight: 180, overflowY: "auto",
-                }}>
-                  {c.error_text}
-                </pre>
-              </div>
-            ))}
-          </div>
+                {detail.error_code}
+              </span>
+            </div>
+          )}
+          {detail.failed_phase && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Фаза</div>
+              <span style={{ fontSize: 13, color: "#f87171" }}>{detail.failed_phase}</span>
+            </div>
+          )}
+          {detail.error_text && (
+            <div>
+              <div style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Подробности</div>
+              <pre style={{
+                margin: 0, fontFamily: "monospace", fontSize: 12, color: "#fca5a5",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+                background: "#0f0404", borderRadius: 5, padding: "10px 12px",
+                maxHeight: 320, overflowY: "auto",
+                border: "1px solid #3b0f0f",
+              }}>
+                {detail.error_text}
+              </pre>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "stats" | "errors" | "history";
+type Tab = "overview" | "stats" | "chunks" | "errors" | "history";
 
 export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: Props) {
   const [detail,    setDetail]    = useState<MigrationDetail | null>(null);
@@ -693,13 +830,29 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
 
   const phase = detail?.phase ?? "";
 
-  const errorCount = detail
-    ? (detail.error_code ? 1 : 0) + (detail.chunks_failed ?? 0)
-    : 0;
+  const errorCount    = detail?.error_code ? 1 : 0;
+  const failedChunks  = detail?.chunks_failed ?? 0;
 
   const tabs: { id: Tab; label: React.ReactNode }[] = [
     { id: "overview", label: "Обзор" },
     { id: "stats",    label: "Статистика" },
+    {
+      id: "chunks",
+      label: (
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          Чанки
+          {failedChunks > 0 && (
+            <span style={{
+              fontSize: 10, fontWeight: 700,
+              background: "#7f1d1d", color: "#fca5a5",
+              borderRadius: 10, padding: "0 5px", lineHeight: "16px",
+            }}>
+              {failedChunks}
+            </span>
+          )}
+        </span>
+      ),
+    },
     {
       id: "errors",
       label: (
@@ -792,8 +945,11 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {activeTab === "stats" && (
             <StatisticsTab detail={detail} />
           )}
+          {activeTab === "chunks" && (
+            <ChunksTab migrationId={migrationId} sseEvents={sseEvents} />
+          )}
           {activeTab === "errors" && (
-            <ErrorsTab detail={detail} migrationId={migrationId} />
+            <ErrorsTab detail={detail} />
           )}
           {activeTab === "history" && (
             <HistoryTab history={detail.history} />
