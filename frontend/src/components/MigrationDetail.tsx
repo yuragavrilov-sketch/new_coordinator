@@ -530,7 +530,7 @@ function ErrorsTab({ detail, migrationId }: { detail: MigrationDetail; migration
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [migrationId]);
+  }, [migrationId, detail.chunks_failed]); // eslint-disable-line
 
   const hasMigError = !!(detail.error_code || detail.error_text);
 
@@ -672,7 +672,8 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
 
   useEffect(() => {
     const last = sseEvents[0];
-    if (last?.type === "migration_phase" && last.migration_id === migrationId) {
+    if (!last || last.migration_id !== migrationId) return;
+    if (last.type === "migration_phase" || last.type === "baseline_progress") {
       loadDetail();
     }
   }, [sseEvents]); // eslint-disable-line
