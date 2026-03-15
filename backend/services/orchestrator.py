@@ -487,6 +487,15 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                     cur.execute(f"TRUNCATE TABLE {tgt_quoted}")
                 conn.commit()
                 print(f"[baseline_publishing] truncated {tgt_quoted}")
+
+                # Mark secondary indexes UNUSABLE so Oracle skips index maintenance
+                # during INSERT — rebuilt by INDEXES_ENABLING phase after load.
+                # PK index is kept VALID (skip_pk=True) to catch PK violations early.
+                marked = oracle_browser.mark_indexes_unusable(
+                    conn, tgt_schema, tgt_table, skip_pk=True,
+                )
+                if marked:
+                    print(f"[baseline_publishing] marked UNUSABLE: {marked}")
             finally:
                 conn.close()
 

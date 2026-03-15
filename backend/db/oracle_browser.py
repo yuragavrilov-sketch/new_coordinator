@@ -245,6 +245,43 @@ def execute_target_action(conn, action: str, schema: str, table: str, object_nam
     conn.commit()
 
 
+def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -> list[str]:
+    """Mark indexes on *table* as UNUSABLE so Oracle skips index maintenance
+    during the subsequent bulk INSERT (SKIP_UNUSABLE_INDEXES = TRUE is the
+    Oracle session default, so the INSERT proceeds without touching the index
+    structures).  Indexes are rebuilt by enable_all_disabled_objects afterwards.
+
+    skip_pk=True (default): leave the primary-key index VALID so that
+    ORA-00001 is still raised for PK violations during the INSERT,
+    which the baseline worker already handles gracefully.
+
+    Returns the list of index names that were marked UNUSABLE.
+    """
+    info = get_full_ddl_info(conn, schema, table)
+    s = schema.upper()
+
+    pk_index_names: set[str] = set()
+    if skip_pk:
+        for con in info["constraints"]:
+            if con["type_code"] == "P":
+                pk_index_names.add(con["name"].upper())
+
+    marked: list[str] = []
+    with conn.cursor() as cur:
+        for idx in info["indexes"]:
+            if idx["status"] != "VALID":
+                continue
+            if skip_pk and idx["name"].upper() in pk_index_names:
+                continue
+            try:
+                cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" UNUSABLE')
+                marked.append(idx["name"])
+            except Exception as exc:
+                print(f"[oracle_browser] could not mark {idx['name']} UNUSABLE: {exc}")
+    conn.commit()
+    return marked
+
+
 def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     """
     Enable all UNUSABLE indexes and DISABLED constraints on *table* in *schema*.
