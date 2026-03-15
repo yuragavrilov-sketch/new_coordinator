@@ -282,14 +282,34 @@ def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -
     return marked
 
 
+def disable_triggers(conn, schema: str, table: str) -> list[str]:
+    """Disable all ENABLED triggers on *table* so they don't fire during bulk
+    INSERT.  Returns the list of trigger names that were disabled.
+    Re-enable them afterwards with enable_all_disabled_objects().
+    """
+    info = get_full_ddl_info(conn, schema, table)
+    s = schema.upper()
+    disabled: list[str] = []
+    with conn.cursor() as cur:
+        for trg in info["triggers"]:
+            if trg["status"] == "ENABLED":
+                try:
+                    cur.execute(f'ALTER TRIGGER "{s}"."{trg["name"]}" DISABLE')
+                    disabled.append(trg["name"])
+                except Exception as exc:
+                    print(f"[oracle_browser] could not disable trigger {trg['name']}: {exc}")
+    conn.commit()
+    return disabled
+
+
 def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     """
-    Enable all UNUSABLE indexes and DISABLED constraints on *table* in *schema*.
-    Triggers are intentionally left untouched.
+    Enable all UNUSABLE indexes, DISABLED constraints, and DISABLED triggers
+    on *table* in *schema*.
 
     Returns a summary dict:
-      { "enabled": {"indexes": [...], "constraints": [...]},
-        "errors":  {"indexes": [...], "constraints": [...]} }
+      { "enabled": {"indexes": [...], "constraints": [...], "triggers": [...]},
+        "errors":  {"indexes": [...], "constraints": [...], "triggers": [...]} }
 
     Errors list items: {"name": str, "error": str}
     A single commit is issued after all statements.  Any per-object error is
@@ -298,8 +318,8 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
     t = table.upper()
-    enabled: dict = {"indexes": [], "constraints": []}
-    errors:  dict = {"indexes": [], "constraints": []}
+    enabled: dict = {"indexes": [], "constraints": [], "triggers": []}
+    errors:  dict = {"indexes": [], "constraints": [], "triggers": []}
 
     with conn.cursor() as cur:
         for idx in info["indexes"]:
@@ -319,6 +339,14 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
                     enabled["constraints"].append(con["name"])
                 except Exception as exc:
                     errors["constraints"].append({"name": con["name"], "error": str(exc)})
+
+        for trg in info["triggers"]:
+            if trg["status"] == "DISABLED":
+                try:
+                    cur.execute(f'ALTER TRIGGER "{s}"."{trg["name"]}" ENABLE')
+                    enabled["triggers"].append(trg["name"])
+                except Exception as exc:
+                    errors["triggers"].append({"name": trg["name"], "error": str(exc)})
 
     conn.commit()
     return {"enabled": enabled, "errors": errors}

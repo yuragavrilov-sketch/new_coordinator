@@ -496,6 +496,15 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 )
                 if marked:
                     print(f"[baseline_publishing] marked UNUSABLE: {marked}")
+
+                # Disable triggers so they don't fire on every INSERT row during
+                # baseline load — re-enabled by enable_all_disabled_objects() in
+                # INDEXES_ENABLING phase after load completes.
+                disabled_trg = oracle_browser.disable_triggers(
+                    conn, tgt_schema, tgt_table,
+                )
+                if disabled_trg:
+                    print(f"[baseline_publishing] disabled triggers: {disabled_trg}")
             finally:
                 conn.close()
 
