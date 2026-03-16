@@ -345,7 +345,7 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
 
     with conn.cursor() as cur:
         for idx in info["indexes"]:
-            if idx["status"] != "VALID":
+            if idx["status"] == "UNUSABLE":
                 try:
                     cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
                     enabled["indexes"].append(idx["name"])
