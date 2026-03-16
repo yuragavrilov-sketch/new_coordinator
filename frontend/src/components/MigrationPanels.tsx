@@ -58,20 +58,11 @@ interface ChunkStats {
   running: number; done: number; failed: number;
 }
 
-interface ChunkRow {
-  chunk_id: string; chunk_seq: number;
-  rowid_start: string; rowid_end: string;
-  status: string; rows_loaded: number;
-  worker_id: string | null; error_text: string | null;
-}
-
 export function BulkProgressPanel({
   migrationId, sseEvents, chunkType = "BULK",
 }: { migrationId: string; sseEvents: SSEEvent[]; chunkType?: "BULK" | "BASELINE" }) {
   const [stats,    setStats]    = useState<ChunkStats | null>(null);
-  const [chunks,   setChunks]   = useState<ChunkRow[]>([]);
   const [loading,  setLoading]  = useState(true);
-  const [showAll,  setShowAll]  = useState(false);
   const [retrying, setRetrying] = useState(false);
 
   const isBaseline = chunkType === "BASELINE";
@@ -79,16 +70,19 @@ export function BulkProgressPanel({
   const panelTitle = isBaseline ? "Baseline Load Progress" : "Bulk Load Progress";
 
   function load() {
-    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}`)
+    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}&page=1&page_size=1`)
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setStats(d.stats); setChunks(d.chunks || []); setLoading(false); })
+      .then(d => { setStats(d.stats); setLoading(false); })
       .catch(() => setLoading(false));
   }
 
   async function retryFailed() {
     setRetrying(true);
     try {
-      await fetch(`/api/migrations/${migrationId}/retry-chunks`, { method: "POST" });
+      await fetch(
+        `/api/migrations/${migrationId}/retry-chunks?chunk_type=${chunkType}`,
+        { method: "POST" },
+      );
       load();
     } finally {
       setRetrying(false);
@@ -97,7 +91,6 @@ export function BulkProgressPanel({
 
   useEffect(() => { load(); }, [migrationId]);
 
-  // Refresh when a chunk_progress or migration_phase event arrives for this migration
   useEffect(() => {
     const last = sseEvents[0];
     if (!last) return;
@@ -110,7 +103,6 @@ export function BulkProgressPanel({
     }
   }, [sseEvents]); // eslint-disable-line
 
-  // Polling every 5s while loading phase is active
   useEffect(() => {
     const id = setInterval(load, 5_000);
     return () => clearInterval(id);
@@ -121,7 +113,6 @@ export function BulkProgressPanel({
 
   const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   const active = stats.claimed + stats.running;
-  const visible = showAll ? chunks : chunks.slice(0, 20);
 
   return (
     <PanelWrap accent={accent} title={panelTitle}>
@@ -146,7 +137,7 @@ export function BulkProgressPanel({
       </div>
 
       {/* Stats row */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8, alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
         {[
           { label: "Ожидают",   value: stats.pending, color: "#64748b" },
           { label: "Активны",   value: active,        color: "#fcd34d" },
@@ -173,62 +164,6 @@ export function BulkProgressPanel({
           </button>
         )}
       </div>
-
-      {/* Chunk table (compact) */}
-      {chunks.length > 0 && (
-        <div>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "40px 1fr 70px 70px",
-            gap: "2px 8px",
-            fontSize: 10,
-            color: "#475569",
-            marginBottom: 3,
-            paddingBottom: 3,
-            borderBottom: "1px solid #1e293b",
-          }}>
-            <span>#</span><span>Статус / Worker</span>
-            <span style={{ textAlign: "right" }}>Строки</span>
-            <span style={{ textAlign: "right" }}>Ошибка</span>
-          </div>
-          {visible.map(c => (
-            <div key={c.chunk_id} style={{
-              display: "grid",
-              gridTemplateColumns: "40px 1fr 70px 70px",
-              gap: "1px 8px",
-              fontSize: 10,
-              padding: "2px 0",
-              borderBottom: "1px solid #0f172a",
-              color: c.status === "FAILED" ? "#fca5a5"
-                   : c.status === "DONE"   ? "#86efac"
-                   : c.status === "RUNNING" ? "#fcd34d"
-                   : "#64748b",
-            }}>
-              <span>{c.chunk_seq}</span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.status}
-                {c.worker_id && <span style={{ color: "#334155", marginLeft: 4 }}>
-                  {c.worker_id.split(":")[0]}
-                </span>}
-              </span>
-              <span style={{ textAlign: "right" }}>
-                {c.rows_loaded > 0 ? c.rows_loaded.toLocaleString() : "—"}
-              </span>
-              <span style={{ textAlign: "right", color: "#fca5a5" }} title={c.error_text ?? ""}>
-                {c.error_text ? "!" : "—"}
-              </span>
-            </div>
-          ))}
-          {chunks.length > 20 && (
-            <button onClick={() => setShowAll(v => !v)} style={{
-              background: "none", border: "none", color: "#475569",
-              fontSize: 10, cursor: "pointer", marginTop: 4, padding: 0,
-            }}>
-              {showAll ? "▲ Свернуть" : `▼ Показать все ${chunks.length} чанков`}
-            </button>
-          )}
-        </div>
-      )}
     </PanelWrap>
   );
 }
