@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -197,28 +198,41 @@ function SearchableSelect({ items, value, onChange, disabled, placeholder }: {
 }) {
   const [open, setOpen]     = useState(false);
   const [filter, setFilter] = useState("");
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [pos, setPos]       = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const dropRef   = useRef<HTMLDivElement>(null);
+  const inputRef  = useRef<HTMLInputElement>(null);
 
   const filtered = filter
     ? items.filter(i => i.toLowerCase().includes(filter.toLowerCase()))
     : items;
 
+  // Close on click outside (check both trigger and dropdown)
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t)) return;
+      if (dropRef.current?.contains(t)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+  // Position the dropdown and focus the search input when opened
+  useEffect(() => {
+    if (open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 2, left: r.left, width: r.width });
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
 
   function pick(v: string) { onChange(v); setFilter(""); setOpen(false); }
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
-      <div
+    <>
+      <div ref={triggerRef}
         onClick={() => { if (!disabled) setOpen(!open); }}
         style={{
           ...(disabled ? S.selectDis : S.select),
@@ -232,11 +246,12 @@ function SearchableSelect({ items, value, onChange, disabled, placeholder }: {
         )}
         <span style={{ color: "#475569", fontSize: 10 }}>{open ? "\u25B2" : "\u25BC"}</span>
       </div>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+      {open && ReactDOM.createPortal(
+        <div ref={dropRef} style={{
+          position: "fixed", top: pos.top, left: pos.left, width: pos.width,
+          zIndex: 9999,
           background: "#0f172a", border: "1px solid #334155", borderRadius: 5,
-          marginTop: 2, maxHeight: 260, display: "flex", flexDirection: "column",
+          maxHeight: 260, display: "flex", flexDirection: "column",
           boxShadow: "0 8px 24px rgba(0,0,0,.6)",
         }}>
           <input
@@ -274,9 +289,10 @@ function SearchableSelect({ items, value, onChange, disabled, placeholder }: {
           }}>
             {filtered.length} / {items.length}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
