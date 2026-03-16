@@ -74,11 +74,12 @@ def create_stage_table(
         null_str = "" if nullable == "Y" else " NOT NULL"
         col_defs.append(f'  "{col_name}" {type_str}{null_str}')
 
-    ts_clause = f' TABLESPACE "{tablespace.upper()}"' if tablespace.strip() else ""
+    ts_clause = f' TABLESPACE "{tablespace.strip().upper()}"' if tablespace.strip() else ""
+    tgt_full = f'"{target_schema.upper()}"."{stage_table.upper()}"'
     ddl = (
-        f'CREATE TABLE "{target_schema.upper()}"."{stage_table.upper()}" (\n'
+        f'CREATE TABLE {tgt_full} (\n'
         + ",\n".join(col_defs)
-        + "\n)" + ts_clause
+        + "\n) NOLOGGING" + ts_clause
     )
 
     dst_conn = open_oracle_conn(dst_cfg)
@@ -87,9 +88,23 @@ def create_stage_table(
             try:
                 cur.execute(ddl)
                 dst_conn.commit()
+                print(f"[oracle_stage] created {tgt_full}"
+                      + (f" in tablespace {tablespace.strip().upper()}" if tablespace.strip() else ""))
             except Exception as exc:
                 # ORA-00955: name is already used by an existing object
                 if "ORA-00955" in str(exc):
+                    # Table exists — move it to the requested tablespace if needed
+                    if tablespace.strip():
+                        try:
+                            cur.execute(
+                                f'ALTER TABLE {tgt_full} MOVE TABLESPACE "{tablespace.strip().upper()}"'
+                            )
+                            dst_conn.commit()
+                            print(f"[oracle_stage] {tgt_full} already exists, moved to tablespace {tablespace.strip().upper()}")
+                        except Exception as move_exc:
+                            print(f"[oracle_stage] {tgt_full} already exists, MOVE TABLESPACE failed: {move_exc}")
+                    else:
+                        print(f"[oracle_stage] {tgt_full} already exists, skipping")
                     return
                 raise
     finally:
