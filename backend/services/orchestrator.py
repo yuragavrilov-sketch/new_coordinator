@@ -679,11 +679,16 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
             n_idx = len(result["enabled"]["indexes"])
             n_con = len(result["enabled"]["constraints"])
+            n_trg = len(result["enabled"]["triggers"])
             msg = (
-                f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                f"Включено: индексов={n_idx}, констрейнтов={n_con}, триггеров={n_trg}. "
                 "Ожидание запуска CDC apply-worker"
             )
-            _transition(mid, "CDC_APPLY_STARTING", message=msg)
+            # Clear leftover error_code/error_text from previous failed attempts
+            _transition(
+                mid, "CDC_APPLY_STARTING", message=msg,
+                extra_fields={"error_code": None, "error_text": None},
+            )
         except Exception as exc:
             _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
         finally:
