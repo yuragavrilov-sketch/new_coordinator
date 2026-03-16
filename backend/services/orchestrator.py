@@ -266,6 +266,7 @@ def _handle_preparing(mid: str, m: dict) -> None:
                     src_cfg, dst_cfg,
                     m["source_schema"], m["source_table"],
                     m["target_schema"], m["stage_table_name"],
+                    tablespace=m.get("stage_tablespace", ""),
                 )
                 stage_msg = "Stage table создана, "
             else:

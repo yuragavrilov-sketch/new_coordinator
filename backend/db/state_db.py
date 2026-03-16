@@ -161,6 +161,7 @@ def init_db() -> None:
                     target_table              varchar(128) NOT NULL DEFAULT '',
 
                     stage_table_name          varchar(128) NOT NULL DEFAULT '',
+                    stage_tablespace          varchar(128) NOT NULL DEFAULT '',
                     connector_name            varchar(255) NOT NULL DEFAULT '',
                     topic_prefix              varchar(255) NOT NULL DEFAULT '',
                     consumer_group            varchar(255) NOT NULL DEFAULT '',

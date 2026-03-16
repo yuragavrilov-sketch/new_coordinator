@@ -22,6 +22,7 @@ export interface Migration {
   target_schema: string;
   target_table: string;
   stage_table_name: string;
+  stage_tablespace: string;
   connector_name: string;
   topic_prefix: string;
   consumer_group: string;

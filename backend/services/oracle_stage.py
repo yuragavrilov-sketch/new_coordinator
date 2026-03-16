@@ -40,6 +40,7 @@ def create_stage_table(
     source_table: str,
     target_schema: str,
     stage_table: str,
+    tablespace: str = "",
 ) -> None:
     """
     Create the stage table on the target Oracle with the same column structure
@@ -73,10 +74,11 @@ def create_stage_table(
         null_str = "" if nullable == "Y" else " NOT NULL"
         col_defs.append(f'  "{col_name}" {type_str}{null_str}')
 
+    ts_clause = f' TABLESPACE "{tablespace.upper()}"' if tablespace.strip() else ""
     ddl = (
         f'CREATE TABLE "{target_schema.upper()}"."{stage_table.upper()}" (\n'
         + ",\n".join(col_defs)
-        + "\n)"
+        + "\n)" + ts_clause
     )
 
     dst_conn = open_oracle_conn(dst_cfg)

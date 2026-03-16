@@ -22,6 +22,7 @@ interface FormData {
   topic_prefix: string;
   consumer_group: string;
   stage_table_name: string;
+  stage_tablespace: string;
   chunk_size: number;
   max_parallel_workers: number;
   baseline_parallel_degree: number;
@@ -402,7 +403,7 @@ const INIT: FormData = {
   source_schema: "", source_table: "",
   target_schema: "", target_table: "",
   migration_strategy: "STAGE",
-  connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "",
+  connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "",
   chunk_size: 1_000_000,
   max_parallel_workers: 1,
   baseline_parallel_degree: 4,
@@ -549,6 +550,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       target_schema:              form.target_schema,
       target_table:               form.target_table,
       stage_table_name:           form.migration_strategy === "STAGE" ? form.stage_table_name.trim() : "",
+      stage_tablespace:           form.migration_strategy === "STAGE" ? form.stage_tablespace.trim() : "",
       connector_name:             form.connector_name.trim(),
       topic_prefix:               form.topic_prefix.trim(),
       consumer_group:             form.consumer_group.trim(),
@@ -712,12 +714,17 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                 <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
                   onChange={v => setF({ consumer_group: v })} />
               </Field>
-              {form.migration_strategy === "STAGE" && (
+              {form.migration_strategy === "STAGE" && (<>
                 <Field label="Stage table name" required error={fieldErrs.stage_table_name}>
                   <TextInput value={form.stage_table_name} hasError={!!fieldErrs.stage_table_name}
                     onChange={v => setF({ stage_table_name: v })} />
                 </Field>
-              )}
+                <Field label="Stage tablespace" hint="Необязательно. Если пусто — default tablespace схемы">
+                  <TextInput value={form.stage_tablespace}
+                    placeholder="например MIGRATION_DATA"
+                    onChange={v => setF({ stage_tablespace: v })} />
+                </Field>
+              </>)}
             </div>
             <div style={S.row2}>
               <Field label="Chunk size" required error={fieldErrs.chunk_size}
