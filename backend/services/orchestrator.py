@@ -18,6 +18,7 @@ from datetime import datetime
 # DB helpers
 from db.state_db import (
     get_active_migrations,
+    row_to_dict,
     transition_phase,
     update_migration_fields,
 )
@@ -659,11 +660,20 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                     [e["name"] for e in result["errors"]["indexes"]]
                     + [e["name"] for e in result["errors"]["constraints"]]
                 )
-                _fail(
-                    mid,
-                    f"Не удалось включить объекты: {', '.join(names)}. "
-                    + str(result["errors"]),
-                    "INDEXES_ENABLE_ERROR",
+                err_detail = str(result["errors"])
+                # Stay in INDEXES_ENABLING so the user can retry via the UI button.
+                # Transitioning to FAILED would make recovery impossible without
+                # manual DB intervention.
+                _transition(
+                    mid, "INDEXES_ENABLING",
+                    message=(
+                        f"Ошибка пересчёта: {', '.join(names)}. "
+                        "Нажмите «Включить индексы» ещё раз для повторной попытки."
+                    ),
+                    extra_fields={
+                        "error_code": "INDEXES_ENABLE_ERROR",
+                        "error_text": err_detail[:2000],
+                    },
                 )
                 return
 
@@ -689,22 +699,44 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 def trigger_indexes_enabling(migration_id: str) -> None:
     """Called by the API endpoint when the user clicks 'Enable Indexes'.
 
-    Fetches the current migration record and fires _handle_indexes_enabling.
-    Raises ValueError if the migration is not in INDEXES_ENABLING phase.
+    Accepts migrations in INDEXES_ENABLING phase.  Also accepts FAILED
+    migrations whose error_code is INDEXES_ENABLE_ERROR so the user can
+    recover a stuck migration without manual DB intervention — the migration
+    is transitioned back to INDEXES_ENABLING before the handler runs.
     """
     get_conn = _state["get_conn"]
     conn = get_conn()
     try:
-        migrations = get_active_migrations(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM migrations WHERE migration_id = %s",
+                (migration_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Migration {migration_id} not found")
+            m = row_to_dict(cur, row)
     finally:
         conn.close()
 
-    m = next((x for x in migrations if x["migration_id"] == migration_id), None)
-    if m is None:
-        raise ValueError(f"Migration {migration_id} not found or not active")
-    if m["phase"] != "INDEXES_ENABLING":
+    phase = m["phase"]
+    if phase == "FAILED" and m.get("error_code") == "INDEXES_ENABLE_ERROR":
+        # Recovery path: transition back to INDEXES_ENABLING, then re-fetch
+        _transition(migration_id, "INDEXES_ENABLING",
+                    message="Повторный запуск пересчёта индексов")
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM migrations WHERE migration_id = %s",
+                    (migration_id,),
+                )
+                m = row_to_dict(cur, cur.fetchone())
+        finally:
+            conn.close()
+    elif phase != "INDEXES_ENABLING":
         raise ValueError(
-            f"Migration is in phase {m['phase']}, expected INDEXES_ENABLING"
+            f"Migration is in phase {phase}, expected INDEXES_ENABLING"
         )
     _handle_indexes_enabling(migration_id, m)
 

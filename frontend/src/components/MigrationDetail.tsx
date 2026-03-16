@@ -944,7 +944,8 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           <span style={{ fontWeight: 700, fontSize: 14, color: "#e2e8f0", flex: 1 }}>
             {detail?.migration_name ?? "Загрузка..."}
           </span>
-          {phase === "INDEXES_ENABLING" && (
+          {(phase === "INDEXES_ENABLING" ||
+            (phase === "FAILED" && detail?.error_code === "INDEXES_ENABLE_ERROR")) && (
             <EnableIndexesButton migrationId={migrationId} onDone={loadDetail} />
           )}
           <button onClick={onClose} style={{
