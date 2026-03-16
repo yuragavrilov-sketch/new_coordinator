@@ -261,12 +261,13 @@ def _handle_preparing(mid: str, m: dict) -> None:
                 print(f"[orchestrator] supplemental logging check failed: {exc}")
 
             if strategy == "STAGE":
-                # Create stage table (idempotent)
+                ts = m.get("stage_tablespace") or ""
+                print(f"[orchestrator] stage_tablespace from DB = {ts!r}")
                 oracle_stage.create_stage_table(
                     src_cfg, dst_cfg,
                     m["source_schema"], m["source_table"],
                     m["target_schema"], m["stage_table_name"],
-                    tablespace=m.get("stage_tablespace", ""),
+                    tablespace=ts,
                 )
                 stage_msg = "Stage table создана, "
             else:
