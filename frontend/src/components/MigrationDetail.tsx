@@ -528,14 +528,26 @@ function ChunksSection({
   const [retrying,      setRetrying]      = useState(false);
   const [retryError,    setRetryError]    = useState<string | null>(null);
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+  const [page,          setPage]          = useState(1);
+  const [totalChunks,   setTotalChunks]   = useState(0);
+  const [statusFilter,  setStatusFilter]  = useState("");
+  const PAGE_SIZE = 100;
 
   const isBaseline = chunkType === "BASELINE";
   const accent     = isBaseline ? "#9333ea" : "#d97706";
 
-  function load() {
-    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}`)
+  function load(p?: number) {
+    const pg = p ?? page;
+    const qs = new URLSearchParams({
+      chunk_type: chunkType, page: String(pg), page_size: String(PAGE_SIZE),
+    });
+    if (statusFilter) qs.set("status", statusFilter);
+    fetch(`/api/migrations/${migrationId}/chunks?${qs}`)
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setStats(d.stats); setChunks(d.chunks ?? []); setLoading(false); })
+      .then(d => {
+        setStats(d.stats); setChunks(d.chunks ?? []);
+        setTotalChunks(d.total ?? 0); setLoading(false);
+      })
       .catch(() => setLoading(false));
   }
 
@@ -560,7 +572,7 @@ function ChunksSection({
     }
   }
 
-  useEffect(() => { load(); }, [migrationId]); // eslint-disable-line
+  useEffect(() => { load(); }, [migrationId, statusFilter]); // eslint-disable-line
 
   useEffect(() => {
     const last = sseEvents[0];
@@ -571,6 +583,22 @@ function ChunksSection({
       last.type === "migration_phase"
     ) load();
   }, [sseEvents]); // eslint-disable-line
+
+  const totalPages = Math.max(1, Math.ceil(totalChunks / PAGE_SIZE));
+
+  function goPage(p: number) {
+    const clamped = Math.max(1, Math.min(totalPages, p));
+    setPage(clamped);
+    load(clamped);
+  }
+
+  const statusOptions = [
+    { value: "",        label: "Все"     },
+    { value: "PENDING", label: "PENDING" },
+    { value: "RUNNING", label: "RUNNING" },
+    { value: "DONE",    label: "DONE"    },
+    { value: "FAILED",  label: "FAILED"  },
+  ];
 
   const hdr = (
     <div style={{
@@ -665,6 +693,40 @@ function ChunksSection({
           <div style={{ color: "#fca5a5", fontSize: 11, marginBottom: 8 }}>{retryError}</div>
         )}
 
+        {/* Status filter + pagination */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 8, gap: 8,
+        }}>
+          <div style={{ display: "flex", gap: 4 }}>
+            {statusOptions.map(o => (
+              <button key={o.value} onClick={() => { setStatusFilter(o.value); setPage(1); }} style={{
+                padding: "2px 8px", fontSize: 10, fontWeight: statusFilter === o.value ? 700 : 400,
+                borderRadius: 4, border: "1px solid",
+                borderColor: statusFilter === o.value ? accent : "#1e293b",
+                background: statusFilter === o.value ? accent + "22" : "transparent",
+                color: statusFilter === o.value ? accent : "#475569",
+                cursor: "pointer",
+              }}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {totalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#64748b" }}>
+              <button onClick={() => goPage(1)} disabled={page <= 1}
+                style={pgBtn(page <= 1)}>{"<<"}</button>
+              <button onClick={() => goPage(page - 1)} disabled={page <= 1}
+                style={pgBtn(page <= 1)}>{"<"}</button>
+              <span>{page}/{totalPages}</span>
+              <button onClick={() => goPage(page + 1)} disabled={page >= totalPages}
+                style={pgBtn(page >= totalPages)}>{">"}</button>
+              <button onClick={() => goPage(totalPages)} disabled={page >= totalPages}
+                style={pgBtn(page >= totalPages)}>{">>"}</button>
+            </div>
+          )}
+        </div>
+
         {/* Chunk table */}
         <div style={{ maxHeight: 320, overflowY: "auto" }}>
           <div style={{
@@ -720,10 +782,23 @@ function ChunksSection({
               )}
             </React.Fragment>
           ))}
+          {chunks.length === 0 && (
+            <div style={{ padding: "10px 0", color: "#334155", fontSize: 11, textAlign: "center" }}>
+              Нет чанков с данным статусом
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+function pgBtn(disabled: boolean): React.CSSProperties {
+  return {
+    background: "none", border: "1px solid #1e293b", borderRadius: 3,
+    color: disabled ? "#1e293b" : "#64748b", cursor: disabled ? "default" : "pointer",
+    padding: "1px 5px", fontSize: 10, fontWeight: 700, lineHeight: 1.2,
+  };
 }
 
 function ChunksTab({ migrationId, sseEvents }: { migrationId: string; sseEvents: SSEEvent[] }) {

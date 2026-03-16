@@ -245,11 +245,34 @@ def save_chunks(conn, migration_id: str, chunks: list) -> None:
     conn.commit()
 
 
-def list_chunks(conn, migration_id: str, chunk_type: str = "BULK") -> list[dict]:
-    """Return chunks for a migration filtered by chunk_type, ordered by chunk_seq."""
+def list_chunks(
+    conn,
+    migration_id: str,
+    chunk_type: str = "BULK",
+    *,
+    page: int = 1,
+    page_size: int = 100,
+    status_filter: str = "",
+) -> dict:
+    """Return paginated chunks for a migration filtered by chunk_type.
+
+    Returns ``{"chunks": [...], "total": int, "page": int, "page_size": int}``.
+    """
     from db.state_db import row_to_dict
+
+    where = "migration_id = %s AND COALESCE(chunk_type, 'BULK') = %s"
+    params: list = [migration_id, chunk_type]
+
+    if status_filter:
+        where += " AND status = %s"
+        params.append(status_filter)
+
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"SELECT COUNT(*) FROM migration_chunks WHERE {where}", params)
+        total = cur.fetchone()[0]
+
+        offset = (max(1, page) - 1) * page_size
+        cur.execute(f"""
             SELECT chunk_id, migration_id, chunk_seq,
                    rowid_start, rowid_end, status,
                    rows_loaded, worker_id,
@@ -257,8 +280,10 @@ def list_chunks(conn, migration_id: str, chunk_type: str = "BULK") -> list[dict]
                    error_text, retry_count, created_at,
                    COALESCE(chunk_type, 'BULK') AS chunk_type
             FROM   migration_chunks
-            WHERE  migration_id = %s
-              AND  COALESCE(chunk_type, 'BULK') = %s
+            WHERE  {where}
             ORDER BY chunk_seq
-        """, (migration_id, chunk_type))
-        return [row_to_dict(cur, r) for r in cur.fetchall()]
+            LIMIT %s OFFSET %s
+        """, params + [page_size, offset])
+        chunks = [row_to_dict(cur, r) for r in cur.fetchall()]
+
+    return {"chunks": chunks, "total": total, "page": page, "page_size": page_size}

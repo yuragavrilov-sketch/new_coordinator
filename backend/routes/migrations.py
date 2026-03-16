@@ -435,14 +435,30 @@ def get_migration_chunks(migration_id: str):
     chunk_type = request.args.get("chunk_type", "BULK").strip().upper()
     if chunk_type not in ("BULK", "BASELINE"):
         chunk_type = "BULK"
+    page      = max(1, int(request.args.get("page", 1)))
+    page_size = max(1, min(500, int(request.args.get("page_size", 100))))
+    status_filter = request.args.get("status", "").strip().upper()
+    if status_filter and status_filter not in ("PENDING", "CLAIMED", "RUNNING", "DONE", "FAILED"):
+        status_filter = ""
     try:
         conn = _state["get_conn"]()
         try:
-            chunks = job_queue.list_chunks(conn, migration_id, chunk_type)
+            result = job_queue.list_chunks(
+                conn, migration_id, chunk_type,
+                page=page, page_size=page_size,
+                status_filter=status_filter,
+            )
             stats  = job_queue.get_chunk_stats(conn, migration_id, chunk_type)
         finally:
             conn.close()
-        return jsonify({"stats": stats, "chunks": chunks, "chunk_type": chunk_type})
+        return jsonify({
+            "stats":      stats,
+            "chunks":     result["chunks"],
+            "total":      result["total"],
+            "page":       result["page"],
+            "page_size":  result["page_size"],
+            "chunk_type": chunk_type,
+        })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
