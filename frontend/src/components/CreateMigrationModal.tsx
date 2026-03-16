@@ -191,6 +191,95 @@ function TextInput({ value, placeholder, hasError, onChange }: {
   );
 }
 
+function SearchableSelect({ items, value, onChange, disabled, placeholder }: {
+  items: string[]; value: string; onChange: (v: string) => void;
+  disabled?: boolean; placeholder?: string;
+}) {
+  const [open, setOpen]     = useState(false);
+  const [filter, setFilter] = useState("");
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = filter
+    ? items.filter(i => i.toLowerCase().includes(filter.toLowerCase()))
+    : items;
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+  function pick(v: string) { onChange(v); setFilter(""); setOpen(false); }
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <div
+        onClick={() => { if (!disabled) setOpen(!open); }}
+        style={{
+          ...(disabled ? S.selectDis : S.select),
+          display: "flex", alignItems: "center", gap: 6, minHeight: 33,
+        }}
+      >
+        {value ? (
+          <span style={{ flex: 1 }}>{value}</span>
+        ) : (
+          <span style={{ flex: 1, color: "#475569" }}>{placeholder}</span>
+        )}
+        <span style={{ color: "#475569", fontSize: 10 }}>{open ? "\u25B2" : "\u25BC"}</span>
+      </div>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+          background: "#0f172a", border: "1px solid #334155", borderRadius: 5,
+          marginTop: 2, maxHeight: 260, display: "flex", flexDirection: "column",
+          boxShadow: "0 8px 24px rgba(0,0,0,.6)",
+        }}>
+          <input
+            ref={inputRef}
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            placeholder="Поиск…"
+            style={{
+              ...S.input, borderRadius: 0, border: "none",
+              borderBottom: "1px solid #1e293b", padding: "7px 10px",
+            }}
+          />
+          <div style={{ overflowY: "auto", maxHeight: 220 }}>
+            {filtered.length === 0 && (
+              <div style={{ padding: "8px 10px", color: "#334155", fontSize: 12 }}>
+                {filter ? "Ничего не найдено" : "Нет данных"}
+              </div>
+            )}
+            {filtered.map(t => (
+              <div key={t} onClick={() => pick(t)} style={{
+                padding: "5px 10px", fontSize: 13, cursor: "pointer",
+                color: t === value ? "#93c5fd" : "#e2e8f0",
+                background: t === value ? "#1e3a5f" : "transparent",
+              }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#1e293b")}
+                onMouseLeave={e => (e.currentTarget.style.background = t === value ? "#1e3a5f" : "transparent")}
+              >
+                {t}
+              </div>
+            ))}
+          </div>
+          <div style={{
+            padding: "3px 10px", fontSize: 10, color: "#475569",
+            borderTop: "1px solid #1e293b", textAlign: "right",
+          }}>
+            {filtered.length} / {items.length}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tableErr }: {
   db: "source" | "target";
   schema: string; table: string;
@@ -204,7 +293,6 @@ function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tabl
   const [eSch,    setESch]    = useState("");
   const [eTab,    setETab]    = useState("");
 
-  // Expose loaded tables so parent can auto-pick
   useEffect(() => {
     setLSch(true);
     fetch(`/api/db/${db}/schemas`)
@@ -225,12 +313,10 @@ function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tabl
       .finally(() => setLTab(false));
   }, [db, schema]);
 
-  // When tables loaded, tell parent (for auto-match in target)
   const prevTables = useRef<string[]>([]);
   useEffect(() => {
     if (tables !== prevTables.current) {
       prevTables.current = tables;
-      // if current table value is not in new list, signal parent with ""
       if (table && !tables.includes(table)) onTable("");
     }
   }, [tables]); // eslint-disable-line
@@ -238,26 +324,22 @@ function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tabl
   return (
     <div style={S.row2}>
       <Field label="Схема" required error={schemaErr || eSch}>
-        <select
-          style={lSch ? S.selectDis : S.select}
+        <SearchableSelect
+          items={schemas}
           value={schema}
+          onChange={onSchema}
           disabled={lSch}
-          onChange={e => onSchema(e.target.value)}
-        >
-          <option value="">{lSch ? "Загрузка…" : "Выберите схему"}</option>
-          {schemas.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+          placeholder={lSch ? "Загрузка…" : "Выберите схему"}
+        />
       </Field>
       <Field label="Таблица" required error={tableErr || eTab}>
-        <select
-          style={(!schema || lTab) ? S.selectDis : S.select}
+        <SearchableSelect
+          items={tables}
           value={table}
+          onChange={onTable}
           disabled={!schema || lTab}
-          onChange={e => onTable(e.target.value)}
-        >
-          <option value="">{!schema ? "Сначала схему" : lTab ? "Загрузка…" : "Выберите таблицу"}</option>
-          {tables.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
+          placeholder={!schema ? "Сначала схему" : lTab ? "Загрузка…" : "Выберите таблицу"}
+        />
       </Field>
     </div>
   );
