@@ -732,13 +732,13 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                 <input style={S.input} type="number" value={form.chunk_size} min={1}
                   onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
               </Field>
-              <Field label="Воркеры (bulk)" hint="Параллельных воркеров для bulk-загрузки (1–16)">
-                <input style={S.input} type="number" value={form.max_parallel_workers} min={1} max={16}
-                  onChange={e => setF({ max_parallel_workers: Math.max(1, Math.min(16, parseInt(e.target.value) || 1)) })} />
+              <Field label="Воркеры (bulk)" hint="Параллельных воркеров для bulk-загрузки">
+                <input style={S.input} type="number" value={form.max_parallel_workers} min={1}
+                  onChange={e => setF({ max_parallel_workers: Math.max(1, parseInt(e.target.value) || 1) })} />
               </Field>
-              <Field label="Воркеры (baseline)" hint="Параллельных воркеров для baseline-загрузки (1–32)">
-                <input style={S.input} type="number" value={form.baseline_parallel_degree} min={1} max={32}
-                  onChange={e => setF({ baseline_parallel_degree: Math.max(1, Math.min(32, parseInt(e.target.value) || 4)) })} />
+              <Field label="Воркеры (baseline)" hint="Параллельных воркеров для baseline-загрузки">
+                <input style={S.input} type="number" value={form.baseline_parallel_degree} min={1}
+                  onChange={e => setF({ baseline_parallel_degree: Math.max(1, parseInt(e.target.value) || 4) })} />
               </Field>
             </div>
             <Field label="Валидация stage">
