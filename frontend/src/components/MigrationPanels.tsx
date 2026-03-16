@@ -56,6 +56,7 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 interface ChunkStats {
   total: number; pending: number; claimed: number;
   running: number; done: number; failed: number;
+  rows_loaded: number;
 }
 
 export function BulkProgressPanel({
@@ -129,7 +130,7 @@ export function BulkProgressPanel({
         </div>
         <div style={{ display: "flex", justifyContent: "space-between",
                       fontSize: 11, color: "#64748b", marginTop: 4 }}>
-          <span>{stats.done} / {stats.total} чанков</span>
+          <span>{stats.done} / {stats.total} чанков &middot; {stats.rows_loaded.toLocaleString()} строк</span>
           <span style={{ color: pct === 100 ? "#22c55e" : "#fcd34d", fontWeight: 700 }}>
             {pct}%
           </span>

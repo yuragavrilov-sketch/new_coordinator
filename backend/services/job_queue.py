@@ -176,25 +176,30 @@ def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
 
 def get_chunk_stats(conn, migration_id: str, chunk_type: str = "BULK") -> dict:
     """
-    Return counts per status for the migration's chunks.
-    {total, pending, claimed, running, done, failed}
+    Return counts per status and total rows_loaded for the migration's chunks.
+    {total, pending, claimed, running, done, failed, rows_loaded}
     """
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT status, COUNT(*)
+            SELECT status, COUNT(*), COALESCE(SUM(rows_loaded), 0)
             FROM   migration_chunks
             WHERE  migration_id = %s
               AND  COALESCE(chunk_type, 'BULK') = %s
             GROUP BY status
         """, (migration_id, chunk_type))
-        counts = {row[0]: row[1] for row in cur.fetchall()}
+        counts = {}
+        total_rows = 0
+        for status, cnt, rows in cur.fetchall():
+            counts[status] = cnt
+            total_rows += int(rows)
     return {
-        "total":   sum(counts.values()),
-        "pending": counts.get("PENDING",  0),
-        "claimed": counts.get("CLAIMED",  0),
-        "running": counts.get("RUNNING",  0),
-        "done":    counts.get("DONE",     0),
-        "failed":  counts.get("FAILED",   0),
+        "total":       sum(counts.values()),
+        "pending":     counts.get("PENDING",  0),
+        "claimed":     counts.get("CLAIMED",  0),
+        "running":     counts.get("RUNNING",  0),
+        "done":        counts.get("DONE",     0),
+        "failed":      counts.get("FAILED",   0),
+        "rows_loaded": total_rows,
     }
 
 

@@ -517,6 +517,7 @@ interface ChunkRow {
 interface ChunkStats {
   total: number; pending: number; claimed: number;
   running: number; done: number; failed: number;
+  rows_loaded: number;
 }
 
 function ChunksSection({
@@ -613,7 +614,9 @@ function ChunksSection({
         {chunkType}
       </span>
       {stats && (
-        <span style={{ fontSize: 11, color: "#475569" }}>{stats.total} чанков</span>
+        <span style={{ fontSize: 11, color: "#475569" }}>
+          {stats.total} чанков &middot; {stats.rows_loaded.toLocaleString()} строк
+        </span>
       )}
     </div>
   );
