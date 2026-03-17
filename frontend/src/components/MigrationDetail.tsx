@@ -925,6 +925,61 @@ function EnableIndexesButton({ migrationId, onDone }: { migrationId: string; onD
   );
 }
 
+// ── EnableTriggersButton ─────────────────────────────────────────────────────
+
+function EnableTriggersButton({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+  const [busy, setBusy]   = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [done, setDone]   = useState(false);
+
+  async function handleClick() {
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/enable-triggers`, { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      } else {
+        setDone(true);
+        onDone();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (done) {
+    return <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>Триггеры включены</span>;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        style={{
+          background: busy ? "#1e3a2f" : "#15803d",
+          color: busy ? "#64748b" : "#e2e8f0",
+          border: "1px solid #166534",
+          borderRadius: 5,
+          padding: "5px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Включение..." : "Включить триггеры"}
+      </button>
+      {errMsg && (
+        <span style={{ fontSize: 11, color: "#fca5a5" }}>{errMsg}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "stats" | "chunks" | "errors" | "history";
@@ -1025,6 +1080,9 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {(phase === "INDEXES_ENABLING" ||
             (phase === "FAILED" && detail?.error_code === "INDEXES_ENABLE_ERROR")) && (
             <EnableIndexesButton migrationId={migrationId} onDone={loadDetail} />
+          )}
+          {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") && (
+            <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
           )}
           <button onClick={onClose} style={{
             background: "none", border: "none", color: "#475569",

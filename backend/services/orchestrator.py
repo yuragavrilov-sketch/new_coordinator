@@ -748,6 +748,54 @@ def trigger_indexes_enabling(migration_id: str) -> None:
     _handle_indexes_enabling(migration_id, m)
 
 
+def trigger_enable_triggers(migration_id: str) -> None:
+    """Called by the API endpoint when the user clicks 'Enable Triggers'.
+
+    Accepts migrations in CDC_CATCHING_UP, CDC_CAUGHT_UP, or STEADY_STATE —
+    i.e. only after CDC apply has started and indexes are rebuilt.
+    """
+    _ALLOWED = {"CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
+    get_conn = _state["get_conn"]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM migrations WHERE migration_id = %s",
+                (migration_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Migration {migration_id} not found")
+            m = row_to_dict(cur, row)
+    finally:
+        conn.close()
+
+    if m["phase"] not in _ALLOWED:
+        raise ValueError(
+            f"Migration is in phase {m['phase']}, "
+            f"expected one of {', '.join(sorted(_ALLOWED))}"
+        )
+
+    dst_cfg = _oracle_cfg(m["target_connection_id"])
+    conn = oracle_scn.open_oracle_conn(dst_cfg)
+    try:
+        result = oracle_browser.enable_triggers(
+            conn, m["target_schema"], m["target_table"],
+        )
+    finally:
+        conn.close()
+
+    if result["errors"]:
+        names = [e["name"] for e in result["errors"]]
+        raise RuntimeError(
+            f"Не удалось включить триггеры: {', '.join(names)}. "
+            + str(result["errors"])
+        )
+
+    n = len(result["enabled"])
+    print(f"[orchestrator] {migration_id}: enabled {n} triggers")
+
+
 def _handle_cdc_apply_starting(mid: str, m: dict) -> None:
     """Wait for heartbeat from cdc_apply_worker (written via /api/worker/cdc/checkin)."""
     conn = _state["get_conn"]()

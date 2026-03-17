@@ -625,6 +625,24 @@ def enable_indexes(migration_id: str):
         return jsonify({"error": str(exc)}), 500
 
 
+@bp.post("/api/migrations/<migration_id>/enable-triggers")
+def enable_triggers(migration_id: str):
+    """Manually re-enable DISABLED triggers on the target table.
+    Only allowed once CDC apply is running (CDC_CATCHING_UP / CDC_CAUGHT_UP / STEADY_STATE)."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("enable_triggers")
+    if fn is None:
+        return jsonify({"error": "enable_triggers not wired"}), 500
+    try:
+        fn(migration_id)
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @bp.get("/api/migrations/<migration_id>/validation")
 def get_validation_result(migration_id: str):
     if not _db_ok():
