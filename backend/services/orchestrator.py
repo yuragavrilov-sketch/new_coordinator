@@ -36,9 +36,13 @@ import db.oracle_browser        as oracle_browser
 
 TICK_INTERVAL = 5  # seconds
 
-# Phases that consume heavy I/O on the target Oracle.  Only ONE migration
-# at a time is allowed in these phases; the rest wait in CHUNKING.
+# Phases that occupy the "loading slot".  Only ONE migration at a time is
+# allowed in these phases; the rest wait in NEW (before SCN fixation so
+# Kafka doesn't accumulate a growing CDC backlog while waiting).
 _HEAVY_PHASES = frozenset({
+    "PREPARING", "SCN_FIXED",
+    "CONNECTOR_STARTING", "CDC_BUFFERING",
+    "CHUNKING",
     "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
@@ -218,7 +222,7 @@ def _unmark_in_prog(migration_id: str) -> None:
 
 
 def _update_queue_positions() -> None:
-    """Recalculate queue_position for all migrations waiting in CHUNKING."""
+    """Recalculate queue_position for all migrations waiting in NEW."""
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
@@ -229,16 +233,16 @@ def _update_queue_positions() -> None:
                     SELECT migration_id,
                            ROW_NUMBER() OVER (ORDER BY state_changed_at ASC) AS pos
                     FROM   migrations
-                    WHERE  phase = 'CHUNKING'
+                    WHERE  phase = 'NEW'
                 ) sub
                 WHERE m.migration_id = sub.migration_id
-                  AND  m.phase = 'CHUNKING'
+                  AND  m.phase = 'NEW'
             """)
-            # Clear stale queue_position on non-CHUNKING migrations
+            # Clear stale queue_position on non-NEW migrations
             cur.execute("""
                 UPDATE migrations
                 SET    queue_position = NULL
-                WHERE  phase != 'CHUNKING'
+                WHERE  phase != 'NEW'
                   AND  queue_position IS NOT NULL
             """)
         conn.commit()
@@ -252,10 +256,9 @@ def _update_queue_positions() -> None:
 
 def _handle_new(mid: str, m: dict) -> None:
     """
-    Validate:
-    - key columns defined (if no PK/UK)
-    - effective_key_columns_json not empty
-    Then transition to PREPARING.
+    Validate key columns, then transition to PREPARING — but only if the
+    loading slot is free.  The gate is here (before SCN fixation) so that
+    queued migrations don't accumulate a growing Kafka CDC backlog.
     """
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
@@ -268,6 +271,45 @@ def _handle_new(mid: str, m: dict) -> None:
               "NO_KEY_COLUMNS")
         return
 
+    # ── Queue gate ────────────────────────────────────────────────────
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            placeholders = ",".join(["%s"] * len(_HEAVY_PHASES))
+            cur.execute(
+                f"""SELECT 1 FROM migrations
+                    WHERE  phase IN ({placeholders})
+                      AND  migration_id != %s
+                    LIMIT 1""",
+                (*_HEAVY_PHASES, mid),
+            )
+            slot_busy = cur.fetchone() is not None
+    finally:
+        conn.close()
+
+    if slot_busy:
+        _update_queue_positions()
+        return  # wait — another migration is loading
+
+    # FIFO: among multiple NEW migrations, let the oldest proceed first
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT migration_id FROM migrations
+                WHERE  phase = 'NEW'
+                ORDER BY state_changed_at ASC
+                LIMIT 1
+            """)
+            first = cur.fetchone()
+    finally:
+        conn.close()
+
+    if first and first[0] != mid:
+        _update_queue_positions()
+        return  # not our turn
+
+    _update(mid, {"queue_position": None})
     _transition(mid, "PREPARING", message="Ключевые колонки проверены")
 
 
@@ -423,51 +465,7 @@ def _handle_cdc_buffering(mid: str, m: dict) -> None:
 
 
 def _handle_chunking(mid: str, m: dict) -> None:
-    """Chunks are written.  Transition to BULK_LOADING only when the loading
-    slot is free (no other migration in _HEAVY_PHASES).  This serialises
-    the resource-intensive loading pipeline across queued migrations while
-    allowing CDC connectors and chunk creation to proceed in parallel.
-    """
-    # Check if another migration is already in a heavy phase
-    conn = _state["get_conn"]()
-    try:
-        with conn.cursor() as cur:
-            placeholders = ",".join(["%s"] * len(_HEAVY_PHASES))
-            cur.execute(
-                f"""SELECT 1 FROM migrations
-                    WHERE  phase IN ({placeholders})
-                      AND  migration_id != %s
-                    LIMIT 1""",
-                (*_HEAVY_PHASES, mid),
-            )
-            slot_busy = cur.fetchone() is not None
-    finally:
-        conn.close()
-
-    if slot_busy:
-        # FIFO: update queue_position for UI
-        _update_queue_positions()
-        return
-
-    # FIFO: among multiple CHUNKING migrations, let the oldest proceed first
-    conn = _state["get_conn"]()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT migration_id FROM migrations
-                WHERE  phase = 'CHUNKING'
-                ORDER BY state_changed_at ASC
-                LIMIT 1
-            """)
-            first = cur.fetchone()
-    finally:
-        conn.close()
-
-    if first and first[0] != mid:
-        _update_queue_positions()
-        return  # not our turn
-
-    _update(mid, {"queue_position": None})
+    """Chunks are written — transition to BULK_LOADING."""
     _transition(mid, "BULK_LOADING",
                 message="Чанки записаны, запуск bulk-загрузки")
 

@@ -358,7 +358,7 @@ function MigrationRow({
           {m.migration_name}
         </span>
         <PhaseBadge phase={m.phase} size="sm" />
-        {m.phase === "CHUNKING" && m.queue_position != null && (
+        {m.phase === "NEW" && m.queue_position != null && (
           <span style={{
             background: "#3b2000", color: "#fcd34d",
             border: "1px solid #d97706", borderRadius: 4,

@@ -385,7 +385,7 @@ function OverviewTab({
   return (
     <>
       {/* Queue position indicator */}
-      {phase === "CHUNKING" && detail.queue_position != null && (
+      {phase === "NEW" && detail.queue_position != null && (
         <div style={{
           background: "#3b2000", border: "1px solid #d97706",
           borderRadius: 6, padding: "8px 12px", marginBottom: 14,
@@ -399,7 +399,7 @@ function OverviewTab({
               В очереди на загрузку
             </div>
             <div style={{ fontSize: 11, color: "#d4a050" }}>
-              Чанки готовы. Ожидание завершения загрузки другой миграции.
+              Ожидание завершения загрузки другой миграции. SCN ещё не зафиксирован.
             </div>
           </div>
         </div>
