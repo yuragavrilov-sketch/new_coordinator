@@ -49,11 +49,15 @@ def create_connector(migration: dict, oracle_cfg: dict) -> dict:
     if status not in ("NOT_FOUND",):
         return {"name": connector_name, "already_existed": True, "state": status}
 
-    bootstrap   = _kafka_bootstrap()
+    bootstrap    = _kafka_bootstrap()
     topic_prefix = migration["topic_prefix"]
     src_schema   = migration["source_schema"].upper()
     src_table    = migration["source_table"].upper()
     lob_enabled  = migration.get("lob_enabled", True)
+
+    # User-defined key columns (for tables without PK/UK)
+    key_cols_json = migration.get("effective_key_columns_json") or "[]"
+    key_cols = json.loads(key_cols_json) if isinstance(key_cols_json, str) else key_cols_json
 
     config = {
         "connector.class":              "io.debezium.connector.oracle.OracleConnector",
@@ -121,6 +125,12 @@ def create_connector(migration: dict, oracle_cfg: dict) -> dict:
         "transforms.route.topic.regex":            f"({topic_prefix}\\..*)",
         "transforms.route.topic.replacement":      "$1",
     }
+
+    # Tell Debezium which columns form the message key when the table has
+    # no PK/UK.  Format: "SCHEMA.TABLE:col1,col2"
+    if key_cols:
+        cols_csv = ",".join(c.upper() for c in key_cols)
+        config["message.key.columns"] = f"{src_schema}.{src_table}:{cols_csv}"
 
     url = f"{_base_url()}/connectors"
     try:
