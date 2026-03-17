@@ -681,9 +681,9 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
             n_idx = len(result["enabled"]["indexes"])
             n_con = len(result["enabled"]["constraints"])
-            n_trg = len(result["enabled"]["triggers"])
             msg = (
-                f"Включено: индексов={n_idx}, констрейнтов={n_con}, триггеров={n_trg}. "
+                f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                "Триггеры остаются выключенными до завершения CDC. "
                 "Ожидание запуска CDC apply-worker"
             )
             # Clear leftover error_code/error_text from previous failed attempts
