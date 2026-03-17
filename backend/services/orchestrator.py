@@ -120,8 +120,7 @@ def _dispatch(migration_id: str, phase: str, m: dict) -> None:
         "BASELINE_LOADING":     _handle_baseline_loading,
         "BASELINE_PUBLISHED":   _handle_baseline_published,
         "STAGE_DROPPING":       _handle_stage_dropping,
-        # INDEXES_ENABLING is NOT in the auto-dispatch table — it must be
-        # triggered manually via trigger_indexes_enabling() (UI button).
+        "INDEXES_ENABLING":     _handle_indexes_enabling,
         "CDC_APPLY_STARTING":   _handle_cdc_apply_starting,
         "CDC_CATCHING_UP":      _handle_cdc_catching_up,
         "CDC_CAUGHT_UP":        _handle_cdc_caught_up,
