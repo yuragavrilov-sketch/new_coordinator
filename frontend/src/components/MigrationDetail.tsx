@@ -384,6 +384,27 @@ function OverviewTab({
 }) {
   return (
     <>
+      {/* Queue position indicator */}
+      {phase === "CHUNKING" && detail.queue_position != null && (
+        <div style={{
+          background: "#3b2000", border: "1px solid #d97706",
+          borderRadius: 6, padding: "8px 12px", marginBottom: 14,
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 22, fontWeight: 800, color: "#fcd34d" }}>
+            #{detail.queue_position}
+          </span>
+          <div>
+            <div style={{ fontSize: 12, color: "#fcd34d", fontWeight: 700 }}>
+              В очереди на загрузку
+            </div>
+            <div style={{ fontSize: 11, color: "#d4a050" }}>
+              Чанки готовы. Ожидание завершения загрузки другой миграции.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error block */}
       {detail.error_code && (
         <div style={{

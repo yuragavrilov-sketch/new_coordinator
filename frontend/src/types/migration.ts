@@ -66,6 +66,7 @@ export interface Migration {
   migration_strategy: string;
   baseline_chunks_total: number | null;
   baseline_chunks_done: number;
+  queue_position: number | null;
 }
 
 export interface MigrationSummary {
@@ -90,6 +91,7 @@ export interface MigrationSummary {
   chunks_done: number;
   chunks_failed: number;
   rows_loaded: number;
+  queue_position: number | null;
 }
 
 export interface StateHistoryEntry {

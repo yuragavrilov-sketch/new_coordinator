@@ -358,6 +358,15 @@ function MigrationRow({
           {m.migration_name}
         </span>
         <PhaseBadge phase={m.phase} size="sm" />
+        {m.phase === "CHUNKING" && m.queue_position != null && (
+          <span style={{
+            background: "#3b2000", color: "#fcd34d",
+            border: "1px solid #d97706", borderRadius: 4,
+            fontSize: 10, fontWeight: 700, padding: "1px 6px",
+          }}>
+            #{m.queue_position} в очереди
+          </span>
+        )}
         {/* Action buttons — stop click propagation */}
         <div
           style={{ display: "flex", gap: 4, flexShrink: 0 }}
