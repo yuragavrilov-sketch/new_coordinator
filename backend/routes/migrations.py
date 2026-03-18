@@ -643,6 +643,24 @@ def enable_triggers(migration_id: str):
         return jsonify({"error": str(exc)}), 500
 
 
+@bp.post("/api/migrations/<migration_id>/restart-baseline")
+def restart_baseline(migration_id: str):
+    """Restart the baseline phase: delete old BASELINE chunks, TRUNCATE target,
+    rebuild unique indexes, re-chunk and re-load."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("restart_baseline")
+    if fn is None:
+        return jsonify({"error": "restart_baseline not wired"}), 500
+    try:
+        fn(migration_id)
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @bp.get("/api/migrations/<migration_id>/validation")
 def get_validation_result(migration_id: str):
     if not _db_ok():

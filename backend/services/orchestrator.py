@@ -882,6 +882,65 @@ def trigger_enable_triggers(migration_id: str) -> None:
     print(f"[orchestrator] {migration_id}: enabled {n} triggers")
 
 
+def trigger_baseline_restart(migration_id: str) -> None:
+    """Restart the baseline phase from scratch.
+
+    Allowed from FAILED (baseline-related errors) or BASELINE_LOADING
+    (e.g. when chunks are stuck or ORA-26026 occurred).
+
+    Cleans up old BASELINE chunks, transitions to BASELINE_PUBLISHING
+    which will TRUNCATE target, rebuild unique indexes, mark non-unique
+    UNUSABLE, re-chunk, and start loading.
+    """
+    _ALLOWED_ERRORS = {"BASELINE_PUBLISH_ERROR", "BASELINE_LOAD_FAILED"}
+    _ALLOWED_PHASES = {"BASELINE_LOADING"}
+
+    get_conn = _state["get_conn"]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM migrations WHERE migration_id = %s",
+                (migration_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Migration {migration_id} not found")
+            m = row_to_dict(cur, row)
+    finally:
+        conn.close()
+
+    phase = m["phase"]
+    ok = (
+        phase in _ALLOWED_PHASES
+        or (phase == "FAILED" and m.get("error_code") in _ALLOWED_ERRORS)
+    )
+    if not ok:
+        raise ValueError(
+            f"Нельзя перезапустить baseline из фазы {phase}"
+            + (f" (error_code={m.get('error_code')})" if phase == "FAILED" else "")
+        )
+
+    # Delete old BASELINE chunks so they don't conflict with new ones
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM migration_chunks
+                WHERE  migration_id = %s AND chunk_type = 'BASELINE'
+            """, (migration_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    _transition(
+        migration_id, "BASELINE_PUBLISHING",
+        message="Перезапуск baseline (очистка чанков, TRUNCATE, повтор)",
+        extra_fields={"error_code": None, "error_text": None},
+    )
+    print(f"[orchestrator] {migration_id}: baseline restart triggered")
+
+
 def _handle_cdc_apply_starting(mid: str, m: dict) -> None:
     """Wait for heartbeat from cdc_apply_worker (written via /api/worker/cdc/checkin)."""
     conn = _state["get_conn"]()

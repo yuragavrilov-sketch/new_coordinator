@@ -1001,6 +1001,56 @@ function EnableTriggersButton({ migrationId, onDone }: { migrationId: string; on
   );
 }
 
+// ── RestartBaselineButton ─────────────────────────────────────────────────────
+
+function RestartBaselineButton({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+  const [busy, setBusy]     = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  async function handleClick() {
+    if (!confirm("Перезапустить baseline? Целевая таблица будет очищена (TRUNCATE) и загрузка начнётся заново.")) return;
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/restart-baseline`, { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+      <button
+        onClick={handleClick}
+        disabled={busy}
+        style={{
+          background: busy ? "#3b2000" : "#92400e",
+          color: busy ? "#64748b" : "#fef3c7",
+          border: "1px solid #d97706",
+          borderRadius: 5,
+          padding: "5px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Перезапуск..." : "Перезапустить baseline"}
+      </button>
+      {errMsg && (
+        <span style={{ fontSize: 11, color: "#fca5a5" }}>{errMsg}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "stats" | "chunks" | "errors" | "history";
@@ -1101,6 +1151,10 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {(phase === "INDEXES_ENABLING" ||
             (phase === "FAILED" && detail?.error_code === "INDEXES_ENABLE_ERROR")) && (
             <EnableIndexesButton migrationId={migrationId} onDone={loadDetail} />
+          )}
+          {(phase === "BASELINE_LOADING" ||
+            (phase === "FAILED" && (detail?.error_code === "BASELINE_PUBLISH_ERROR" || detail?.error_code === "BASELINE_LOAD_FAILED"))) && (
+            <RestartBaselineButton migrationId={migrationId} onDone={loadDetail} />
           )}
           {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") && (
             <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
