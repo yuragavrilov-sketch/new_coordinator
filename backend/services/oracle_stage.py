@@ -203,13 +203,14 @@ def sync_target_columns(
     Actions:
     - Columns present in source but missing in target → ALTER TABLE ADD
     - Columns with mismatched type/length → logged as warning only (no auto-ALTER)
-    - Extra columns in target not in source → left untouched
+    - Extra columns in target not in source → ALTER TABLE DROP COLUMN
 
     Returns a summary:
       {
-        "added":    [{"column": str, "type": str}, ...],
-        "warnings": [{"column": str, "source_type": str, "target_type": str}, ...],
-        "skipped":  [str, ...],   # extra target columns
+        "added":       [{"column": str, "type": str}, ...],
+        "dropped":     [str, ...],
+        "drop_errors": [{"column": str, "error": str}, ...],
+        "warnings":    [{"column": str, "source_type": str, "target_type": str}, ...],
       }
     """
     src_conn = open_oracle_conn(src_cfg)
@@ -242,9 +243,21 @@ def sync_target_columns(
             """, {"s": target_schema.upper(), "t": target_table.upper()})
             dst_cols = {r[0]: r for r in cur.fetchall()}
 
-        added: list   = []
+        added: list    = []
+        dropped: list  = []
+        drop_errors: list = []
         warnings: list = []
-        skipped: list  = [c for c in dst_cols if c not in src_cols]
+        extra_cols = [c for c in dst_cols if c not in src_cols]
+
+        # Drop extra columns from target that don't exist in source
+        tgt_full = f'"{target_schema.upper()}"."{target_table.upper()}"'
+        for col_name in extra_cols:
+            try:
+                with dst_conn.cursor() as cur:
+                    cur.execute(f'ALTER TABLE {tgt_full} DROP COLUMN "{col_name}"')
+                dropped.append(col_name)
+            except Exception as exc:
+                drop_errors.append({"column": col_name, "error": str(exc)})
 
         # LONG / LONG RAW columns cannot be added via ALTER TABLE without
         # restrictions (ORA-00997 / ORA-01703) — skip them.
@@ -300,7 +313,7 @@ def sync_target_columns(
             )
         )
 
-    return {"added": added, "warnings": warnings, "skipped": skipped}
+    return {"added": added, "dropped": dropped, "drop_errors": drop_errors, "warnings": warnings}
 
 
 def count_stage(dst_cfg: dict, target_schema: str, stage_table: str) -> int:

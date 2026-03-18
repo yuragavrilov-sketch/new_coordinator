@@ -719,6 +719,12 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                     {ensureResult.columns?.added?.length > 0 && (
                       <Chip label={`+${ensureResult.columns.added.length} колонок`} color="#86efac" bg="#052e16" />
                     )}
+                    {ensureResult.columns?.dropped?.length > 0 && (
+                      <Chip label={`−${ensureResult.columns.dropped.length} лишних колонок`} color="#f97316" bg="#431407" />
+                    )}
+                    {ensureResult.columns?.drop_errors?.length > 0 && (
+                      <Chip label={`${ensureResult.columns.drop_errors.length} ошибок удаления колонок`} color="#fca5a5" bg="#450a0a" />
+                    )}
                     {ensureResult.columns?.warnings?.length > 0 && (
                       <Chip label={`${ensureResult.columns.warnings.length} расхождений типов`} color="#fbbf24" bg="#422006" />
                     )}
@@ -742,6 +748,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                     )}
                     {!ensureResult.created &&
                       ensureResult.columns?.added?.length === 0 &&
+                      ensureResult.columns?.dropped?.length === 0 &&
                       ensureResult.columns?.warnings?.length === 0 &&
                       (ensureResult.objects?.constraints?.added?.length || 0) +
                       (ensureResult.objects?.indexes?.added?.length || 0) +
