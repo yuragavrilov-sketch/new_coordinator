@@ -508,6 +508,12 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     setFormRaw(f => ({ ...f, source_schema: v, source_table: "", target_schema: f.target_schema || v }));
   }, []);
 
+  const onSourceTable = useCallback((v: string) => {
+    setF({ source_table: v });
+    // Suggest same table for target if not yet chosen
+    setFormRaw(f => ({ ...f, source_table: v, target_table: f.target_table || v }));
+  }, []);
+
   // ── Validation ────────────────────────────────────────────────────────────
 
   function validate(): boolean {
@@ -625,7 +631,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
               schema={form.source_schema}
               table={form.source_table}
               onSchema={onSourceSchema}
-              onTable={v => setF({ source_table: v })}
+              onTable={onSourceTable}
               schemaErr={fieldErrs.source_schema}
               tableErr={fieldErrs.source_table}
             />
