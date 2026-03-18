@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request, render_template
-from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action
+from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action, list_tables
 from services.oracle_stage    import sync_target_columns
 from services.oracle_ddl_sync import sync_target_objects
 
@@ -362,4 +362,144 @@ def compare_report():
         idx_rows=idx_rows,
         con_rows=con_rows,
         trg_rows=trg_rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Full-schema comparison report (all tables)
+# ---------------------------------------------------------------------------
+
+def _problem_cols(src_info: dict, tgt_info: dict) -> list[dict]:
+    """Return only columns with issues (for detail section)."""
+    src_map = {c["name"]: c for c in src_info["columns"]}
+    tgt_map = {c["name"]: c for c in tgt_info["columns"]}
+    rows = []
+    for c in src_info["columns"]:
+        if c["name"] not in tgt_map:
+            rows.append({"name": c["name"], "css": "miss", "src_type": _fmt_col_type(c), "tgt_type": "", "status": "Нет в target"})
+        elif c["data_type"] != tgt_map[c["name"]]["data_type"]:
+            rows.append({"name": c["name"], "css": "diff", "src_type": _fmt_col_type(c), "tgt_type": _fmt_col_type(tgt_map[c["name"]]), "status": "Тип различается"})
+    for c in tgt_info["columns"]:
+        if c["name"] not in src_map:
+            rows.append({"name": c["name"], "css": "extra", "src_type": "", "tgt_type": _fmt_col_type(c), "status": "Лишняя в target"})
+    return rows
+
+
+def _problem_indexes(src_info: dict, tgt_info: dict) -> list[dict]:
+    tgt_map = {i["name"]: i for i in tgt_info["indexes"]}
+    rows = []
+    for i in src_info["indexes"]:
+        if i["name"] not in tgt_map:
+            rows.append({"name": i["name"], "css": "miss", "columns": ", ".join(i["columns"]), "status": "Нет в target"})
+    for i in tgt_info["indexes"]:
+        if i["status"] != "VALID":
+            rows.append({"name": i["name"], "css": "diff", "columns": ", ".join(i["columns"]), "status": i["status"]})
+    return rows
+
+
+def _problem_constraints(src_info: dict, tgt_info: dict) -> list[dict]:
+    tgt_keys = {(c["type_code"], ",".join(c["columns"])) for c in tgt_info["constraints"]}
+    tgt_map = {c["name"]: c for c in tgt_info["constraints"]}
+    rows = []
+    for c in src_info["constraints"]:
+        if (c["type_code"], ",".join(c["columns"])) not in tgt_keys:
+            rows.append({"name": c["name"], "css": "miss", "type": c["type"], "columns": ", ".join(c["columns"]), "status": "Нет в target"})
+    for c in tgt_info["constraints"]:
+        if c["status"] == "DISABLED" and c["type_code"] != "P":
+            rows.append({"name": c["name"], "css": "diff", "type": c["type"], "columns": ", ".join(c["columns"]), "status": "DISABLED"})
+    return rows
+
+
+def _problem_triggers(src_info: dict, tgt_info: dict) -> list[dict]:
+    tgt_names = {t["name"] for t in tgt_info["triggers"]}
+    rows = []
+    for t in src_info["triggers"]:
+        if t["name"] not in tgt_names:
+            rows.append({"name": t["name"], "css": "miss", "status": "Нет в target"})
+    return rows
+
+
+@bp.get("/api/target-prep/report-all")
+def compare_report_all():
+    """Full-schema comparison report: all source tables vs target."""
+    src_schema = request.args.get("src_schema", "").strip().upper()
+    tgt_schema = request.args.get("tgt_schema", "").strip().upper()
+    if not src_schema or not tgt_schema:
+        return "src_schema and tgt_schema required", 400
+
+    configs = _state["load_configs"]()
+    try:
+        src_conn = get_oracle_conn("source", configs)
+        tgt_conn = get_oracle_conn("target", configs)
+    except Exception as exc:
+        return f"<h1>Ошибка подключения</h1><pre>{exc}</pre>", 503
+
+    try:
+        src_tables = list_tables(src_conn, src_schema)
+        tgt_tables_set = set(list_tables(tgt_conn, tgt_schema))
+
+        _EMPTY_DIFF = {"ok": True, "total": 0, "cols_missing": 0, "cols_extra": 0,
+                       "cols_type": 0, "idx_missing": 0, "idx_disabled": 0,
+                       "con_missing": 0, "con_disabled": 0, "trg_missing": 0}
+
+        summary_rows = []
+        detail_pairs = []
+
+        for tbl in src_tables:
+            if tbl not in tgt_tables_set:
+                summary_rows.append({
+                    "table": tbl, "css": "row-miss", "badge": "miss",
+                    "status_text": "Нет в target", "d": _EMPTY_DIFF,
+                })
+                continue
+
+            try:
+                si = get_full_ddl_info(src_conn, src_schema, tbl)
+                ti = get_full_ddl_info(tgt_conn, tgt_schema, tbl)
+                d = _diff_summary(si, ti)
+            except Exception as exc:
+                summary_rows.append({
+                    "table": tbl, "css": "row-err", "badge": "err",
+                    "status_text": f"Ошибка: {str(exc)[:60]}",
+                    "d": _EMPTY_DIFF,
+                })
+                continue
+
+            if d["ok"]:
+                summary_rows.append({
+                    "table": tbl, "css": "row-ok", "badge": "ok",
+                    "status_text": "OK", "d": d,
+                })
+            else:
+                summary_rows.append({
+                    "table": tbl, "css": "row-diff", "badge": "warn",
+                    "status_text": f"Расхождения: {d['total']}", "d": d,
+                })
+                detail_pairs.append({
+                    "table": tbl, "diff": d,
+                    "col_rows": _problem_cols(si, ti),
+                    "idx_rows": _problem_indexes(si, ti),
+                    "con_rows": _problem_constraints(si, ti),
+                    "trg_rows": _problem_triggers(si, ti),
+                })
+    finally:
+        src_conn.close()
+        tgt_conn.close()
+
+    ok_count = sum(1 for r in summary_rows if r["badge"] == "ok")
+    diff_count = sum(1 for r in summary_rows if r["badge"] == "warn")
+    error_count = sum(1 for r in summary_rows if r["badge"] == "err")
+    no_target_count = sum(1 for r in summary_rows if r["badge"] == "miss")
+
+    return render_template(
+        "compare_report_all.html",
+        title=f"Сравнение DDL: {src_schema} → {tgt_schema}",
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        src_schema=src_schema, tgt_schema=tgt_schema,
+        total_tables=len(src_tables),
+        compared_count=ok_count + diff_count + error_count,
+        ok_count=ok_count, diff_count=diff_count,
+        error_count=error_count, no_target_count=no_target_count,
+        summary_rows=summary_rows,
+        detail_pairs=detail_pairs,
     )

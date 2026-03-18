@@ -1022,6 +1022,21 @@ export function TargetPrep() {
             {compareAllBusy ? "Сравниваю…" : "Сравнить все DDL"}
           </button>
         )}
+        {tablesLoaded && (
+          <a
+            href={`/api/target-prep/report-all?src_schema=${encodeURIComponent(srcSchema)}&tgt_schema=${encodeURIComponent(tgtSchema)}`}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: "#1e3a5f", border: "1px solid #2563eb",
+              borderRadius: 6, color: "#93c5fd",
+              padding: "7px 20px", fontSize: 13, fontWeight: 600,
+              textDecoration: "none", cursor: "pointer",
+            }}
+          >
+            Обобщённый отчёт
+          </a>
+        )}
       </div>
 
       {/* Load error */}
