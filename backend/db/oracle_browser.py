@@ -259,6 +259,31 @@ def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
     conn.commit()
 
 
+def rebuild_unusable_unique_indexes(conn, schema: str, table: str) -> list[str]:
+    """Rebuild any UNUSABLE unique/PK indexes on *table*.
+
+    This recovers from a previous failed attempt that left unique indexes
+    in UNUSABLE state (before the fix that skips them in mark_indexes_unusable).
+    ORA-26026 is raised by INSERT if a unique index is UNUSABLE, so they
+    MUST be VALID before the load starts.
+
+    Returns the list of index names that were rebuilt.
+    """
+    info = get_full_ddl_info(conn, schema, table)
+    s = schema.upper()
+    rebuilt: list[str] = []
+    with conn.cursor() as cur:
+        for idx in info["indexes"]:
+            if idx["status"] == "UNUSABLE" and idx["unique"]:
+                try:
+                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
+                    rebuilt.append(idx["name"])
+                except Exception as exc:
+                    print(f"[oracle_browser] could not rebuild unique index {idx['name']}: {exc}")
+    conn.commit()
+    return rebuilt
+
+
 def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -> list[str]:
     """Mark non-unique indexes on *table* as UNUSABLE so Oracle skips index
     maintenance during the subsequent bulk INSERT.
