@@ -259,38 +259,45 @@ def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
     conn.commit()
 
 
-def _constraint_backing_indexes(info: dict) -> set[str]:
+def _constraint_backing_indexes(conn, schema: str, table: str) -> set[str]:
     """Return upper-cased names of indexes that back a PK or UNIQUE constraint.
+
+    Uses the authoritative ``all_constraints.index_name`` column — this is
+    Oracle's own mapping and covers all cases including non-unique indexes
+    created with ``USING INDEX`` on a UNIQUE constraint.
+
+    Also includes every index with ``uniqueness = 'UNIQUE'`` as a safety net.
 
     Oracle refuses to skip such indexes during INSERT even with
     SKIP_UNUSABLE_INDEXES = TRUE.  Marking them UNUSABLE causes ORA-26026.
-
-    Detection strategy (covers both implicit and explicit backing indexes):
-      1. Index name == constraint name (Oracle default when no USING INDEX).
-      2. Index column set == constraint column set (explicit USING INDEX).
-      3. Index flagged as UNIQUE in all_indexes.
     """
+    s = schema.upper()
+    t = table.upper()
     protected: set[str] = set()
 
-    # Gather PK/UK constraint column sets
-    pk_uk_col_sets: list[tuple[str, frozenset[str]]] = []
-    for con in info["constraints"]:
-        if con["type_code"] in ("P", "U"):
-            protected.add(con["name"].upper())           # rule 1
-            col_set = frozenset(c.upper() for c in con["columns"])
-            pk_uk_col_sets.append((con["name"], col_set))
+    with conn.cursor() as cur:
+        # Direct authoritative lookup
+        cur.execute("""
+            SELECT index_name
+            FROM   all_constraints
+            WHERE  owner = :s AND table_name = :t
+              AND  constraint_type IN ('P', 'U')
+              AND  index_name IS NOT NULL
+        """, {"s": s, "t": t})
+        for row in cur.fetchall():
+            protected.add(row[0].upper())
 
-    # Match indexes by column set
-    for idx in info["indexes"]:
-        if idx["unique"]:                                # rule 3
-            protected.add(idx["name"].upper())
-            continue
-        idx_cols = frozenset(c.upper() for c in idx["columns"])
-        for _con_name, con_cols in pk_uk_col_sets:
-            if idx_cols == con_cols:                      # rule 2
-                protected.add(idx["name"].upper())
-                break
+        # Safety net: any index flagged UNIQUE in all_indexes
+        cur.execute("""
+            SELECT index_name
+            FROM   all_indexes
+            WHERE  owner = :s AND table_name = :t
+              AND  uniqueness = 'UNIQUE'
+        """, {"s": s, "t": t})
+        for row in cur.fetchall():
+            protected.add(row[0].upper())
 
+    print(f"[oracle_browser] protected indexes for {s}.{t}: {protected}")
     return protected
 
 
@@ -305,7 +312,7 @@ def rebuild_unusable_constraint_indexes(conn, schema: str, table: str) -> list[s
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
-    protected = _constraint_backing_indexes(info)
+    protected = _constraint_backing_indexes(conn, schema, table)
     rebuilt: list[str] = []
     with conn.cursor() as cur:
         for idx in info["indexes"]:
@@ -324,19 +331,17 @@ def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -
     during the subsequent bulk INSERT.
 
     SKIP_UNUSABLE_INDEXES = TRUE (Oracle session default) causes the INSERT to
-    bypass UNUSABLE indexes — but ONLY for non-unique indexes and indexes that
-    do NOT back a PK or UNIQUE constraint.  Marking such an index UNUSABLE
-    causes ORA-26026 on INSERT (ORA-12801 with parallel DML).
+    bypass UNUSABLE indexes — but ONLY for indexes that do NOT back a PK or
+    UNIQUE constraint.  Marking such an index UNUSABLE causes ORA-26026.
 
-    Therefore indexes that back PK/UK constraints (by name, column set, or
-    uniqueness flag) are left VALID.  Only truly secondary indexes are
-    marked UNUSABLE.
+    Detection uses ``all_constraints.index_name`` — the authoritative Oracle
+    mapping — plus the ``uniqueness`` flag as a safety net.
 
     Returns the list of index names that were marked UNUSABLE.
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
-    protected = _constraint_backing_indexes(info)
+    protected = _constraint_backing_indexes(conn, schema, table)
 
     marked: list[str] = []
     with conn.cursor() as cur:
