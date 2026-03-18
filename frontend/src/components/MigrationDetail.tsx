@@ -372,6 +372,16 @@ function HistoryTab({ history }: { history: StateHistoryEntry[] }) {
   );
 }
 
+function EnsureChip({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return (
+    <span style={{
+      background: bg, color, border: `1px solid ${color}44`,
+      borderRadius: 4, fontSize: 10, fontWeight: 700,
+      padding: "2px 8px", display: "inline-block",
+    }}>{label}</span>
+  );
+}
+
 // ── Overview tab ──────────────────────────────────────────────────────────────
 
 function OverviewTab({
@@ -382,6 +392,33 @@ function OverviewTab({
   sseEvents: SSEEvent[];
   phase: string;
 }) {
+  const [ensureBusy,   setEnsureBusy]   = useState(false);
+  const [ensureResult, setEnsureResult] = useState<any>(null);
+  const [ensureErr,    setEnsureErr]    = useState("");
+
+  const ensureTargetTable = () => {
+    setEnsureBusy(true);
+    setEnsureErr("");
+    setEnsureResult(null);
+    fetch("/api/target-prep/ensure-table", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        src_schema: detail.source_schema,
+        src_table:  detail.source_table,
+        tgt_schema: detail.target_schema,
+        tgt_table:  detail.target_table,
+      }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) setEnsureErr(d.error);
+        else setEnsureResult(d);
+      })
+      .catch(e => setEnsureErr(String(e)))
+      .finally(() => setEnsureBusy(false));
+  };
+
   return (
     <>
       {/* Queue position indicator */}
@@ -469,6 +506,67 @@ function OverviewTab({
         <InfoRow label="Target table"      value={`${detail.target_schema}.${detail.target_table}`} />
         <InfoRow label="Stage table"       value={detail.stage_table_name} />
       </InfoGrid>
+
+      <div style={{ marginBottom: 16, display: "flex", flexDirection: "column", gap: 6 }}>
+        <button
+          disabled={ensureBusy}
+          onClick={ensureTargetTable}
+          style={{
+            padding: "6px 14px", borderRadius: 6,
+            cursor: ensureBusy ? "not-allowed" : "pointer",
+            border: "1px solid #047857", background: "#052e16", color: "#6ee7b7",
+            fontSize: 12, fontWeight: 600, opacity: ensureBusy ? 0.5 : 1,
+            alignSelf: "flex-start",
+          }}
+        >
+          {ensureBusy ? "Синхронизация…" : "Привести target в соответствие source"}
+        </button>
+        {ensureErr && (
+          <div style={{ color: "#fca5a5", fontSize: 11 }}>{ensureErr}</div>
+        )}
+        {ensureResult && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {ensureResult.created && (
+              <EnsureChip label="Таблица создана" color="#86efac" bg="#052e16" />
+            )}
+            {ensureResult.columns?.added?.length > 0 && (
+              <EnsureChip label={`+${ensureResult.columns.added.length} колонок`} color="#86efac" bg="#052e16" />
+            )}
+            {ensureResult.columns?.warnings?.length > 0 && (
+              <EnsureChip label={`${ensureResult.columns.warnings.length} расхождений типов`} color="#fbbf24" bg="#422006" />
+            )}
+            {(ensureResult.objects?.constraints?.added?.length > 0 ||
+              ensureResult.objects?.indexes?.added?.length > 0 ||
+              ensureResult.objects?.triggers?.added?.length > 0) && (
+              <EnsureChip label={`+${
+                (ensureResult.objects.constraints?.added?.length || 0) +
+                (ensureResult.objects.indexes?.added?.length || 0) +
+                (ensureResult.objects.triggers?.added?.length || 0)
+              } объектов`} color="#86efac" bg="#052e16" />
+            )}
+            {(ensureResult.objects?.constraints?.errors?.length > 0 ||
+              ensureResult.objects?.indexes?.errors?.length > 0 ||
+              ensureResult.objects?.triggers?.errors?.length > 0) && (
+              <EnsureChip label={`${
+                (ensureResult.objects.constraints?.errors?.length || 0) +
+                (ensureResult.objects.indexes?.errors?.length || 0) +
+                (ensureResult.objects.triggers?.errors?.length || 0)
+              } ошибок`} color="#fca5a5" bg="#450a0a" />
+            )}
+            {!ensureResult.created &&
+              ensureResult.columns?.added?.length === 0 &&
+              ensureResult.columns?.warnings?.length === 0 &&
+              (ensureResult.objects?.constraints?.added?.length || 0) +
+              (ensureResult.objects?.indexes?.added?.length || 0) +
+              (ensureResult.objects?.triggers?.added?.length || 0) === 0 &&
+              (ensureResult.objects?.constraints?.errors?.length || 0) +
+              (ensureResult.objects?.indexes?.errors?.length || 0) +
+              (ensureResult.objects?.triggers?.errors?.length || 0) === 0 && (
+              <EnsureChip label="Таблицы идентичны" color="#86efac" bg="#052e16" />
+            )}
+          </div>
+        )}
+      </div>
 
       <InfoGrid title="Коннектор / Kafka">
         <InfoRow label="Connector"      value={detail.connector_name} />
