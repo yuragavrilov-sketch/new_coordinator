@@ -169,8 +169,12 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         ]
 
         # Indexes
+        # Note: partitioned indexes have status = 'N/A' in all_indexes;
+        # real per-partition status lives in all_ind_partitions.
+        # We treat 'N/A' as 'VALID' for comparison purposes.
         cur.execute("""
-            SELECT ai.index_name, ai.uniqueness, ai.index_type, ai.status,
+            SELECT ai.index_name, ai.uniqueness, ai.index_type,
+                   ai.status, ai.partitioned,
                    LISTAGG(aic.column_name, ',')
                        WITHIN GROUP (ORDER BY aic.column_position) AS cols
             FROM   all_indexes     ai
@@ -179,7 +183,8 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
                    AND ai.owner       = aic.index_owner
             WHERE  ai.owner      = :s
               AND  ai.table_name = :t
-            GROUP BY ai.index_name, ai.uniqueness, ai.index_type, ai.status
+            GROUP BY ai.index_name, ai.uniqueness, ai.index_type,
+                     ai.status, ai.partitioned
             ORDER BY ai.index_name
         """, {"s": schema, "t": table})
         indexes = [
@@ -187,8 +192,8 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
                 "name":       r[0],
                 "unique":     r[1] == "UNIQUE",
                 "index_type": r[2],
-                "status":     r[3],         # VALID / UNUSABLE
-                "columns":    r[4].split(",") if r[4] else [],
+                "status":     "VALID" if r[3] == "N/A" else r[3],
+                "columns":    r[5].split(",") if r[5] else [],
             }
             for r in cur.fetchall()
         ]

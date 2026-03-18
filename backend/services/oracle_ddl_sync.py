@@ -108,7 +108,7 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
     # Target constraints keyed by (type_code, cols) for structural matching
     with dst_conn.cursor() as cur:
         cur.execute("""
-            SELECT ac.constraint_type,
+            SELECT ac.constraint_name, ac.constraint_type,
                    LISTAGG(acc.column_name, ',')
                        WITHIN GROUP (ORDER BY acc.position) AS cols
             FROM   all_constraints  ac
@@ -120,7 +120,12 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
               AND  ac.constraint_type IN ('P','U','R','C')
             GROUP BY ac.constraint_name, ac.constraint_type
         """, {"s": tgt_schema.upper(), "t": tgt_table.upper()})
-        tgt_keys = {(r[0], r[1]) for r in cur.fetchall()}
+        tgt_rows_raw = cur.fetchall()
+        tgt_keys = {(r[1], r[2]) for r in tgt_rows_raw}
+        # Map type_code → (constraint_name, cols) for PK/UK drop-and-recreate
+        tgt_by_type: dict[str, list[tuple[str, str]]] = {}
+        for cname_t, ctype_t, cols_t in tgt_rows_raw:
+            tgt_by_type.setdefault(ctype_t, []).append((cname_t, cols_t))
 
     s = tgt_schema.upper()
     t = tgt_table.upper()
@@ -136,6 +141,23 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
             continue
 
         try:
+            # PK changed columns — drop old PK before creating new one
+            if ctype == "P" and "P" in tgt_by_type:
+                old_pk_name, old_pk_cols = tgt_by_type["P"][0]
+                if old_pk_cols != cols:
+                    try:
+                        with dst_conn.cursor() as cur:
+                            cur.execute(
+                                f'ALTER TABLE "{s}"."{t}" DROP CONSTRAINT "{old_pk_name}" CASCADE'
+                            )
+                        out["added"].append(f"DROP PK {old_pk_name} ({old_pk_cols})")
+                        # Remove old key so it won't block
+                        tgt_keys.discard(("P", old_pk_cols))
+                        del tgt_by_type["P"]
+                    except Exception as exc:
+                        out["errors"].append({"name": old_pk_name, "error": f"DROP PK: {exc}"})
+                        continue
+
             if ctype == "P":
                 ddl = (
                     f'ALTER TABLE "{s}"."{t}" ADD CONSTRAINT "{cname}" '
