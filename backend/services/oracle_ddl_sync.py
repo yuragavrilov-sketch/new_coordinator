@@ -241,11 +241,22 @@ def _sync_indexes(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_tab
         con_backed = {r[0] for r in cur.fetchall()}
 
     with dst_conn.cursor() as cur:
-        cur.execute(
-            "SELECT index_name FROM all_indexes WHERE owner = :s AND table_name = :t",
-            {"s": tgt_schema.upper(), "t": tgt_table.upper()},
-        )
-        tgt_names = {r[0] for r in cur.fetchall()}
+        cur.execute("""
+            SELECT ai.index_name, ai.uniqueness,
+                   LISTAGG(aic.column_name, ',')
+                       WITHIN GROUP (ORDER BY aic.column_position) AS cols
+            FROM   all_indexes     ai
+            JOIN   all_ind_columns aic
+                   ON  ai.index_name  = aic.index_name
+                   AND ai.owner       = aic.index_owner
+            WHERE  ai.owner      = :s
+              AND  ai.table_name = :t
+            GROUP BY ai.index_name, ai.uniqueness
+        """, {"s": tgt_schema.upper(), "t": tgt_table.upper()})
+        tgt_rows_all = cur.fetchall()
+        tgt_names = {r[0] for r in tgt_rows_all}
+        # Structural key: (uniqueness, cols) — catches SYS_ renamed indexes
+        tgt_struct = {(r[1], r[2]) for r in tgt_rows_all}
 
     s = tgt_schema.upper()
     t = tgt_table.upper()
@@ -258,6 +269,11 @@ def _sync_indexes(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_tab
 
         if idx_name in tgt_names:
             out["skipped"].append(idx_name)
+            continue
+
+        # Structural match — same columns & uniqueness under a different name (SYS_* etc.)
+        if (uniqueness, cols) in tgt_struct:
+            out["skipped"].append(f"{idx_name} (структурный аналог уже существует)")
             continue
 
         # Skip function-based / BITMAP — require special DDL

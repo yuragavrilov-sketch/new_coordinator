@@ -90,9 +90,16 @@ def _diff_summary(src: dict, tgt: dict) -> dict:
         and c["data_type"] != tgt_col_map[c["name"]]["data_type"]
     )
 
-    tgt_idx      = {i["name"] for i in tgt["indexes"]}
-    idx_missing  = sum(1 for i in src["indexes"] if i["name"] not in tgt_idx)
-    idx_disabled = sum(1 for i in tgt["indexes"] if i["status"] != "VALID")
+    def _idx_key(i: dict) -> tuple:
+        return (i["unique"], ",".join(i["columns"]))
+
+    tgt_idx_names = {i["name"] for i in tgt["indexes"]}
+    tgt_idx_keys  = {_idx_key(i) for i in tgt["indexes"]}
+    idx_missing   = sum(
+        1 for i in src["indexes"]
+        if i["name"] not in tgt_idx_names and _idx_key(i) not in tgt_idx_keys
+    )
+    idx_disabled  = sum(1 for i in tgt["indexes"] if i["status"] != "VALID")
 
     tgt_con_keys = {(c["type_code"], ",".join(c["columns"])) for c in tgt["constraints"]}
     con_missing  = sum(
@@ -323,32 +330,52 @@ def compare_report():
             "tgt_default": (tc.get("data_default") or "") if tc else "",
         })
 
-    # ── Index rows ───────────────────────────────────────────────────
+    # ── Index rows (match by name first, then by structure for SYS_ indexes) ──
+    def _idx_struct_key(i: dict) -> tuple:
+        return (i["unique"], ",".join(i["columns"]))
+
     src_idx_map = {i["name"]: i for i in src_info["indexes"]}
     tgt_idx_map = {i["name"]: i for i in tgt_info["indexes"]}
-    all_idx_names = list(dict.fromkeys(
-        list(src_idx_map) + list(tgt_idx_map)
-    ))
+    tgt_idx_by_struct = {}
+    for i in tgt_info["indexes"]:
+        tgt_idx_by_struct.setdefault(_idx_struct_key(i), i)
+
+    matched_tgt_names: set[str] = set()
     idx_rows = []
-    for name in all_idx_names:
-        si = src_idx_map.get(name)
+
+    for name, si in src_idx_map.items():
         ti = tgt_idx_map.get(name)
-        ref = si or ti
-        if si and not ti:
+        if not ti:
+            ti = tgt_idx_by_struct.get(_idx_struct_key(si))
+        if ti:
+            matched_tgt_names.add(ti["name"])
+        ref = si
+        if not ti:
             css = "miss"
-        elif ti and not si:
-            css = "extra"
-        elif ti and ti["status"] != "VALID":
+        elif ti["status"] != "VALID":
             css = "diff"
         else:
             css = "ok-row"
+        display_name = name if not ti or ti["name"] == name else f"{name} / {ti['name']}"
         idx_rows.append({
-            "name": name, "css": css,
+            "name": display_name, "css": css,
             "index_type": ref["index_type"],
             "unique": "Да" if ref["unique"] else "",
             "columns": ", ".join(ref["columns"]),
-            "in_source": "Да" if si else "Нет",
+            "in_source": "Да",
             "tgt_status": ti["status"] if ti else "Нет",
+        })
+
+    for name, ti in tgt_idx_map.items():
+        if name in matched_tgt_names or name in src_idx_map:
+            continue
+        idx_rows.append({
+            "name": name, "css": "extra",
+            "index_type": ti["index_type"],
+            "unique": "Да" if ti["unique"] else "",
+            "columns": ", ".join(ti["columns"]),
+            "in_source": "Нет",
+            "tgt_status": ti["status"],
         })
 
     # ── Constraint rows ──────────────────────────────────────────────
@@ -442,10 +469,12 @@ def _problem_cols(src_info: dict, tgt_info: dict) -> list[dict]:
 
 
 def _problem_indexes(src_info: dict, tgt_info: dict) -> list[dict]:
-    tgt_map = {i["name"]: i for i in tgt_info["indexes"]}
+    tgt_name_set = {i["name"] for i in tgt_info["indexes"]}
+    tgt_struct    = {(i["unique"], ",".join(i["columns"])) for i in tgt_info["indexes"]}
     rows = []
     for i in src_info["indexes"]:
-        if i["name"] not in tgt_map:
+        key = (i["unique"], ",".join(i["columns"]))
+        if i["name"] not in tgt_name_set and key not in tgt_struct:
             rows.append({"name": i["name"], "css": "miss", "columns": ", ".join(i["columns"]), "status": "Нет в target"})
     for i in tgt_info["indexes"]:
         if i["status"] != "VALID":
