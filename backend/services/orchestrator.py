@@ -562,6 +562,39 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
             stg_table  = m["stage_table_name"]
             chunk_size = int(m.get("baseline_batch_size") or 500_000)
 
+            # Wait for in-flight BASELINE chunks to drain (restart scenario).
+            # Phase is already BASELINE_PUBLISHING so workers won't claim new
+            # chunks; we just need active ones to finish before TRUNCATE.
+            pg_conn = _state["get_conn"]()
+            try:
+                while True:
+                    with pg_conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT COUNT(*) FROM migration_chunks
+                            WHERE  migration_id = %s
+                              AND  chunk_type = 'BASELINE'
+                              AND  status IN ('CLAIMED', 'RUNNING')
+                        """, (mid,))
+                        active = cur.fetchone()[0]
+                    if active == 0:
+                        break
+                    print(f"[baseline_publishing] waiting for {active} in-flight chunks to drain…")
+                    time.sleep(3)
+            finally:
+                pg_conn.close()
+
+            # Delete old BASELINE chunks (DONE/FAILED/CANCELLED from previous run)
+            pg_conn = _state["get_conn"]()
+            try:
+                with pg_conn.cursor() as cur:
+                    cur.execute("""
+                        DELETE FROM migration_chunks
+                        WHERE  migration_id = %s AND chunk_type = 'BASELINE'
+                    """, (mid,))
+                pg_conn.commit()
+            finally:
+                pg_conn.close()
+
             # TRUNCATE target table before loading so retries start from a clean slate
             tgt_quoted = f'"{tgt_schema.upper()}"."{tgt_table.upper()}"'
             conn = oracle_scn.open_oracle_conn(dst_cfg)
@@ -888,9 +921,10 @@ def trigger_baseline_restart(migration_id: str) -> None:
     Allowed from FAILED (baseline-related errors) or BASELINE_LOADING
     (e.g. when chunks are stuck or ORA-26026 occurred).
 
-    Cleans up old BASELINE chunks, transitions to BASELINE_PUBLISHING
-    which will TRUNCATE target, rebuild unique indexes, mark non-unique
-    UNUSABLE, re-chunk, and start loading.
+    1. Cancel PENDING chunks (prevent new claims).
+    2. Transition to BASELINE_PUBLISHING (workers won't claim from this phase).
+    3. _handle_baseline_publishing will wait for in-flight chunks to drain,
+       delete old chunks, TRUNCATE, rebuild unique indexes, re-chunk, and load.
     """
     _ALLOWED_ERRORS = {"BASELINE_PUBLISH_ERROR", "BASELINE_LOAD_FAILED"}
     _ALLOWED_PHASES = {"BASELINE_LOADING"}
@@ -921,21 +955,26 @@ def trigger_baseline_restart(migration_id: str) -> None:
             + (f" (error_code={m.get('error_code')})" if phase == "FAILED" else "")
         )
 
-    # Delete old BASELINE chunks so they don't conflict with new ones
+    # Cancel PENDING chunks immediately so workers don't pick them up
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                DELETE FROM migration_chunks
-                WHERE  migration_id = %s AND chunk_type = 'BASELINE'
+                UPDATE migration_chunks
+                SET    status = 'CANCELLED'
+                WHERE  migration_id = %s
+                  AND  chunk_type = 'BASELINE'
+                  AND  status = 'PENDING'
             """, (migration_id,))
         conn.commit()
     finally:
         conn.close()
 
+    # Transition away from BASELINE_LOADING — workers won't claim new chunks.
+    # _handle_baseline_publishing will drain in-flight chunks before TRUNCATE.
     _transition(
         migration_id, "BASELINE_PUBLISHING",
-        message="Перезапуск baseline (очистка чанков, TRUNCATE, повтор)",
+        message="Перезапуск baseline: ожидание завершения активных воркеров…",
         extra_fields={"error_code": None, "error_text": None},
     )
     print(f"[orchestrator] {migration_id}: baseline restart triggered")
