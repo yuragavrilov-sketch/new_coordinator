@@ -371,6 +371,7 @@ def get_active_migrations(conn) -> list[dict]:
         "STAGE_DROPPING", "INDEXES_ENABLING",
         "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",
+        "CANCELLING",
     )
     placeholders = ",".join(["%s"] * len(_ACTIVE_PHASES))
     with conn.cursor() as cur:

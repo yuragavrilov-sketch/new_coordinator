@@ -138,6 +138,7 @@ def _dispatch(migration_id: str, phase: str, m: dict) -> None:
         "CDC_CATCHING_UP":      _handle_cdc_catching_up,
         "CDC_CAUGHT_UP":        _handle_cdc_caught_up,
         "STEADY_STATE":         _handle_steady_state,
+        "CANCELLING":           _handle_cancelling,
     }
     handler = handlers.get(phase)
     if handler:
@@ -204,6 +205,35 @@ def _configs() -> dict:
 
 def _oracle_cfg(connection_id: str) -> dict:
     return _configs().get(connection_id, {})
+
+
+def _current_phase(migration_id: str) -> str | None:
+    """Read the current phase from the DB.  Used by threaded handlers to
+    detect if the user cancelled while they were running."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT phase FROM migrations WHERE migration_id = %s",
+                (migration_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def _safe_transition(migration_id: str, expected_phase: str, to_phase: str,
+                     **kwargs) -> bool:
+    """Transition only if the migration is still in *expected_phase*.
+    Returns True if transitioned, False if phase changed (e.g. cancelled)."""
+    cur = _current_phase(migration_id)
+    if cur != expected_phase:
+        print(f"[orchestrator] {migration_id}: skip transition {expected_phase}→{to_phase}, "
+              f"current phase is {cur} (cancelled?)")
+        return False
+    _transition(migration_id, to_phase, **kwargs)
+    return True
 
 
 def _in_prog(migration_id: str) -> bool:
@@ -360,10 +390,11 @@ def _handle_preparing(mid: str, m: dict) -> None:
                 "start_scn":   scn,
                 "scn_fixed_at": datetime.utcnow(),
             })
-            _transition(mid, "SCN_FIXED",
-                        message=f"{stage_msg}start_scn={scn}")
+            _safe_transition(mid, "PREPARING", "SCN_FIXED",
+                            message=f"{stage_msg}start_scn={scn}")
         except Exception as exc:
-            _fail(mid, str(exc), "PREPARING_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "PREPARING_ERROR")
         finally:
             _unmark_in_prog(mid)
 
@@ -529,11 +560,14 @@ def _handle_stage_validating(mid: str, m: dict) -> None:
             _update(mid, {"validation_result": json.dumps(result.to_dict())})
 
             if result.ok:
-                _transition(mid, "STAGE_VALIDATED", message=result.message)
+                _safe_transition(mid, "STAGE_VALIDATING", "STAGE_VALIDATED",
+                                 message=result.message)
             else:
-                _fail(mid, result.message, "VALIDATION_FAILED")
+                if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                    _fail(mid, result.message, "VALIDATION_FAILED")
         except Exception as exc:
-            _fail(mid, str(exc), "VALIDATION_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "VALIDATION_ERROR")
         finally:
             _unmark_in_prog(mid)
 
@@ -668,10 +702,11 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 "baseline_chunks_total": len(chunks),
                 "baseline_chunks_done":  0,
             })
-            _transition(mid, "BASELINE_LOADING",
-                        message=f"Создано {len(chunks)} baseline-чанков, запуск воркеров")
+            _safe_transition(mid, "BASELINE_PUBLISHING", "BASELINE_LOADING",
+                            message=f"Создано {len(chunks)} baseline-чанков, запуск воркеров")
         except Exception as exc:
-            _fail(mid, str(exc), "BASELINE_PUBLISH_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "BASELINE_PUBLISH_ERROR")
         finally:
             _unmark_in_prog(mid)
 
@@ -739,10 +774,11 @@ def _handle_stage_dropping(mid: str, m: dict) -> None:
             oracle_stage.drop_stage_table(
                 dst_cfg, m["target_schema"], m["stage_table_name"],
             )
-            _transition(mid, "INDEXES_ENABLING",
-                        message="Stage-таблица удалена, включение индексов и прочих объектов")
+            _safe_transition(mid, "STAGE_DROPPING", "INDEXES_ENABLING",
+                            message="Stage-таблица удалена, включение индексов и прочих объектов")
         except Exception as exc:
-            _fail(mid, str(exc), "STAGE_DROP_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "STAGE_DROP_ERROR")
         finally:
             _unmark_in_prog(mid)
 
@@ -805,17 +841,26 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                 "Триггеры остаются выключенными до завершения CDC. "
                 "Ожидание запуска CDC apply-worker"
             )
-            # Clear leftover error_code/error_text from previous failed attempts
-            _transition(
-                mid, "CDC_APPLY_STARTING", message=msg,
+            # Clear leftover error_code/error_text from previous failed attempts.
+            # Use _safe_transition so a concurrent cancel is respected.
+            _safe_transition(
+                mid, "INDEXES_ENABLING", "CDC_APPLY_STARTING",
+                message=msg,
                 extra_fields={"error_code": None, "error_text": None},
             )
         except Exception as exc:
-            _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
         finally:
             _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
+
+def _handle_cancelling(mid: str, m: dict) -> None:
+    """Wait for any in-flight thread to finish, then transition to CANCELLED."""
+    if _in_prog(mid):
+        return  # thread still running — wait for next tick
+    _transition(mid, "CANCELLED", message="Миграция отменена")
 
 
 # ---------------------------------------------------------------------------

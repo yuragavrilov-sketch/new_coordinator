@@ -1051,6 +1051,73 @@ function RestartBaselineButton({ migrationId, onDone }: { migrationId: string; o
   );
 }
 
+// ── StopDeleteButtons ─────────────────────────────────────────────────────────
+
+const _ACTIVE = new Set([
+  "NEW", "PREPARING", "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "CHUNKING", "BULK_LOADING", "BULK_LOADED",
+  "STAGE_VALIDATING", "STAGE_VALIDATED",
+  "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
+  "STAGE_DROPPING", "INDEXES_ENABLING",
+  "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE",
+]);
+const _DELETABLE = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
+
+function StopDeleteButtons({ migrationId, phase, onDone, onDeleted }: {
+  migrationId: string; phase: string; onDone: () => void; onDeleted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const canStop   = _ACTIVE.has(phase);
+  const canDelete = _DELETABLE.has(phase);
+  if (!canStop && !canDelete) return null;
+
+  async function doStop() {
+    if (!confirm("Остановить миграцию? Текущая операция завершится, после чего миграция перейдёт в CANCELLED.")) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/migrations/${migrationId}/action`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      onDone();
+    } finally { setBusy(false); }
+  }
+
+  async function doDelete() {
+    if (!confirm("Удалить миграцию? Это действие необратимо.")) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}`, { method: "DELETE" });
+      if (r.ok) { onDeleted(); } else { onDone(); }
+    } finally { setBusy(false); }
+  }
+
+  const btnStyle = (bg: string, border: string, color: string): React.CSSProperties => ({
+    background: busy ? "#1e293b" : bg,
+    color: busy ? "#475569" : color,
+    border: `1px solid ${border}`,
+    borderRadius: 4, padding: "3px 10px",
+    fontSize: 11, fontWeight: 600,
+    cursor: busy ? "not-allowed" : "pointer",
+  });
+
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {canStop && (
+        <button onClick={doStop} disabled={busy} style={btnStyle("#450a0a", "#7f1d1d", "#fca5a5")}>
+          Остановить
+        </button>
+      )}
+      {canDelete && (
+        <button onClick={doDelete} disabled={busy} style={btnStyle("#450a0a", "#7f1d1d", "#fca5a5")}>
+          Удалить
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type Tab = "overview" | "stats" | "chunks" | "errors" | "history";
@@ -1159,6 +1226,7 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") && (
             <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
           )}
+          <StopDeleteButtons migrationId={migrationId} phase={phase} onDone={loadDetail} onDeleted={onClose} />
           <button onClick={onClose} style={{
             background: "none", border: "none", color: "#475569",
             cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 4px",
