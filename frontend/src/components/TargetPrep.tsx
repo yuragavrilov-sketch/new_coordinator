@@ -922,14 +922,16 @@ export function TargetPrep() {
   const syncPair = useCallback(async (srcTable: string, tgtTable: string) => {
     setPair(srcTable, { syncing: true, syncError: null });
     try {
-      await fetch("/api/target-prep/sync-columns", {
+      const r = await fetch("/api/target-prep/ensure-table", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ src_schema: srcSchema, src_table: srcTable, tgt_schema: tgtSchema, tgt_table: tgtTable }),
       });
-      await fetch("/api/target-prep/sync-objects", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ src_schema: srcSchema, src_table: srcTable, tgt_schema: tgtSchema, tgt_table: tgtTable, types: ["constraints", "indexes", "triggers"] }),
-      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Ошибка синхронизации");
+      if (d.created) {
+        // Table was just created — update the known target tables set
+        setTgtTablesSet(prev => new Set([...prev, tgtTable.toUpperCase()]));
+      }
       setPair(srcTable, { syncing: false, ddl: null });
       await comparePair(srcTable, tgtTable);
       if (expandedKey === srcTable) loadDdl(srcTable, tgtTable);
@@ -1190,10 +1192,18 @@ export function TargetPrep() {
                         variant="success"
                       />
                     )}
-                    {tgtTable && (
+                    {tgtTable && st.compared && st.diff && !st.diff.ok && (
                       <ActionBtn
                         label="Привести"
                         onClick={() => syncPair(srcTable, tgtTable)}
+                        busy={st.syncing}
+                        variant="success"
+                      />
+                    )}
+                    {!tgtTable && (
+                      <ActionBtn
+                        label="Создать"
+                        onClick={() => syncPair(srcTable, srcTable)}
                         busy={st.syncing}
                         variant="success"
                       />
@@ -1215,8 +1225,14 @@ export function TargetPrep() {
                 {isExpanded && (
                   <div style={{ borderBottom: "1px solid #1e293b", background: "#080f1a" }}>
                     {!tgtTable && (
-                      <div style={{ padding: "20px", color: "#475569", fontSize: 13 }}>
-                        Таблица <code style={{ color: "#e2e8f0" }}>{srcTable}</code> не найдена на таргете в схеме <code style={{ color: "#e2e8f0" }}>{tgtSchema}</code>
+                      <div style={{ padding: "20px", color: "#475569", fontSize: 13, display: "flex", alignItems: "center", gap: 12 }}>
+                        <span>Таблица <code style={{ color: "#e2e8f0" }}>{srcTable}</code> не найдена на таргете в схеме <code style={{ color: "#e2e8f0" }}>{tgtSchema}</code></span>
+                        <ActionBtn
+                          label="Создать по образцу source"
+                          onClick={() => syncPair(srcTable, srcTable)}
+                          busy={st.syncing}
+                          variant="success"
+                        />
                       </div>
                     )}
                     {tgtTable && st.ddlLoading && (
