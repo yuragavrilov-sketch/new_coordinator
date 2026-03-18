@@ -671,8 +671,26 @@ function TablePairDetail({
     return ddl.source.triggers.filter(t => !tgtNames.has(t.name)).length;
   }, [ddl]);
 
+  const reportUrl = `/api/target-prep/report?src_schema=${encodeURIComponent(srcSchema)}&src_table=${encodeURIComponent(srcTable)}&tgt_schema=${encodeURIComponent(tgtSchema)}&tgt_table=${encodeURIComponent(tgtTable)}`;
+
   return (
     <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Report button */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <a
+          href={reportUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            background: "#1e3a5f", color: "#93c5fd", border: "1px solid #2563eb",
+            borderRadius: 5, padding: "4px 12px", fontSize: 11, fontWeight: 600,
+            textDecoration: "none", cursor: "pointer",
+          }}
+        >
+          Отчёт (PDF)
+        </a>
+      </div>
+
       {detailError && (
         <div style={{ background: "#7f1d1d22", border: "1px solid #7f1d1d", color: "#fca5a5", padding: "8px 12px", borderRadius: 6, fontSize: 12 }}>
           {detailError}

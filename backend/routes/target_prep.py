@@ -1,11 +1,17 @@
 """Target preparation API — DDL comparison and target object management."""
 
-from flask import Blueprint, jsonify, request
+import os
+from datetime import datetime
+
+from flask import Blueprint, jsonify, request, render_template
 from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action
 from services.oracle_stage    import sync_target_columns
 from services.oracle_ddl_sync import sync_target_objects
 
-bp = Blueprint("target_prep", __name__)
+bp = Blueprint(
+    "target_prep", __name__,
+    template_folder=os.path.join(os.path.dirname(__file__), "..", "templates"),
+)
 
 _state: dict = {}
 
@@ -189,3 +195,171 @@ def sync_objects():
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
+
+
+# ---------------------------------------------------------------------------
+# HTML comparison report (print → PDF)
+# ---------------------------------------------------------------------------
+
+def _fmt_col_type(c: dict) -> str:
+    """Format Oracle column type with precision/length."""
+    t = c["data_type"]
+    p, s, l = c.get("data_precision"), c.get("data_scale"), c.get("data_length")
+    if p is not None:
+        return f"{t}({p},{s})" if s else f"{t}({p})"
+    if t in ("VARCHAR2", "CHAR", "NVARCHAR2", "RAW") and l:
+        return f"{t}({l})"
+    return t
+
+
+@bp.get("/api/target-prep/report")
+def compare_report():
+    """Return a printable HTML comparison report for a table pair."""
+    src_schema = request.args.get("src_schema", "").strip().upper()
+    src_table  = request.args.get("src_table",  "").strip().upper()
+    tgt_schema = request.args.get("tgt_schema", "").strip().upper()
+    tgt_table  = request.args.get("tgt_table",  "").strip().upper()
+
+    if not all([src_schema, src_table, tgt_schema, tgt_table]):
+        return "src_schema, src_table, tgt_schema, tgt_table required", 400
+
+    configs = _state["load_configs"]()
+    try:
+        src_conn = get_oracle_conn("source", configs)
+        tgt_conn = get_oracle_conn("target", configs)
+        try:
+            src_info = get_full_ddl_info(src_conn, src_schema, src_table)
+            tgt_info = get_full_ddl_info(tgt_conn, tgt_schema, tgt_table)
+        finally:
+            src_conn.close()
+            tgt_conn.close()
+    except Exception as exc:
+        return f"<h1>Ошибка</h1><pre>{exc}</pre>", 503
+
+    diff = _diff_summary(src_info, tgt_info)
+
+    # ── Column rows ──────────────────────────────────────────────────
+    src_col_map = {c["name"]: c for c in src_info["columns"]}
+    tgt_col_map = {c["name"]: c for c in tgt_info["columns"]}
+    all_col_names = list(dict.fromkeys(
+        [c["name"] for c in src_info["columns"]]
+        + [c["name"] for c in tgt_info["columns"]]
+    ))
+    col_rows = []
+    for name in all_col_names:
+        sc = src_col_map.get(name)
+        tc = tgt_col_map.get(name)
+        if sc and not tc:
+            css, status = "miss", "Нет в target"
+        elif tc and not sc:
+            css, status = "extra", "Лишняя в target"
+        elif sc and tc and sc["data_type"] != tc["data_type"]:
+            css, status = "diff", "Тип различается"
+        else:
+            css, status = "ok-row", "OK"
+        col_rows.append({
+            "name": name, "css": css, "status": status,
+            "src_type":    _fmt_col_type(sc) if sc else "",
+            "tgt_type":    _fmt_col_type(tc) if tc else "",
+            "src_null":    "Y" if sc and sc.get("nullable") else ("N" if sc else ""),
+            "tgt_null":    "Y" if tc and tc.get("nullable") else ("N" if tc else ""),
+            "src_default": (sc.get("data_default") or "") if sc else "",
+            "tgt_default": (tc.get("data_default") or "") if tc else "",
+        })
+
+    # ── Index rows ───────────────────────────────────────────────────
+    src_idx_map = {i["name"]: i for i in src_info["indexes"]}
+    tgt_idx_map = {i["name"]: i for i in tgt_info["indexes"]}
+    all_idx_names = list(dict.fromkeys(
+        list(src_idx_map) + list(tgt_idx_map)
+    ))
+    idx_rows = []
+    for name in all_idx_names:
+        si = src_idx_map.get(name)
+        ti = tgt_idx_map.get(name)
+        ref = si or ti
+        if si and not ti:
+            css = "miss"
+        elif ti and not si:
+            css = "extra"
+        elif ti and ti["status"] != "VALID":
+            css = "diff"
+        else:
+            css = "ok-row"
+        idx_rows.append({
+            "name": name, "css": css,
+            "index_type": ref["index_type"],
+            "unique": "Да" if ref["unique"] else "",
+            "columns": ", ".join(ref["columns"]),
+            "in_source": "Да" if si else "Нет",
+            "tgt_status": ti["status"] if ti else "Нет",
+        })
+
+    # ── Constraint rows ──────────────────────────────────────────────
+    src_con_map = {c["name"]: c for c in src_info["constraints"]}
+    tgt_con_map = {c["name"]: c for c in tgt_info["constraints"]}
+    all_con_names = list(dict.fromkeys(
+        list(src_con_map) + list(tgt_con_map)
+    ))
+    con_rows = []
+    for name in all_con_names:
+        sc = src_con_map.get(name)
+        tc = tgt_con_map.get(name)
+        ref = sc or tc
+        if sc and not tc:
+            css = "miss"
+        elif tc and not sc:
+            css = "extra"
+        elif tc and tc["status"] == "DISABLED":
+            css = "diff"
+        else:
+            css = "ok-row"
+        con_rows.append({
+            "name": name, "css": css,
+            "type": ref["type"],
+            "columns": ", ".join(ref["columns"]),
+            "in_source": "Да" if sc else "Нет",
+            "tgt_status": tc["status"] if tc else "Нет",
+        })
+
+    # ── Trigger rows ─────────────────────────────────────────────────
+    src_trg_map = {t["name"]: t for t in src_info["triggers"]}
+    tgt_trg_map = {t["name"]: t for t in tgt_info["triggers"]}
+    all_trg_names = list(dict.fromkeys(
+        list(src_trg_map) + list(tgt_trg_map)
+    ))
+    trg_rows = []
+    for name in all_trg_names:
+        st = src_trg_map.get(name)
+        tt = tgt_trg_map.get(name)
+        ref = st or tt
+        if st and not tt:
+            css = "miss"
+        elif tt and not st:
+            css = "extra"
+        elif tt and tt["status"] == "DISABLED":
+            css = "diff"
+        else:
+            css = "ok-row"
+        trg_rows.append({
+            "name": name, "css": css,
+            "trigger_type": ref.get("trigger_type", ""),
+            "event": ref.get("event", ""),
+            "in_source": "Да" if st else "Нет",
+            "tgt_status": tt["status"] if tt else "Нет",
+        })
+
+    return render_template(
+        "compare_report.html",
+        title=f"Сравнение DDL: {src_schema}.{src_table}",
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        src_schema=src_schema, src_table=src_table,
+        tgt_schema=tgt_schema, tgt_table=tgt_table,
+        diff=diff,
+        src_info=src_info, tgt_info=tgt_info,
+        src_cols=src_info["columns"], tgt_cols=tgt_info["columns"],
+        col_rows=col_rows,
+        idx_rows=idx_rows,
+        con_rows=con_rows,
+        trg_rows=trg_rows,
+    )
