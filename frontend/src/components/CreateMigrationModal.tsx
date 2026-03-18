@@ -403,7 +403,7 @@ const INIT: FormData = {
   source_schema: "", source_table: "",
   target_schema: "", target_table: "",
   migration_strategy: "STAGE",
-  connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "",
+  connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "PAYSTAGE",
   chunk_size: 1_000_000,
   max_parallel_workers: 1,
   baseline_parallel_degree: 4,
