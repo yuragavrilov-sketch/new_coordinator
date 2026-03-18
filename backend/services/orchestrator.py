@@ -604,13 +604,13 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
                 conn.commit()
                 print(f"[baseline_publishing] truncated {tgt_quoted}")
 
-                # Recover unique indexes left UNUSABLE by a previous failed attempt.
-                # ORA-26026 is raised on INSERT if a unique index is UNUSABLE.
-                rebuilt = oracle_browser.rebuild_unusable_unique_indexes(
+                # Recover PK/UK-backing indexes left UNUSABLE by a previous failed
+                # attempt.  ORA-26026 is raised on INSERT if such an index is UNUSABLE.
+                rebuilt = oracle_browser.rebuild_unusable_constraint_indexes(
                     conn, tgt_schema, tgt_table,
                 )
                 if rebuilt:
-                    print(f"[baseline_publishing] rebuilt UNUSABLE unique indexes: {rebuilt}")
+                    print(f"[baseline_publishing] rebuilt UNUSABLE constraint indexes: {rebuilt}")
 
                 # Mark secondary (non-unique) indexes UNUSABLE so Oracle skips
                 # index maintenance during INSERT — rebuilt by INDEXES_ENABLING.

@@ -259,66 +259,91 @@ def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
     conn.commit()
 
 
-def rebuild_unusable_unique_indexes(conn, schema: str, table: str) -> list[str]:
-    """Rebuild any UNUSABLE unique/PK indexes on *table*.
+def _constraint_backing_indexes(info: dict) -> set[str]:
+    """Return upper-cased names of indexes that back a PK or UNIQUE constraint.
 
-    This recovers from a previous failed attempt that left unique indexes
-    in UNUSABLE state (before the fix that skips them in mark_indexes_unusable).
-    ORA-26026 is raised by INSERT if a unique index is UNUSABLE, so they
-    MUST be VALID before the load starts.
+    Oracle refuses to skip such indexes during INSERT even with
+    SKIP_UNUSABLE_INDEXES = TRUE.  Marking them UNUSABLE causes ORA-26026.
+
+    Detection strategy (covers both implicit and explicit backing indexes):
+      1. Index name == constraint name (Oracle default when no USING INDEX).
+      2. Index column set == constraint column set (explicit USING INDEX).
+      3. Index flagged as UNIQUE in all_indexes.
+    """
+    protected: set[str] = set()
+
+    # Gather PK/UK constraint column sets
+    pk_uk_col_sets: list[tuple[str, frozenset[str]]] = []
+    for con in info["constraints"]:
+        if con["type_code"] in ("P", "U"):
+            protected.add(con["name"].upper())           # rule 1
+            col_set = frozenset(c.upper() for c in con["columns"])
+            pk_uk_col_sets.append((con["name"], col_set))
+
+    # Match indexes by column set
+    for idx in info["indexes"]:
+        if idx["unique"]:                                # rule 3
+            protected.add(idx["name"].upper())
+            continue
+        idx_cols = frozenset(c.upper() for c in idx["columns"])
+        for _con_name, con_cols in pk_uk_col_sets:
+            if idx_cols == con_cols:                      # rule 2
+                protected.add(idx["name"].upper())
+                break
+
+    return protected
+
+
+def rebuild_unusable_constraint_indexes(conn, schema: str, table: str) -> list[str]:
+    """Rebuild any UNUSABLE indexes that back PK/UNIQUE constraints.
+
+    Recovers from a previous failed attempt that left such indexes in
+    UNUSABLE state.  ORA-26026 is raised by INSERT if they are UNUSABLE,
+    so they MUST be VALID before the load starts.
 
     Returns the list of index names that were rebuilt.
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
+    protected = _constraint_backing_indexes(info)
     rebuilt: list[str] = []
     with conn.cursor() as cur:
         for idx in info["indexes"]:
-            if idx["status"] == "UNUSABLE" and idx["unique"]:
+            if idx["name"].upper() in protected and idx["status"] == "UNUSABLE":
                 try:
                     cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
                     rebuilt.append(idx["name"])
                 except Exception as exc:
-                    print(f"[oracle_browser] could not rebuild unique index {idx['name']}: {exc}")
+                    print(f"[oracle_browser] could not rebuild {idx['name']}: {exc}")
     conn.commit()
     return rebuilt
 
 
 def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -> list[str]:
-    """Mark non-unique indexes on *table* as UNUSABLE so Oracle skips index
-    maintenance during the subsequent bulk INSERT.
+    """Mark indexes on *table* as UNUSABLE so Oracle skips index maintenance
+    during the subsequent bulk INSERT.
 
     SKIP_UNUSABLE_INDEXES = TRUE (Oracle session default) causes the INSERT to
-    bypass UNUSABLE indexes — but ONLY for non-unique indexes.  Oracle always
-    enforces unique indexes regardless of that setting; marking a unique index
-    UNUSABLE causes ORA-26026 on INSERT (ORA-12801 with parallel DML).
+    bypass UNUSABLE indexes — but ONLY for non-unique indexes and indexes that
+    do NOT back a PK or UNIQUE constraint.  Marking such an index UNUSABLE
+    causes ORA-26026 on INSERT (ORA-12801 with parallel DML).
 
-    Therefore only non-unique, non-PK indexes are marked UNUSABLE here.
-    PK and unique indexes are left VALID so Oracle can still enforce
-    uniqueness / catch PK violations during the load.
+    Therefore indexes that back PK/UK constraints (by name, column set, or
+    uniqueness flag) are left VALID.  Only truly secondary indexes are
+    marked UNUSABLE.
 
     Returns the list of index names that were marked UNUSABLE.
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
-
-    # Collect index names that back a PK constraint (skip_pk=True)
-    pk_index_names: set[str] = set()
-    if skip_pk:
-        for con in info["constraints"]:
-            if con["type_code"] == "P":
-                pk_index_names.add(con["name"].upper())
+    protected = _constraint_backing_indexes(info)
 
     marked: list[str] = []
     with conn.cursor() as cur:
         for idx in info["indexes"]:
             if idx["status"] != "VALID":
                 continue
-            # Always skip unique indexes — SKIP_UNUSABLE_INDEXES does not apply
-            # to them and marking them UNUSABLE raises ORA-26026 on INSERT.
-            if idx["unique"]:
-                continue
-            if skip_pk and idx["name"].upper() in pk_index_names:
+            if idx["name"].upper() in protected:
                 continue
             try:
                 cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" UNUSABLE')
