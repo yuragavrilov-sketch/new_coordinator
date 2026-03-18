@@ -420,6 +420,9 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
   const [submitErr,    setSubmitErr] = useState("");
   const [fieldErrs,    setFieldErrs] = useState<Partial<Record<keyof FormData, string>>>({});
   const [dupWarning,   setDupWarning] = useState<string | null>(null);
+  const [ensureBusy,   setEnsureBusy]   = useState(false);
+  const [ensureResult, setEnsureResult] = useState<{ created: boolean; columns: any; objects: any } | null>(null);
+  const [ensureErr,    setEnsureErr]    = useState("");
   const nameTouched = useRef(false);
 
   const setF = useCallback((up: Partial<FormData>) =>
@@ -504,15 +507,41 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
 
   const onSourceSchema = useCallback((v: string) => {
     setF({ source_schema: v, source_table: "" });
-    // Suggest same schema for target if not yet chosen
     setFormRaw(f => ({ ...f, source_schema: v, source_table: "", target_schema: f.target_schema || v }));
+    setEnsureResult(null); setEnsureErr("");
   }, []);
 
   const onSourceTable = useCallback((v: string) => {
     setF({ source_table: v });
-    // Suggest same table for target if not yet chosen
     setFormRaw(f => ({ ...f, source_table: v, target_table: f.target_table || v }));
+    setEnsureResult(null); setEnsureErr("");
   }, []);
+
+  // ── Ensure target table matches source ────────────────────────────────────
+
+  const ensureTargetTable = useCallback(() => {
+    if (!form.source_schema || !form.source_table || !form.target_schema || !form.target_table) return;
+    setEnsureBusy(true);
+    setEnsureErr("");
+    setEnsureResult(null);
+    fetch("/api/target-prep/ensure-table", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        src_schema: form.source_schema,
+        src_table:  form.source_table,
+        tgt_schema: form.target_schema,
+        tgt_table:  form.target_table,
+      }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) setEnsureErr(d.error);
+        else setEnsureResult(d);
+      })
+      .catch(e => setEnsureErr(String(e)))
+      .finally(() => setEnsureBusy(false));
+  }, [form.source_schema, form.source_table, form.target_schema, form.target_table]);
 
   // ── Validation ────────────────────────────────────────────────────────────
 
@@ -663,11 +692,69 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
               db="target"
               schema={form.target_schema}
               table={form.target_table}
-              onSchema={v => setF({ target_schema: v, target_table: "" })}
-              onTable={v => setF({ target_table: v })}
+              onSchema={v => { setF({ target_schema: v, target_table: "" }); setEnsureResult(null); setEnsureErr(""); }}
+              onTable={v => { setF({ target_table: v }); setEnsureResult(null); setEnsureErr(""); }}
               schemaErr={fieldErrs.target_schema}
               tableErr={fieldErrs.target_table}
             />
+            {form.source_schema && form.source_table && form.target_schema && (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                <button
+                  disabled={ensureBusy || !form.target_table}
+                  onClick={ensureTargetTable}
+                  style={{
+                    padding: "6px 14px", borderRadius: 6, cursor: ensureBusy || !form.target_table ? "not-allowed" : "pointer",
+                    border: "1px solid #047857", background: "#052e16", color: "#6ee7b7",
+                    fontSize: 12, fontWeight: 600, opacity: ensureBusy || !form.target_table ? 0.5 : 1,
+                  }}
+                >
+                  {ensureBusy ? "Синхронизация…" : "Привести target в соответствие source"}
+                </button>
+                {ensureErr && <div style={S.err}>{ensureErr}</div>}
+                {ensureResult && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {ensureResult.created && (
+                      <Chip label="Таблица создана" color="#86efac" bg="#052e16" />
+                    )}
+                    {ensureResult.columns?.added?.length > 0 && (
+                      <Chip label={`+${ensureResult.columns.added.length} колонок`} color="#86efac" bg="#052e16" />
+                    )}
+                    {ensureResult.columns?.warnings?.length > 0 && (
+                      <Chip label={`${ensureResult.columns.warnings.length} расхождений типов`} color="#fbbf24" bg="#422006" />
+                    )}
+                    {(ensureResult.objects?.constraints?.added?.length > 0 ||
+                      ensureResult.objects?.indexes?.added?.length > 0 ||
+                      ensureResult.objects?.triggers?.added?.length > 0) && (
+                      <Chip label={`+${
+                        (ensureResult.objects.constraints?.added?.length || 0) +
+                        (ensureResult.objects.indexes?.added?.length || 0) +
+                        (ensureResult.objects.triggers?.added?.length || 0)
+                      } объектов`} color="#86efac" bg="#052e16" />
+                    )}
+                    {(ensureResult.objects?.constraints?.errors?.length > 0 ||
+                      ensureResult.objects?.indexes?.errors?.length > 0 ||
+                      ensureResult.objects?.triggers?.errors?.length > 0) && (
+                      <Chip label={`${
+                        (ensureResult.objects.constraints?.errors?.length || 0) +
+                        (ensureResult.objects.indexes?.errors?.length || 0) +
+                        (ensureResult.objects.triggers?.errors?.length || 0)
+                      } ошибок`} color="#fca5a5" bg="#450a0a" />
+                    )}
+                    {!ensureResult.created &&
+                      ensureResult.columns?.added?.length === 0 &&
+                      ensureResult.columns?.warnings?.length === 0 &&
+                      (ensureResult.objects?.constraints?.added?.length || 0) +
+                      (ensureResult.objects?.indexes?.added?.length || 0) +
+                      (ensureResult.objects?.triggers?.added?.length || 0) === 0 &&
+                      (ensureResult.objects?.constraints?.errors?.length || 0) +
+                      (ensureResult.objects?.indexes?.errors?.length || 0) +
+                      (ensureResult.objects?.triggers?.errors?.length || 0) === 0 && (
+                      <Chip label="Таблицы идентичны" color="#86efac" bg="#052e16" />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </Section>
 
           {/* ── Config ── */}

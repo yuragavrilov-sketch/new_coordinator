@@ -5,7 +5,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request, render_template
 from db.oracle_browser import get_oracle_conn, get_full_ddl_info, execute_target_action, list_tables
-from services.oracle_stage    import sync_target_columns
+from services.oracle_stage    import sync_target_columns, create_target_table_like_source
 from services.oracle_ddl_sync import sync_target_objects
 
 bp = Blueprint(
@@ -167,6 +167,62 @@ def sync_columns():
     try:
         result = sync_target_columns(src_cfg, dst_cfg, src_schema, src_table, tgt_schema, tgt_table)
         return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@bp.post("/api/target-prep/ensure-table")
+def ensure_table():
+    """Create target table (if missing) matching source structure, then sync columns & objects."""
+    data       = request.json or {}
+    src_schema = data.get("src_schema", "").strip().upper()
+    src_table  = data.get("src_table",  "").strip().upper()
+    tgt_schema = data.get("tgt_schema", "").strip().upper()
+    tgt_table  = data.get("tgt_table",  "").strip().upper()
+
+    if not all([src_schema, src_table, tgt_schema, tgt_table]):
+        return jsonify({"error": "src_schema, src_table, tgt_schema, tgt_table required"}), 400
+
+    configs = _state["load_configs"]()
+    src_cfg = configs.get("oracle_source", {})
+    dst_cfg = configs.get("oracle_target", {})
+
+    created = False
+    try:
+        # Check if target table exists
+        tgt_conn = get_oracle_conn("target", configs)
+        try:
+            existing = set(list_tables(tgt_conn, tgt_schema))
+        finally:
+            tgt_conn.close()
+
+        if tgt_table not in existing:
+            create_target_table_like_source(
+                src_cfg, dst_cfg,
+                src_schema, src_table,
+                tgt_schema, tgt_table,
+            )
+            created = True
+
+        # Sync columns (add missing)
+        col_result = sync_target_columns(
+            src_cfg, dst_cfg,
+            src_schema, src_table,
+            tgt_schema, tgt_table,
+        )
+
+        # Sync objects (constraints, indexes, triggers)
+        obj_result = sync_target_objects(
+            src_cfg, dst_cfg,
+            src_schema, src_table,
+            tgt_schema, tgt_table,
+        )
+
+        return jsonify({
+            "created": created,
+            "columns": col_result,
+            "objects": obj_result,
+        })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
 

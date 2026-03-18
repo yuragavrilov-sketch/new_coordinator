@@ -33,6 +33,66 @@ def _col_type_str(data_type: str, data_length, data_precision, data_scale,
 # Public API
 # ---------------------------------------------------------------------------
 
+def create_target_table_like_source(
+    src_cfg: dict,
+    dst_cfg: dict,
+    source_schema: str,
+    source_table: str,
+    target_schema: str,
+    target_table: str,
+) -> None:
+    """
+    Create a regular table on the target Oracle matching the source column
+    structure.  Unlike create_stage_table this creates a normal (LOGGING)
+    table without a custom tablespace.
+
+    Raises if the table already exists (caller should check first).
+    """
+    src_conn = open_oracle_conn(src_cfg)
+    try:
+        with src_conn.cursor() as cur:
+            cur.execute("""
+                SELECT column_name, data_type, data_length,
+                       data_precision, data_scale, nullable, char_used
+                FROM   all_tab_columns
+                WHERE  owner      = :s
+                  AND  table_name = :t
+                ORDER BY column_id
+            """, {"s": source_schema.upper(), "t": source_table.upper()})
+            columns = cur.fetchall()
+    finally:
+        src_conn.close()
+
+    if not columns:
+        raise ValueError(
+            f"Исходная таблица {source_schema}.{source_table} не найдена "
+            "или нет прав на all_tab_columns"
+        )
+
+    col_defs = []
+    for col_name, data_type, data_length, data_precision, data_scale, nullable, char_used in columns:
+        type_str = _col_type_str(data_type, data_length, data_precision,
+                                 data_scale, char_used or "B")
+        null_str = "" if nullable == "Y" else " NOT NULL"
+        col_defs.append(f'  "{col_name}" {type_str}{null_str}')
+
+    tgt_full = f'"{target_schema.upper()}"."{target_table.upper()}"'
+    ddl = (
+        f'CREATE TABLE {tgt_full} (\n'
+        + ",\n".join(col_defs)
+        + "\n)"
+    )
+
+    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        with dst_conn.cursor() as cur:
+            cur.execute(ddl)
+            dst_conn.commit()
+            print(f"[oracle_stage] created target table {tgt_full}")
+    finally:
+        dst_conn.close()
+
+
 def create_stage_table(
     src_cfg: dict,
     dst_cfg: dict,
