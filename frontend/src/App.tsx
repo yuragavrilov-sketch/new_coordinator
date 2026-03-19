@@ -4,12 +4,13 @@ import { ServiceStatusBar } from "./components/ServiceStatusBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { MigrationList } from "./components/MigrationList";
 import { TargetPrep } from "./components/TargetPrep";
+import { Checklist } from "./components/Checklist";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "migrations" | "target-prep";
+type Tab = "migrations" | "target-prep" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -154,12 +155,18 @@ export default function App() {
           active={activeTab === "target-prep"}
           onClick={() => setActiveTab("target-prep")}
         />
+        <TabButton
+          label="Чек-лист"
+          active={activeTab === "checklist"}
+          onClick={() => setActiveTab("checklist")}
+        />
       </div>
 
       {/* Tab content */}
       <div style={{ marginTop: 16 }}>
         {activeTab === "migrations"   && <MigrationList sseEvents={events} />}
         {activeTab === "target-prep"  && <TargetPrep />}
+        {activeTab === "checklist"    && <Checklist />}
       </div>
     </div>
   );
