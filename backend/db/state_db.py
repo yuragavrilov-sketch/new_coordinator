@@ -351,6 +351,27 @@ def init_db() -> None:
             )
             print("[state_db]   column ok: migration_cdc_state.rows_applied")
 
+            # ── checklist tables ────────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS checklist_lists (
+                    list_id    SERIAL PRIMARY KEY,
+                    name       VARCHAR(255) NOT NULL UNIQUE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS checklist_items (
+                    item_id      SERIAL PRIMARY KEY,
+                    list_id      INTEGER NOT NULL REFERENCES checklist_lists(list_id) ON DELETE CASCADE,
+                    schema_name  VARCHAR(128) NOT NULL DEFAULT '',
+                    table_name   VARCHAR(128) NOT NULL,
+                    decision     VARCHAR(20) NOT NULL DEFAULT 'migrate',
+                    status       VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UNIQUE (list_id, schema_name, table_name)
+                )
+            """)
+
         conn.commit()
         print("[state_db] schema init complete")
     finally:

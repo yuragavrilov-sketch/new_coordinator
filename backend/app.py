@@ -132,6 +132,13 @@ from routes.oracle_db import bp as oracle_bp
 oracle_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(oracle_bp)
 
+# ── Checklist blueprint ───────────────────────────────────────────────────────
+import routes.checklist as checklist_mod
+from routes.checklist import bp as checklist_bp
+
+checklist_mod.init(get_conn_fn=get_conn, db_available_ref=_db_available)
+app.register_blueprint(checklist_bp)
+
 # ── Target preparation blueprint ──────────────────────────────────────────────
 import routes.target_prep as target_prep_mod
 from routes.target_prep import bp as target_prep_bp

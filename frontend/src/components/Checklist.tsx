@@ -6,19 +6,19 @@ import ReactDOM from "react-dom";
 type Decision = "migrate" | "skip" | "archive";
 type Status   = "done" | "pending";
 
-interface TableEntry {
+interface TableItem {
+  item_id: number;
   schema: string;
   table: string;
   decision: Decision;
   status: Status;
 }
 
-interface ChecklistData {
+interface ChecklistList {
+  list_id: number;
   name: string;
-  tables: TableEntry[];
+  tables: TableItem[];
 }
-
-const LS_KEY = "mig_checklists";
 
 const DECISION_LABELS: Record<Decision, string> = {
   migrate: "Переносить",
@@ -36,17 +36,6 @@ const STATUS_LABELS: Record<Status, string> = {
   done:    "Перенесено",
   pending: "Не перенесено",
 };
-
-// ── Persistence ──────────────────────────────────────────────────────────────
-
-function loadAll(): ChecklistData[] {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "[]"); }
-  catch { return []; }
-}
-
-function saveAll(data: ChecklistData[]) {
-  localStorage.setItem(LS_KEY, JSON.stringify(data));
-}
 
 // ── SearchableSelect ─────────────────────────────────────────────────────────
 
@@ -159,12 +148,25 @@ function SearchableSelect({ items, value, onChange, placeholder, loading }: {
   );
 }
 
+// ── API helpers ──────────────────────────────────────────────────────────────
+
+async function api<T>(url: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts });
+  if (res.status === 204) return undefined as T;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function Checklist() {
-  const [lists, setLists]           = useState<ChecklistData[]>(loadAll);
-  const [activeIdx, setActiveIdx]   = useState(0);
+  const [lists, setLists]           = useState<ChecklistList[]>([]);
+  const [activeId, setActiveId]     = useState<number | null>(null);
   const [newListName, setNewListName] = useState("");
+  const [loading, setLoading]       = useState(true);
 
   // Source DB data
   const [schemas, setSchemas]       = useState<string[]>([]);
@@ -176,9 +178,21 @@ export function Checklist() {
   const [loadAllBusy, setLoadAllBusy] = useState(false);
   const [loadAllError, setLoadAllError] = useState("");
 
-  useEffect(() => { saveAll(lists); }, [lists]);
+  const active = lists.find(l => l.list_id === activeId) ?? null;
 
-  const active = lists[activeIdx] as ChecklistData | undefined;
+  // Load lists from DB
+  const fetchLists = useCallback(async () => {
+    try {
+      const data = await api<ChecklistList[]>("/api/checklists");
+      setLists(data);
+      if (data.length > 0 && !data.find(l => l.list_id === activeId)) {
+        setActiveId(data[0].list_id);
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [activeId]);
+
+  useEffect(() => { fetchLists(); }, []);
 
   // Load schemas on mount
   useEffect(() => {
@@ -203,88 +217,113 @@ export function Checklist() {
       .finally(() => setTablesLoading(false));
   }, [newSchema]);
 
-  const addList = useCallback(() => {
+  // ── List CRUD ──────────────────────────────────────────────────────────────
+
+  const addList = useCallback(async () => {
     const name = newListName.trim();
     if (!name) return;
-    setLists(prev => [...prev, { name, tables: [] }]);
-    setActiveIdx(lists.length);
-    setNewListName("");
-  }, [newListName, lists.length]);
+    try {
+      const res = await api<ChecklistList>("/api/checklists", {
+        method: "POST", body: JSON.stringify({ name }),
+      });
+      setLists(prev => [...prev, { ...res, tables: res.tables || [] }]);
+      setActiveId(res.list_id);
+      setNewListName("");
+    } catch { /* ignore */ }
+  }, [newListName]);
 
-  const deleteList = useCallback(() => {
+  const deleteList = useCallback(async () => {
     if (!active || !confirm(`Удалить «${active.name}»?`)) return;
-    setLists(prev => prev.filter((_, i) => i !== activeIdx));
-    setActiveIdx(0);
-  }, [active, activeIdx]);
+    await api(`/api/checklists/${active.list_id}`, { method: "DELETE" });
+    setLists(prev => prev.filter(l => l.list_id !== active.list_id));
+    setActiveId(lists.find(l => l.list_id !== active.list_id)?.list_id ?? null);
+  }, [active, lists]);
 
-  const addRow = useCallback(() => {
-    if (!newSchema || !newTable) return;
-    setLists(prev => prev.map((l, i) =>
-      i === activeIdx
-        ? { ...l, tables: [...l.tables, { schema: newSchema, table: newTable, decision: "migrate", status: "pending" }] }
-        : l
-    ));
-    setNewTable("");
-  }, [newSchema, newTable, activeIdx]);
+  // ── Item CRUD ──────────────────────────────────────────────────────────────
 
-  const addRows = useCallback((rows: { schema: string; table: string }[]) => {
-    setLists(prev => prev.map((l, i) => {
-      if (i !== activeIdx) return l;
-      const existing = new Set(l.tables.map(t => `${t.schema}.${t.table}`));
-      const newEntries = rows
-        .filter(r => !existing.has(`${r.schema}.${r.table}`))
-        .map(r => ({ schema: r.schema, table: r.table, decision: "migrate" as Decision, status: "pending" as Status }));
-      return { ...l, tables: [...l.tables, ...newEntries] };
-    }));
-  }, [activeIdx]);
+  const addRow = useCallback(async () => {
+    if (!active || !newSchema || !newTable) return;
+    try {
+      const res = await api<{ added: TableItem[] }>(`/api/checklists/${active.list_id}/items`, {
+        method: "POST",
+        body: JSON.stringify({ items: [{ schema: newSchema, table: newTable }] }),
+      });
+      if (res.added.length > 0) {
+        setLists(prev => prev.map(l =>
+          l.list_id === active.list_id
+            ? { ...l, tables: [...l.tables, ...res.added] }
+            : l
+        ));
+      }
+      setNewTable("");
+    } catch { /* ignore */ }
+  }, [active, newSchema, newTable]);
 
-  const loadAllFromSource = useCallback(async () => {
-    if (!newSchema) { setLoadAllError("Сначала выберите схему"); return; }
+  const loadAllFromSchema = useCallback(async () => {
+    if (!active || !newSchema) { setLoadAllError("Сначала выберите схему"); return; }
     setLoadAllBusy(true);
     setLoadAllError("");
     try {
       const res = await fetch(`/api/db/source/tables?schema=${encodeURIComponent(newSchema)}`);
       if (!res.ok) throw new Error("Не удалось загрузить таблицы");
       const tables: string[] = await res.json();
-      addRows(tables.map(t => ({ schema: newSchema, table: t })));
+      const addRes = await api<{ added: TableItem[] }>(`/api/checklists/${active.list_id}/items`, {
+        method: "POST",
+        body: JSON.stringify({ items: tables.map(t => ({ schema: newSchema, table: t })) }),
+      });
+      if (addRes.added.length > 0) {
+        setLists(prev => prev.map(l =>
+          l.list_id === active.list_id
+            ? { ...l, tables: [...l.tables, ...addRes.added] }
+            : l
+        ));
+      }
     } catch (e: unknown) {
       setLoadAllError(e instanceof Error ? e.message : "Ошибка загрузки");
     } finally {
       setLoadAllBusy(false);
     }
-  }, [addRows, newSchema]);
+  }, [active, newSchema]);
 
-  const updateRow = useCallback((rowIdx: number, patch: Partial<TableEntry>) => {
-    setLists(prev => prev.map((l, i) =>
-      i === activeIdx
-        ? { ...l, tables: l.tables.map((r, j) => j === rowIdx ? { ...r, ...patch } : r) }
+  const updateItem = useCallback(async (item: TableItem, patch: Partial<Pick<TableItem, "decision" | "status">>) => {
+    if (!active) return;
+    await api(`/api/checklists/${active.list_id}/items/${item.item_id}`, {
+      method: "PATCH", body: JSON.stringify(patch),
+    });
+    setLists(prev => prev.map(l =>
+      l.list_id === active.list_id
+        ? { ...l, tables: l.tables.map(t => t.item_id === item.item_id ? { ...t, ...patch } : t) }
         : l
     ));
-  }, [activeIdx]);
+  }, [active]);
 
-  const deleteRow = useCallback((rowIdx: number) => {
-    setLists(prev => prev.map((l, i) =>
-      i === activeIdx
-        ? { ...l, tables: l.tables.filter((_, j) => j !== rowIdx) }
+  const deleteItem = useCallback(async (item: TableItem) => {
+    if (!active) return;
+    await api(`/api/checklists/${active.list_id}/items/${item.item_id}`, { method: "DELETE" });
+    setLists(prev => prev.map(l =>
+      l.list_id === active.list_id
+        ? { ...l, tables: l.tables.filter(t => t.item_id !== item.item_id) }
         : l
     ));
-  }, [activeIdx]);
+  }, [active]);
 
   const tables = active?.tables || [];
   const toMigrate = tables.filter(t => t.decision !== "skip");
   const doneCount = toMigrate.filter(t => t.status === "done").length;
+
+  if (loading) return <div style={{ color: "#475569", padding: 24, textAlign: "center" }}>Загрузка…</div>;
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       {/* List selector */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         <select
-          value={activeIdx}
-          onChange={e => setActiveIdx(Number(e.target.value))}
+          value={activeId ?? ""}
+          onChange={e => setActiveId(Number(e.target.value) || null)}
           style={selectStyle}
         >
-          {lists.length === 0 && <option value={0}>-- создайте список --</option>}
-          {lists.map((l, i) => <option key={i} value={i}>{l.name}</option>)}
+          {lists.length === 0 && <option value="">-- создайте список --</option>}
+          {lists.map(l => <option key={l.list_id} value={l.list_id}>{l.name}</option>)}
         </select>
         <input
           placeholder="Новый список..."
@@ -316,12 +355,9 @@ export function Checklist() {
             )}
             <div style={{ marginLeft: "auto" }}>
               <button
-                onClick={loadAllFromSource}
+                onClick={loadAllFromSchema}
                 disabled={loadAllBusy}
-                style={{
-                  ...btnStyle("#1e293b"),
-                  opacity: loadAllBusy ? 0.5 : 1,
-                }}
+                style={{ ...btnStyle("#1e293b"), opacity: loadAllBusy ? 0.5 : 1 }}
               >
                 {loadAllBusy ? "Загрузка…" : "Загрузить все таблицы схемы"}
               </button>
@@ -341,20 +377,19 @@ export function Checklist() {
               </tr>
             </thead>
             <tbody>
-              {tables.map((row, idx) => {
+              {tables.map(row => {
                 const dc = DECISION_COLORS[row.decision];
                 return (
-                  <tr key={idx} style={{ borderBottom: "1px solid #1e293b" }}>
+                  <tr key={row.item_id} style={{ borderBottom: "1px solid #1e293b" }}>
                     <td style={tdStyle}>{row.schema}</td>
                     <td style={{ ...tdStyle, fontWeight: 600 }}>{row.table}</td>
                     <td style={tdStyle}>
                       <select
                         value={row.decision}
-                        onChange={e => updateRow(idx, { decision: e.target.value as Decision })}
+                        onChange={e => updateItem(row, { decision: e.target.value as Decision })}
                         style={{
                           ...cellSelectStyle,
-                          background: dc.bg,
-                          color: dc.text,
+                          background: dc.bg, color: dc.text,
                           borderColor: dc.text + "44",
                         }}
                       >
@@ -367,7 +402,7 @@ export function Checklist() {
                       {row.decision !== "skip" ? (
                         <select
                           value={row.status}
-                          onChange={e => updateRow(idx, { status: e.target.value as Status })}
+                          onChange={e => updateItem(row, { status: e.target.value as Status })}
                           style={{
                             ...cellSelectStyle,
                             background: row.status === "done" ? "#052e16" : "#1e293b",
@@ -385,7 +420,7 @@ export function Checklist() {
                     </td>
                     <td style={{ ...tdStyle, textAlign: "center" }}>
                       <button
-                        onClick={() => deleteRow(idx)}
+                        onClick={() => deleteItem(row)}
                         style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 14 }}
                         title="Удалить"
                       >
