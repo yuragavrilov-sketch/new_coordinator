@@ -530,6 +530,47 @@ def get_migration_lag(migration_id: str):
         return jsonify({"error": str(exc)}), 500
 
 
+@bp.patch("/api/migrations/<migration_id>/workers")
+def update_workers(migration_id: str):
+    """Update max_parallel_workers and/or baseline_parallel_degree on the fly."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    body = request.get_json(force=True) or {}
+
+    fields: dict = {}
+    if "max_parallel_workers" in body:
+        fields["max_parallel_workers"] = max(1, int(body["max_parallel_workers"]))
+    if "baseline_parallel_degree" in body:
+        fields["baseline_parallel_degree"] = max(1, int(body["baseline_parallel_degree"]))
+    if not fields:
+        return jsonify({"error": "Nothing to update"}), 400
+
+    try:
+        conn = _state["get_conn"]()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT phase FROM migrations WHERE migration_id = %s FOR UPDATE",
+                    (migration_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return jsonify({"error": "Not found"}), 404
+
+                fields["updated_at"] = datetime.utcnow()
+                set_clause = ", ".join(f"{k} = %s" for k in fields)
+                cur.execute(
+                    f"UPDATE migrations SET {set_clause} WHERE migration_id = %s",
+                    [*fields.values(), migration_id],
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({"ok": True, **{k: v for k, v in fields.items() if k != "updated_at"}})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @bp.post("/api/migrations/<migration_id>/retry-chunks")
 def retry_failed_chunks(migration_id: str):
     """Reset FAILED chunks back to PENDING so workers will retry them.

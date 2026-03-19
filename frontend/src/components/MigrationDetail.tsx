@@ -385,12 +385,13 @@ function EnsureChip({ label, color, bg }: { label: string; color: string; bg: st
 // ── Overview tab ──────────────────────────────────────────────────────────────
 
 function OverviewTab({
-  detail, migrationId, sseEvents, phase,
+  detail, migrationId, sseEvents, phase, loadDetail,
 }: {
   detail: MigrationDetail;
   migrationId: string;
   sseEvents: SSEEvent[];
   phase: string;
+  loadDetail: () => void;
 }) {
   const [ensureBusy,   setEnsureBusy]   = useState(false);
   const [ensureResult, setEnsureResult] = useState<any>(null);
@@ -583,8 +584,22 @@ function OverviewTab({
 
       <InfoGrid title="Параметры загрузки">
         <InfoRow label="Chunk size"              value={detail.chunk_size?.toLocaleString()} />
-        <InfoRow label="Воркеры bulk"            value={detail.max_parallel_workers} />
-        <InfoRow label="Воркеры baseline"        value={detail.baseline_parallel_degree} />
+        <InfoRow label="Воркеры bulk" value={
+          <WorkerCountEditor
+            migrationId={detail.migration_id}
+            field="max_parallel_workers"
+            value={detail.max_parallel_workers}
+            onSaved={loadDetail}
+          />
+        } />
+        <InfoRow label="Воркеры baseline" value={
+          <WorkerCountEditor
+            migrationId={detail.migration_id}
+            field="baseline_parallel_degree"
+            value={detail.baseline_parallel_degree}
+            onSaved={loadDetail}
+          />
+        } />
         <InfoRow label="Total rows"         value={detail.total_rows != null ? fmtNum(detail.total_rows) : "—"} />
         <InfoRow label="Total chunks"       value={detail.total_chunks ?? "—"} />
         <InfoRow label="Chunks done"        value={detail.chunks_done} />
@@ -608,6 +623,88 @@ function OverviewTab({
         <InfoRow label="UK exists"   value={detail.source_uk_exists ? "да" : "нет"} />
       </InfoGrid>
     </>
+  );
+}
+
+// ── WorkerCountEditor ─────────────────────────────────────────────────────────
+
+function WorkerCountEditor({
+  migrationId, field, value, onSaved,
+}: {
+  migrationId: string;
+  field: "max_parallel_workers" | "baseline_parallel_degree";
+  value: number;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState(value);
+  const [saving, setSaving]   = useState(false);
+
+  useEffect(() => { setDraft(value); }, [value]);
+
+  async function save() {
+    const v = Math.max(1, draft);
+    if (v === value) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/migrations/${migrationId}/workers`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: v }),
+      });
+      if (res.ok) { onSaved(); setEditing(false); }
+    } finally { setSaving(false); }
+  }
+
+  if (!editing) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ color: "#e2e8f0" }}>{value}</span>
+        <button
+          onClick={() => { setDraft(value); setEditing(true); }}
+          style={{
+            background: "none", border: "1px solid #334155", borderRadius: 4,
+            color: "#94a3b8", fontSize: 10, padding: "1px 6px", cursor: "pointer",
+          }}
+        >
+          изменить
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <input
+        type="number" min={1} value={draft}
+        onChange={e => setDraft(parseInt(e.target.value) || 1)}
+        onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+        autoFocus
+        style={{
+          width: 60, background: "#0f172a", border: "1px solid #3b82f6",
+          borderRadius: 4, color: "#e2e8f0", fontSize: 12, padding: "2px 6px",
+          textAlign: "center",
+        }}
+      />
+      <button
+        onClick={save} disabled={saving}
+        style={{
+          background: "#1e3a5f", border: "1px solid #1d4ed8", borderRadius: 4,
+          color: "#93c5fd", fontSize: 10, padding: "2px 8px", cursor: saving ? "not-allowed" : "pointer",
+        }}
+      >
+        {saving ? "…" : "OK"}
+      </button>
+      <button
+        onClick={() => setEditing(false)}
+        style={{
+          background: "none", border: "1px solid #334155", borderRadius: 4,
+          color: "#64748b", fontSize: 10, padding: "2px 6px", cursor: "pointer",
+        }}
+      >
+        ✕
+      </button>
+    </span>
   );
 }
 
@@ -1378,6 +1475,7 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
               migrationId={migrationId}
               sseEvents={sseEvents}
               phase={phase}
+              loadDetail={loadDetail}
             />
           )}
           {activeTab === "stats" && (
