@@ -83,6 +83,39 @@ def get_table_info(conn, schema: str, table: str) -> dict:
         uk_map: dict = {}
         for cname, col in cur.fetchall():
             uk_map.setdefault(cname, []).append(col)
+
+        # Unique indexes that are NOT already covered by a UK constraint
+        # (CREATE UNIQUE INDEX without a matching CONSTRAINT UNIQUE)
+        constraint_backed: set = set()
+        cur.execute("""
+            SELECT index_name
+            FROM   all_constraints
+            WHERE  owner      = :s
+              AND  table_name = :t
+              AND  constraint_type IN ('P', 'U')
+              AND  index_name IS NOT NULL
+        """, {"s": schema, "t": table})
+        for row in cur.fetchall():
+            constraint_backed.add(row[0])
+
+        cur.execute("""
+            SELECT ai.index_name,
+                   LISTAGG(aic.column_name, ',')
+                       WITHIN GROUP (ORDER BY aic.column_position) AS cols
+            FROM   all_indexes     ai
+            JOIN   all_ind_columns aic
+                   ON  ai.index_name = aic.index_name
+                   AND ai.owner      = aic.index_owner
+            WHERE  ai.owner      = :s
+              AND  ai.table_name = :t
+              AND  ai.uniqueness = 'UNIQUE'
+            GROUP BY ai.index_name
+            ORDER BY ai.index_name
+        """, {"s": schema, "t": table})
+        for idx_name, cols_csv in cur.fetchall():
+            if idx_name not in constraint_backed and idx_name not in uk_map:
+                uk_map[idx_name] = cols_csv.split(",")
+
         uk_constraints = [{"name": k, "columns": v} for k, v in uk_map.items()]
 
     return {
