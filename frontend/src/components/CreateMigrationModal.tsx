@@ -298,11 +298,12 @@ function SearchableSelect({ items, value, onChange, disabled, placeholder }: {
   );
 }
 
-function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tableErr }: {
+function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tableErr, excludeTables }: {
   db: "source" | "target";
   schema: string; table: string;
   onSchema: (v: string) => void; onTable: (v: string) => void;
   schemaErr?: string; tableErr?: string;
+  excludeTables?: Set<string>;
 }) {
   const [schemas, setSchemas] = useState<string[]>([]);
   const [tables,  setTables]  = useState<string[]>([]);
@@ -331,13 +332,17 @@ function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tabl
       .finally(() => setLTab(false));
   }, [db, schema]);
 
+  const availableTables = excludeTables
+    ? tables.filter(t => !excludeTables.has(t))
+    : tables;
+
   const prevTables = useRef<string[]>([]);
   useEffect(() => {
-    if (tables !== prevTables.current) {
-      prevTables.current = tables;
-      if (table && !tables.includes(table)) onTable("");
+    if (availableTables !== prevTables.current) {
+      prevTables.current = availableTables;
+      if (table && !availableTables.includes(table)) onTable("");
     }
-  }, [tables]); // eslint-disable-line
+  }, [availableTables]); // eslint-disable-line
 
   return (
     <div style={S.row2}>
@@ -352,7 +357,7 @@ function SchemaTablePair({ db, schema, table, onSchema, onTable, schemaErr, tabl
       </Field>
       <Field label="Таблица" required error={tableErr || eTab}>
         <SearchableSelect
-          items={tables}
+          items={availableTables}
           value={table}
           onChange={onTable}
           disabled={!schema || lTab}
@@ -425,10 +430,33 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
   const [ensureBusy,   setEnsureBusy]   = useState(false);
   const [ensureResult, setEnsureResult] = useState<{ created: boolean; columns: any; objects: any } | null>(null);
   const [ensureErr,    setEnsureErr]    = useState("");
+  const [existingMigrations, setExistingMigrations] = useState<{ source_schema: string; source_table: string; phase: string }[]>([]);
   const nameTouched = useRef(false);
 
   const setF = useCallback((up: Partial<FormData>) =>
     setFormRaw(f => ({ ...f, ...up })), []);
+
+  // ── Load existing migrations to exclude already-used tables ───────────────
+
+  useEffect(() => {
+    fetch("/api/migrations")
+      .then(r => r.json())
+      .then((data: { source_schema: string; source_table: string; phase: string }[]) =>
+        setExistingMigrations(data.filter(m =>
+          m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
+        ))
+      )
+      .catch(() => {});
+  }, []);
+
+  const excludeSourceTables = React.useMemo(() => {
+    if (!form.source_schema) return undefined;
+    const set = new Set<string>();
+    for (const m of existingMigrations) {
+      if (m.source_schema === form.source_schema) set.add(m.source_table);
+    }
+    return set.size > 0 ? set : undefined;
+  }, [form.source_schema, existingMigrations]);
 
   // ── Load table info when source schema+table are both selected ────────────
 
@@ -668,6 +696,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
               onTable={onSourceTable}
               schemaErr={fieldErrs.source_schema}
               tableErr={fieldErrs.source_table}
+              excludeTables={excludeSourceTables}
             />
             {loadingInfo && (
               <div style={{ fontSize: 11, color: "#475569" }}>
