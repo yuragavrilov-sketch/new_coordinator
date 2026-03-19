@@ -239,30 +239,20 @@ export function Checklist() {
   }, [activeIdx]);
 
   const loadAllFromSource = useCallback(async () => {
+    if (!newSchema) { setLoadAllError("Сначала выберите схему"); return; }
     setLoadAllBusy(true);
     setLoadAllError("");
     try {
-      const schemasRes = await fetch("/api/db/source/schemas");
-      if (!schemasRes.ok) throw new Error("Не удалось загрузить схемы");
-      const allSchemas: string[] = await schemasRes.json();
-
-      const allRows: { schema: string; table: string }[] = [];
-      for (const schema of allSchemas) {
-        const tablesRes = await fetch(`/api/db/source/tables?schema=${encodeURIComponent(schema)}`);
-        if (!tablesRes.ok) continue;
-        const tables: string[] = await tablesRes.json();
-        for (const table of tables) {
-          allRows.push({ schema, table });
-        }
-      }
-
-      addRows(allRows);
+      const res = await fetch(`/api/db/source/tables?schema=${encodeURIComponent(newSchema)}`);
+      if (!res.ok) throw new Error("Не удалось загрузить таблицы");
+      const tables: string[] = await res.json();
+      addRows(tables.map(t => ({ schema: newSchema, table: t })));
     } catch (e: unknown) {
       setLoadAllError(e instanceof Error ? e.message : "Ошибка загрузки");
     } finally {
       setLoadAllBusy(false);
     }
-  }, [addRows]);
+  }, [addRows, newSchema]);
 
   const updateRow = useCallback((rowIdx: number, patch: Partial<TableEntry>) => {
     setLists(prev => prev.map((l, i) =>
@@ -333,7 +323,7 @@ export function Checklist() {
                   opacity: loadAllBusy ? 0.5 : 1,
                 }}
               >
-                {loadAllBusy ? "Загрузка…" : "Загрузить все таблицы из источника"}
+                {loadAllBusy ? "Загрузка…" : "Загрузить все таблицы схемы"}
               </button>
             </div>
             {loadAllError && <span style={{ color: "#fca5a5", fontSize: 11 }}>{loadAllError}</span>}
