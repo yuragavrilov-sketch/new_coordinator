@@ -271,7 +271,7 @@ export function Checklist() {
   }, [activeIdx]);
 
   const tables = active?.tables || [];
-  const toMigrate = tables.filter(t => t.decision === "migrate");
+  const toMigrate = tables.filter(t => t.decision !== "skip");
   const doneCount = toMigrate.filter(t => t.status === "done").length;
 
   return (
@@ -364,7 +364,7 @@ export function Checklist() {
                       </select>
                     </td>
                     <td style={tdStyle}>
-                      {row.decision === "migrate" ? (
+                      {row.decision !== "skip" ? (
                         <select
                           value={row.status}
                           onChange={e => updateRow(idx, { status: e.target.value as Status })}
