@@ -17,6 +17,7 @@ interface FormData {
   source_table: string;
   target_schema: string;
   target_table: string;
+  migration_mode: "CDC" | "BULK_ONLY";
   migration_strategy: "STAGE" | "DIRECT";
   connector_name: string;
   topic_prefix: string;
@@ -402,6 +403,7 @@ const INIT: FormData = {
   migration_name: "",
   source_schema: "", source_table: "",
   target_schema: "", target_table: "",
+  migration_mode: "CDC",
   migration_strategy: "STAGE",
   connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "PAYSTAGE",
   chunk_size: 1_000_000,
@@ -552,9 +554,11 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     if (!form.source_table)             e.source_table        = "Выберите таблицу";
     if (!form.target_schema)            e.target_schema       = "Выберите схему";
     if (!form.target_table)             e.target_table        = "Выберите таблицу";
-    if (!form.connector_name.trim())    e.connector_name      = "Обязательное поле";
-    if (!form.topic_prefix.trim())      e.topic_prefix        = "Обязательное поле";
-    if (!form.consumer_group.trim())    e.consumer_group      = "Обязательное поле";
+    if (form.migration_mode === "CDC") {
+      if (!form.connector_name.trim())  e.connector_name      = "Обязательное поле";
+      if (!form.topic_prefix.trim())    e.topic_prefix        = "Обязательное поле";
+      if (!form.consumer_group.trim())  e.consumer_group      = "Обязательное поле";
+    }
     if (form.migration_strategy === "STAGE" && !form.stage_table_name.trim())
       e.stage_table_name = "Обязательное поле";
     if (form.chunk_size <= 0)           e.chunk_size          = "Должно быть > 0";
@@ -577,6 +581,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     const payload = {
       initial_phase:              "DRAFT",
       migration_name:             form.migration_name.trim(),
+      migration_mode:             form.migration_mode,
       migration_strategy:         form.migration_strategy,
       source_connection_id:       "oracle_source",
       target_connection_id:       "oracle_target",
@@ -586,9 +591,9 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       target_table:               form.target_table,
       stage_table_name:           form.migration_strategy === "STAGE" ? form.stage_table_name.trim() : "",
       stage_tablespace:           form.migration_strategy === "STAGE" ? form.stage_tablespace.trim() : "",
-      connector_name:             form.connector_name.trim(),
-      topic_prefix:               form.topic_prefix.trim(),
-      consumer_group:             form.consumer_group.trim(),
+      connector_name:             form.migration_mode === "CDC" ? form.connector_name.trim() : "",
+      topic_prefix:               form.migration_mode === "CDC" ? form.topic_prefix.trim() : "",
+      consumer_group:             form.migration_mode === "CDC" ? form.consumer_group.trim() : "",
       chunk_size:                 form.chunk_size,
       max_parallel_workers:       form.max_parallel_workers,
       baseline_parallel_degree:   form.baseline_parallel_degree,
@@ -764,6 +769,43 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
             )}
           </Section>
 
+          {/* ── Mode ── */}
+          <Section title="Режим миграции" accent="#7c3aed">
+            <Field label="Режим">
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => setF({ migration_mode: "CDC" })}
+                  style={{
+                    flex: 1, padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+                    border: `1px solid ${form.migration_mode === "CDC" ? "#7c3aed" : "#334155"}`,
+                    background: form.migration_mode === "CDC" ? "#2e1065" : "#1e293b",
+                    color: form.migration_mode === "CDC" ? "#c4b5fd" : "#64748b",
+                    fontWeight: 700, fontSize: 12,
+                  }}
+                >
+                  CDC (Debezium)
+                </button>
+                <button
+                  onClick={() => setF({ migration_mode: "BULK_ONLY" })}
+                  style={{
+                    flex: 1, padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+                    border: `1px solid ${form.migration_mode === "BULK_ONLY" ? "#059669" : "#334155"}`,
+                    background: form.migration_mode === "BULK_ONLY" ? "#064e3b" : "#1e293b",
+                    color: form.migration_mode === "BULK_ONLY" ? "#6ee7b7" : "#64748b",
+                    fontWeight: 700, fontSize: 12,
+                  }}
+                >
+                  Разовая переливка
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>
+                {form.migration_mode === "CDC"
+                  ? "Полная миграция с Debezium: bulk-загрузка + отслеживание изменений через CDC до полного catchup"
+                  : "Однократная переливка данных без Debezium/Kafka. Не отслеживает изменения — только разовый снимок"}
+              </div>
+            </Field>
+          </Section>
+
           {/* ── Config ── */}
           <Section title="Параметры миграции">
             <Field label="Стратегия миграции" required>
@@ -799,21 +841,25 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   : "Прямая загрузка в целевую таблицу, без stage. Быстрее, но без возможности валидации stage"}
               </div>
             </Field>
+            {form.migration_mode === "CDC" && (
+              <>
+                <div style={S.row2}>
+                  <Field label="Connector name" required error={fieldErrs.connector_name}>
+                    <TextInput value={form.connector_name} hasError={!!fieldErrs.connector_name}
+                      onChange={v => setF({ connector_name: v })} />
+                  </Field>
+                  <Field label="Topic prefix" required error={fieldErrs.topic_prefix}>
+                    <TextInput value={form.topic_prefix} hasError={!!fieldErrs.topic_prefix}
+                      onChange={v => setF({ topic_prefix: v })} />
+                  </Field>
+                </div>
+                <Field label="Consumer group" required error={fieldErrs.consumer_group}>
+                  <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
+                    onChange={v => setF({ consumer_group: v })} />
+                </Field>
+              </>
+            )}
             <div style={S.row2}>
-              <Field label="Connector name" required error={fieldErrs.connector_name}>
-                <TextInput value={form.connector_name} hasError={!!fieldErrs.connector_name}
-                  onChange={v => setF({ connector_name: v })} />
-              </Field>
-              <Field label="Topic prefix" required error={fieldErrs.topic_prefix}>
-                <TextInput value={form.topic_prefix} hasError={!!fieldErrs.topic_prefix}
-                  onChange={v => setF({ topic_prefix: v })} />
-              </Field>
-            </div>
-            <div style={S.row2}>
-              <Field label="Consumer group" required error={fieldErrs.consumer_group}>
-                <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
-                  onChange={v => setF({ consumer_group: v })} />
-              </Field>
               {form.migration_strategy === "STAGE" && (<>
                 <Field label="Stage table name" required error={fieldErrs.stage_table_name}>
                   <TextInput value={form.stage_table_name} hasError={!!fieldErrs.stage_table_name}

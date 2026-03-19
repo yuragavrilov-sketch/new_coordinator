@@ -359,6 +359,16 @@ function MigrationRow({
           {m.migration_name}
         </span>
         <PhaseBadge phase={m.phase} size="sm" />
+        {m.migration_mode === "BULK_ONLY" && (
+          <span style={{
+            background: "#064e3b", color: "#6ee7b7",
+            border: "1px solid #059669", borderRadius: 4,
+            fontSize: 9, fontWeight: 700, padding: "1px 5px",
+            textTransform: "uppercase", letterSpacing: 0.4,
+          }}>
+            BULK
+          </span>
+        )}
         {m.phase === "NEW" && m.queue_position != null && (
           <span style={{
             background: "#3b2000", color: "#fcd34d",

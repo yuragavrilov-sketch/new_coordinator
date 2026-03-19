@@ -355,19 +355,21 @@ def _handle_preparing(mid: str, m: dict) -> None:
             dst_cfg  = _oracle_cfg(m["target_connection_id"])
             strategy = (m.get("migration_strategy") or "STAGE").upper()
 
-            # Check supplemental logging (warn, don't block)
-            try:
-                has_supp = oracle_scn.check_supplemental_logging(
-                    src_cfg, m["source_schema"], m["source_table"]
-                )
-                if not has_supp:
-                    print(
-                        f"[orchestrator] WARNING: {m['source_schema']}.{m['source_table']} "
-                        "does not have ALL COLUMNS supplemental logging. "
-                        "Debezium may not capture full row images."
+            # Check supplemental logging (warn, don't block) — CDC only
+            mode = (m.get("migration_mode") or "CDC").upper()
+            if mode != "BULK_ONLY":
+                try:
+                    has_supp = oracle_scn.check_supplemental_logging(
+                        src_cfg, m["source_schema"], m["source_table"]
                     )
-            except Exception as exc:
-                print(f"[orchestrator] supplemental logging check failed: {exc}")
+                    if not has_supp:
+                        print(
+                            f"[orchestrator] WARNING: {m['source_schema']}.{m['source_table']} "
+                            "does not have ALL COLUMNS supplemental logging. "
+                            "Debezium may not capture full row images."
+                        )
+                except Exception as exc:
+                    print(f"[orchestrator] supplemental logging check failed: {exc}")
 
             if strategy == "STAGE":
                 ts = m.get("stage_tablespace") or ""
@@ -402,7 +404,16 @@ def _handle_preparing(mid: str, m: dict) -> None:
 
 
 def _handle_scn_fixed(mid: str, m: dict) -> None:
-    """Create Debezium connector → CONNECTOR_STARTING."""
+    """CDC: create Debezium connector → CONNECTOR_STARTING.
+    BULK_ONLY: skip connector, create chunks directly → CHUNKING."""
+    mode = (m.get("migration_mode") or "CDC").upper()
+
+    if mode == "BULK_ONLY":
+        # Skip Debezium entirely — go straight to chunk creation
+        _create_chunks_and_transition(mid, m)
+        return
+
+    # CDC mode — create Debezium connector
     src_cfg = _oracle_cfg(m["source_connection_id"])
     try:
         debezium.create_connector(m, src_cfg)
@@ -438,11 +449,9 @@ def _handle_connector_starting(mid: str, m: dict) -> None:
               "CONNECTOR_FAILED")
 
 
-def _handle_cdc_buffering(mid: str, m: dict) -> None:
-    """
-    Create ROWID chunks via DBMS_PARALLEL_EXECUTE and store in migration_chunks.
-    Idempotent: if chunks already exist, skip.
-    """
+def _create_chunks_and_transition(mid: str, m: dict) -> None:
+    """Create ROWID chunks and transition to CHUNKING.
+    Shared by CDC (via _handle_cdc_buffering) and BULK_ONLY (via _handle_scn_fixed)."""
     if _in_prog(mid):
         return
 
@@ -454,7 +463,6 @@ def _handle_cdc_buffering(mid: str, m: dict) -> None:
         conn.close()
 
     if stats["total"] > 0:
-        # Chunks already written — move on
         _update(mid, {"total_chunks": stats["total"]})
         _transition(mid, "CHUNKING",
                     message=f"Чанки уже созданы ({stats['total']}), переход к нарезке")
@@ -493,6 +501,14 @@ def _handle_cdc_buffering(mid: str, m: dict) -> None:
             _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_cdc_buffering(mid: str, m: dict) -> None:
+    """
+    Create ROWID chunks via DBMS_PARALLEL_EXECUTE and store in migration_chunks.
+    Idempotent: if chunks already exist, skip.
+    """
+    _create_chunks_and_transition(mid, m)
 
 
 def _handle_chunking(mid: str, m: dict) -> None:
@@ -836,18 +852,40 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
             n_idx = len(result["enabled"]["indexes"])
             n_con = len(result["enabled"]["constraints"])
-            msg = (
-                f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
-                "Триггеры остаются выключенными до завершения CDC. "
-                "Ожидание запуска CDC apply-worker"
-            )
-            # Clear leftover error_code/error_text from previous failed attempts.
-            # Use _safe_transition so a concurrent cancel is respected.
-            _safe_transition(
-                mid, "INDEXES_ENABLING", "CDC_APPLY_STARTING",
-                message=msg,
-                extra_fields={"error_code": None, "error_text": None},
-            )
+
+            mode = (m.get("migration_mode") or "CDC").upper()
+            if mode == "BULK_ONLY":
+                # No CDC phase — enable triggers immediately and complete
+                try:
+                    oracle_browser.enable_triggers(
+                        oracle_scn.open_oracle_conn(dst_cfg),
+                        m["target_schema"], m["target_table"],
+                    )
+                except Exception as exc:
+                    print(f"[orchestrator] {mid}: enable triggers warning: {exc}")
+
+                msg = (
+                    f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                    "Режим BULK_ONLY — миграция завершена"
+                )
+                _safe_transition(
+                    mid, "INDEXES_ENABLING", "COMPLETED",
+                    message=msg,
+                    extra_fields={"error_code": None, "error_text": None},
+                )
+            else:
+                msg = (
+                    f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                    "Триггеры остаются выключенными до завершения CDC. "
+                    "Ожидание запуска CDC apply-worker"
+                )
+                # Clear leftover error_code/error_text from previous failed attempts.
+                # Use _safe_transition so a concurrent cancel is respected.
+                _safe_transition(
+                    mid, "INDEXES_ENABLING", "CDC_APPLY_STARTING",
+                    message=msg,
+                    extra_fields={"error_code": None, "error_text": None},
+                )
         except Exception as exc:
             if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
                 _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")

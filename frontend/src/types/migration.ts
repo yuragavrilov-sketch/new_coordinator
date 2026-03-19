@@ -64,6 +64,7 @@ export interface Migration {
   baseline_parallel_degree: number;
   baseline_batch_size: number;
   migration_strategy: string;
+  migration_mode: string;
   baseline_chunks_total: number | null;
   baseline_chunks_done: number;
   queue_position: number | null;
@@ -91,6 +92,7 @@ export interface MigrationSummary {
   chunks_done: number;
   chunks_failed: number;
   rows_loaded: number;
+  migration_mode: string;
   queue_position: number | null;
 }
 

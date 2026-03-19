@@ -34,7 +34,7 @@ _LIST_COLS = """
     error_code, error_text, failed_phase, retry_count,
     description, created_by,
     total_rows, total_chunks, chunks_done, chunks_failed, rows_loaded,
-    migration_strategy
+    migration_strategy, migration_mode
 """
 
 _state: dict = {}
@@ -122,6 +122,10 @@ def create_migration():
                 if strategy not in ("STAGE", "DIRECT"):
                     strategy = "STAGE"
 
+                mode = body.get("migration_mode", "CDC").strip().upper()
+                if mode not in ("CDC", "BULK_ONLY"):
+                    mode = "CDC"
+
                 cur.execute("""
                     INSERT INTO migrations (
                         migration_id, migration_name, phase, state_changed_at,
@@ -133,7 +137,7 @@ def create_migration():
                         validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
-                        migration_strategy,
+                        migration_strategy, migration_mode,
                         created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s,
@@ -145,7 +149,7 @@ def create_migration():
                         %s,
                         %s, %s,
                         %s, %s, %s,
-                        %s,
+                        %s, %s,
                         %s, %s
                     )
                 """, (
@@ -156,8 +160,9 @@ def create_migration():
                     body.get("target_schema", ""), body.get("target_table", ""),
                     body.get("stage_table_name", ""),
                     body.get("stage_tablespace", "").strip().upper(),
-                    body.get("connector_name", ""),
-                    body.get("topic_prefix", ""), body.get("consumer_group", ""),
+                    body.get("connector_name", "") if mode == "CDC" else "",
+                    body.get("topic_prefix", "")   if mode == "CDC" else "",
+                    body.get("consumer_group", "")  if mode == "CDC" else "",
                     body.get("chunk_size", 1_000_000),
                     max(1, int(body.get("max_parallel_workers",          1) or 1)),
                     max(1, int(body.get("baseline_parallel_degree",      4) or 4)),
@@ -165,7 +170,7 @@ def create_migration():
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
                     body.get("effective_key_columns_json", "[]"),
-                    strategy,
+                    strategy, mode,
                     now, now,
                 ))
                 cur.execute("""

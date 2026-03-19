@@ -92,6 +92,10 @@ const CONNECTOR_PHASES = new Set([
 const LAG_PHASES       = new Set([
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE",
 ]);
+
+function isCdcMode(detail: { migration_mode?: string }): boolean {
+  return (detail.migration_mode ?? "CDC").toUpperCase() !== "BULK_ONLY";
+}
 const VALIDATION_PHASES = new Set([
   "STAGE_VALIDATED", "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE",
@@ -464,7 +468,7 @@ function OverviewTab({
       )}
 
       {/* Phase-specific panels */}
-      {CONNECTOR_PHASES.has(phase) && (
+      {CONNECTOR_PHASES.has(phase) && isCdcMode(detail) && (
         <ConnectorPanel migrationId={migrationId} sseEvents={sseEvents} />
       )}
       {BULK_PHASES.has(phase) && (
@@ -477,7 +481,7 @@ function OverviewTab({
       {VALIDATION_PHASES.has(phase) && (
         <ValidationPanel migrationId={migrationId} />
       )}
-      {LAG_PHASES.has(phase) && (
+      {LAG_PHASES.has(phase) && isCdcMode(detail) && (
         <KafkaLagPanel migrationId={migrationId} sseEvents={sseEvents} />
       )}
 
@@ -576,11 +580,25 @@ function OverviewTab({
         )}
       </div>
 
-      <InfoGrid title="Коннектор / Kafka">
-        <InfoRow label="Connector"      value={detail.connector_name} />
-        <InfoRow label="Topic prefix"   value={detail.topic_prefix} />
-        <InfoRow label="Consumer group" value={detail.consumer_group} />
+      <InfoGrid title="Режим миграции">
+        <InfoRow label="Режим" value={
+          <span style={{
+            fontWeight: 700,
+            color: isCdcMode(detail) ? "#c4b5fd" : "#6ee7b7",
+          }}>
+            {isCdcMode(detail) ? "CDC (Debezium)" : "Разовая переливка"}
+          </span>
+        } />
+        <InfoRow label="Стратегия" value={detail.migration_strategy} />
       </InfoGrid>
+
+      {isCdcMode(detail) && (
+        <InfoGrid title="Коннектор / Kafka">
+          <InfoRow label="Connector"      value={detail.connector_name} />
+          <InfoRow label="Topic prefix"   value={detail.topic_prefix} />
+          <InfoRow label="Consumer group" value={detail.consumer_group} />
+        </InfoGrid>
+      )}
 
       <InfoGrid title="Параметры загрузки">
         <InfoRow label="Chunk size"              value={detail.chunk_size?.toLocaleString()} />
@@ -1425,7 +1443,8 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
             (phase === "FAILED" && (detail?.error_code === "BASELINE_PUBLISH_ERROR" || detail?.error_code === "BASELINE_LOAD_FAILED"))) && (
             <RestartBaselineButton migrationId={migrationId} onDone={loadDetail} />
           )}
-          {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") && (
+          {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") &&
+            detail && isCdcMode(detail) && (
             <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
           )}
           <StopDeleteButtons migrationId={migrationId} phase={phase} onDone={loadDetail} onDeleted={onClose} />
