@@ -1,11 +1,12 @@
 export type MigrationPhase =
   | "DRAFT" | "NEW" | "PREPARING" | "SCN_FIXED"
   | "CONNECTOR_STARTING" | "CDC_BUFFERING"
+  | "TOPIC_CREATING"
   | "CHUNKING" | "BULK_LOADING" | "BULK_LOADED"
   | "STAGE_VALIDATING" | "STAGE_VALIDATED"
   | "BASELINE_PUBLISHING" | "BASELINE_LOADING" | "BASELINE_PUBLISHED"
   | "STAGE_DROPPING" | "INDEXES_ENABLING"
-  | "CDC_APPLY_STARTING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
+  | "CDC_APPLY_STARTING" | "CDC_APPLYING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
   | "STEADY_STATE" | "PAUSED"
   | "CANCELLING" | "CANCELLED"
   | "COMPLETED" | "FAILED";
@@ -68,6 +69,25 @@ export interface Migration {
   baseline_chunks_total: number | null;
   baseline_chunks_done: number;
   queue_position: number | null;
+  group_id: string | null;
+}
+
+// ── Connector Groups ──────────────────────────────────────────────────────────
+
+export type GroupStatus = "PENDING" | "STARTING" | "RUNNING" | "STOPPING" | "STOPPED" | "FAILED";
+
+export interface ConnectorGroup {
+  group_id: string;
+  group_name: string;
+  source_connection_id: string;
+  connector_name: string;
+  topic_prefix: string;
+  consumer_group_prefix: string;
+  status: GroupStatus;
+  error_text: string | null;
+  created_at: string;
+  updated_at: string;
+  migrations?: MigrationSummary[];
 }
 
 export interface MigrationSummary {
@@ -125,6 +145,7 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   SCN_FIXED:           { bg: "#1e3a5f", text: "#93c5fd", border: "#1d4ed8" },
   CONNECTOR_STARTING:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   CDC_BUFFERING:       { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
+  TOPIC_CREATING:      { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   CHUNKING:            { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
   BULK_LOADING:        { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
   BULK_LOADED:         { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
@@ -136,6 +157,7 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   STAGE_DROPPING:      { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
   INDEXES_ENABLING:    { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
   CDC_APPLY_STARTING:  { bg: "#431407", text: "#fdba74", border: "#ea580c" },
+  CDC_APPLYING:        { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CDC_CATCHING_UP:     { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CDC_CAUGHT_UP:       { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   STEADY_STATE:        { bg: "#052e16", text: "#86efac", border: "#16a34a" },
@@ -155,10 +177,11 @@ export function phaseColor(phase: string): PhaseColor {
 export const ORDERED_PHASES: MigrationPhase[] = [
   "DRAFT", "NEW", "PREPARING", "SCN_FIXED",
   "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "TOPIC_CREATING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
   "STAGE_VALIDATING", "STAGE_VALIDATED",
   "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
   "STAGE_DROPPING", "INDEXES_ENABLING",
-  "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+  "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ];

@@ -146,6 +146,18 @@ from routes.target_prep import bp as target_prep_bp
 target_prep_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(target_prep_bp)
 
+# ── Connector Groups blueprint ───────────────────────────────────────────────
+import routes.connector_groups as cg_mod
+from routes.connector_groups import bp as cg_bp
+
+cg_mod.init(
+    get_conn_fn=get_conn,
+    row_to_dict_fn=row_to_dict,
+    load_configs_fn=_load_cfg,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(cg_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp

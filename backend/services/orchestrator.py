@@ -32,6 +32,8 @@ import services.oracle_baseline as oracle_baseline
 import services.kafka_lag       as kafka_lag_svc
 import services.validator       as validator
 import services.job_queue       as job_queue
+import services.kafka_topics    as kafka_topics
+import services.connector_groups as connector_groups_svc
 import db.oracle_browser        as oracle_browser
 
 TICK_INTERVAL = 5  # seconds
@@ -42,6 +44,7 @@ TICK_INTERVAL = 5  # seconds
 _HEAVY_PHASES = frozenset({
     "PREPARING", "SCN_FIXED",
     "CONNECTOR_STARTING", "CDC_BUFFERING",
+    "TOPIC_CREATING",
     "CHUNKING",
     "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
@@ -116,33 +119,64 @@ def _tick() -> None:
             print(f"[orchestrator] migration {mid} phase {phase} error: {exc}")
             _fail(mid, str(exc))
 
+    # Check connector group health
+    _check_group_connectors()
+
 
 def _dispatch(migration_id: str, phase: str, m: dict) -> None:
-    handlers = {
-        "NEW":                  _handle_new,
-        "PREPARING":            _handle_preparing,
-        "SCN_FIXED":            _handle_scn_fixed,
-        "CONNECTOR_STARTING":   _handle_connector_starting,
-        "CDC_BUFFERING":        _handle_cdc_buffering,
-        "CHUNKING":             _handle_chunking,
-        "BULK_LOADING":         _handle_bulk_loading,
-        "BULK_LOADED":          _handle_bulk_loaded,
-        "STAGE_VALIDATING":     _handle_stage_validating,
-        "STAGE_VALIDATED":      _handle_stage_validated,
-        "BASELINE_PUBLISHING":  _handle_baseline_publishing,
-        "BASELINE_LOADING":     _handle_baseline_loading,
-        "BASELINE_PUBLISHED":   _handle_baseline_published,
-        "STAGE_DROPPING":       _handle_stage_dropping,
-        "INDEXES_ENABLING":     _handle_indexes_enabling,
-        "CDC_APPLY_STARTING":   _handle_cdc_apply_starting,
-        "CDC_CATCHING_UP":      _handle_cdc_catching_up,
-        "CDC_CAUGHT_UP":        _handle_cdc_caught_up,
-        "STEADY_STATE":         _handle_steady_state,
-        "CANCELLING":           _handle_cancelling,
-    }
-    handler = handlers.get(phase)
+    # Group-based migrations use a simplified phase machine
+    if m.get("group_id"):
+        handler = _GROUP_HANDLERS.get(phase)
+    else:
+        handler = _LEGACY_HANDLERS.get(phase)
     if handler:
         handler(migration_id, m)
+
+
+# Legacy handlers (per-migration connector, AS OF SCN)
+_LEGACY_HANDLERS = {
+    "NEW":                  lambda mid, m: _handle_new(mid, m),
+    "PREPARING":            lambda mid, m: _handle_preparing(mid, m),
+    "SCN_FIXED":            lambda mid, m: _handle_scn_fixed(mid, m),
+    "CONNECTOR_STARTING":   lambda mid, m: _handle_connector_starting(mid, m),
+    "CDC_BUFFERING":        lambda mid, m: _handle_cdc_buffering(mid, m),
+    "CHUNKING":             lambda mid, m: _handle_chunking(mid, m),
+    "BULK_LOADING":         lambda mid, m: _handle_bulk_loading(mid, m),
+    "BULK_LOADED":          lambda mid, m: _handle_bulk_loaded(mid, m),
+    "STAGE_VALIDATING":     lambda mid, m: _handle_stage_validating(mid, m),
+    "STAGE_VALIDATED":      lambda mid, m: _handle_stage_validated(mid, m),
+    "BASELINE_PUBLISHING":  lambda mid, m: _handle_baseline_publishing(mid, m),
+    "BASELINE_LOADING":     lambda mid, m: _handle_baseline_loading(mid, m),
+    "BASELINE_PUBLISHED":   lambda mid, m: _handle_baseline_published(mid, m),
+    "STAGE_DROPPING":       lambda mid, m: _handle_stage_dropping(mid, m),
+    "INDEXES_ENABLING":     lambda mid, m: _handle_indexes_enabling(mid, m),
+    "CDC_APPLY_STARTING":   lambda mid, m: _handle_cdc_apply_starting(mid, m),
+    "CDC_CATCHING_UP":      lambda mid, m: _handle_cdc_catching_up(mid, m),
+    "CDC_CAUGHT_UP":        lambda mid, m: _handle_cdc_caught_up(mid, m),
+    "STEADY_STATE":         lambda mid, m: _handle_steady_state(mid, m),
+    "CANCELLING":           lambda mid, m: _handle_cancelling(mid, m),
+}
+
+# Group handlers (shared connector, no SCN, pre-created topics)
+_GROUP_HANDLERS = {
+    "NEW":                  lambda mid, m: _handle_new_group(mid, m),
+    "TOPIC_CREATING":       lambda mid, m: _handle_topic_creating(mid, m),
+    "CHUNKING":             lambda mid, m: _handle_chunking(mid, m),
+    "BULK_LOADING":         lambda mid, m: _handle_bulk_loading(mid, m),
+    "BULK_LOADED":          lambda mid, m: _handle_bulk_loaded(mid, m),
+    "STAGE_VALIDATING":     lambda mid, m: _handle_stage_validating(mid, m),
+    "STAGE_VALIDATED":      lambda mid, m: _handle_stage_validated(mid, m),
+    "BASELINE_PUBLISHING":  lambda mid, m: _handle_baseline_publishing(mid, m),
+    "BASELINE_LOADING":     lambda mid, m: _handle_baseline_loading(mid, m),
+    "BASELINE_PUBLISHED":   lambda mid, m: _handle_baseline_published(mid, m),
+    "STAGE_DROPPING":       lambda mid, m: _handle_stage_dropping(mid, m),
+    "INDEXES_ENABLING":     lambda mid, m: _handle_indexes_enabling_group(mid, m),
+    "CDC_APPLYING":         lambda mid, m: _handle_cdc_applying(mid, m),
+    "CDC_CATCHING_UP":      lambda mid, m: _handle_cdc_catching_up(mid, m),
+    "CDC_CAUGHT_UP":        lambda mid, m: _handle_cdc_caught_up(mid, m),
+    "STEADY_STATE":         lambda mid, m: _handle_steady_state(mid, m),
+    "CANCELLING":           lambda mid, m: _handle_cancelling(mid, m),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1146,3 +1180,330 @@ def _handle_steady_state(mid: str, m: dict) -> None:
         "updated_at":   updated_at.isoformat() + "Z" if updated_at else None,
         "ts":           datetime.utcnow().isoformat() + "Z",
     })
+
+
+# ---------------------------------------------------------------------------
+# Group-based handlers (shared connector, no SCN)
+# ---------------------------------------------------------------------------
+
+def _handle_new_group(mid: str, m: dict) -> None:
+    """Group migration: validate keys, queue gate, create stage, → TOPIC_CREATING.
+
+    Unlike legacy NEW:
+    - No SCN fixation
+    - Connector already managed at group level
+    """
+    pk = m.get("source_pk_exists", False)
+    uk = m.get("source_uk_exists", False)
+    key_cols = json.loads(m.get("effective_key_columns_json") or "[]")
+
+    if not pk and not uk and not key_cols:
+        _fail(mid,
+              "Таблица не имеет PK/UK и ключевые колонки не заданы.",
+              "NO_KEY_COLUMNS")
+        return
+
+    # Queue gate (same as legacy)
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            placeholders = ",".join(["%s"] * len(_HEAVY_PHASES))
+            cur.execute(
+                f"""SELECT 1 FROM migrations
+                    WHERE  phase IN ({placeholders})
+                      AND  migration_id != %s
+                    LIMIT 1""",
+                (*_HEAVY_PHASES, mid),
+            )
+            slot_busy = cur.fetchone() is not None
+    finally:
+        conn.close()
+
+    if slot_busy:
+        _update_queue_positions()
+        return
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT migration_id FROM migrations
+                WHERE  phase = 'NEW'
+                ORDER BY state_changed_at ASC
+                LIMIT 1
+            """)
+            first = cur.fetchone()
+    finally:
+        conn.close()
+
+    if first and first[0] != mid:
+        _update_queue_positions()
+        return
+
+    # Verify group connector is RUNNING (for CDC mode)
+    mode = (m.get("migration_mode") or "CDC").upper()
+    if mode != "BULK_ONLY":
+        group = connector_groups_svc.get_group(m["group_id"])
+        if not group:
+            _fail(mid, "Группа коннектора не найдена", "GROUP_NOT_FOUND")
+            return
+        if group["status"] != "RUNNING":
+            _fail(mid,
+                  f"Коннектор группы не запущен (status={group['status']}). "
+                  "Запустите коннектор группы перед миграцией.",
+                  "GROUP_NOT_RUNNING")
+            return
+
+    _update(mid, {"queue_position": None})
+
+    # Create stage table (if STAGE strategy) — same as legacy PREPARING
+    # but without SCN fixation
+    if _in_prog(mid):
+        return
+    _mark_in_prog(mid)
+
+    def _run():
+        try:
+            src_cfg = _oracle_cfg(m["source_connection_id"])
+            dst_cfg = _oracle_cfg(m["target_connection_id"])
+            strategy = (m.get("migration_strategy") or "STAGE").upper()
+
+            if mode != "BULK_ONLY":
+                try:
+                    has_supp = oracle_scn.check_supplemental_logging(
+                        src_cfg, m["source_schema"], m["source_table"]
+                    )
+                    if not has_supp:
+                        print(
+                            f"[orchestrator] WARNING: {m['source_schema']}.{m['source_table']} "
+                            "does not have ALL COLUMNS supplemental logging."
+                        )
+                except Exception as exc:
+                    print(f"[orchestrator] supplemental logging check failed: {exc}")
+
+            if strategy == "STAGE":
+                ts = m.get("stage_tablespace") or ""
+                oracle_stage.create_stage_table(
+                    src_cfg, dst_cfg,
+                    m["source_schema"], m["source_table"],
+                    m["target_schema"], m["stage_table_name"],
+                    tablespace=ts,
+                )
+                stage_msg = "Stage table создана"
+            else:
+                stage_msg = "Прямая загрузка (без stage)"
+
+            if mode == "BULK_ONLY":
+                # Skip topic creation — go straight to chunking
+                _safe_transition(mid, "NEW", "CHUNKING",
+                                 message=f"{stage_msg}, BULK_ONLY → нарезка чанков")
+                # Create chunks inline
+                _unmark_in_prog(mid)
+                _create_chunks_and_transition(mid, m)
+                return
+            else:
+                _safe_transition(mid, "NEW", "TOPIC_CREATING",
+                                 message=f"{stage_msg}, создание топика Kafka")
+        except Exception as exc:
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "PREPARING_ERROR")
+        finally:
+            _unmark_in_prog(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_topic_creating(mid: str, m: dict) -> None:
+    """Pre-create the Kafka topic for this table, then create chunks."""
+    if _in_prog(mid):
+        return
+    _mark_in_prog(mid)
+
+    def _run():
+        try:
+            topic_prefix = m.get("topic_prefix", "")
+            src_schema = m["source_schema"].upper()
+            src_table = m["source_table"].upper()
+            topic_name = f"{topic_prefix}.{src_schema}.{src_table}"
+
+            # Get Kafka bootstrap servers
+            configs = _configs()
+            kafka_cfg = configs.get("kafka", {})
+            bootstrap = [
+                s.strip()
+                for s in (kafka_cfg.get("bootstrap_servers") or "kafka:9092").split(",")
+            ]
+
+            kafka_topics.create_topic(
+                bootstrap_servers=bootstrap,
+                topic_name=topic_name,
+            )
+
+            # Transition to chunking
+            _safe_transition(mid, "TOPIC_CREATING", "CHUNKING",
+                             message=f"Топик {topic_name} создан, нарезка чанков")
+
+            # Create chunks
+            _unmark_in_prog(mid)
+            _create_chunks_and_transition(mid, m)
+            return
+        except Exception as exc:
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "TOPIC_CREATE_ERROR")
+        finally:
+            _unmark_in_prog(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_indexes_enabling_group(mid: str, m: dict) -> None:
+    """Same as legacy _handle_indexes_enabling but routes to CDC_APPLYING
+    instead of CDC_APPLY_STARTING for group-based migrations."""
+    if _in_prog(mid):
+        return
+    _mark_in_prog(mid)
+
+    def _run():
+        try:
+            dst_cfg = _oracle_cfg(m["target_connection_id"])
+            conn = oracle_scn.open_oracle_conn(dst_cfg)
+            try:
+                oracle_browser.set_table_logging(
+                    conn, m["target_schema"], m["target_table"], nologging=False,
+                )
+                result = oracle_browser.enable_all_disabled_objects(
+                    conn, m["target_schema"], m["target_table"],
+                )
+            finally:
+                conn.close()
+
+            err_count = (
+                len(result["errors"]["indexes"])
+                + len(result["errors"]["constraints"])
+            )
+            if err_count:
+                names = (
+                    [e["name"] for e in result["errors"]["indexes"]]
+                    + [e["name"] for e in result["errors"]["constraints"]]
+                )
+                err_detail = str(result["errors"])
+                _transition(
+                    mid, "INDEXES_ENABLING",
+                    message=(
+                        f"Ошибка пересчёта: {', '.join(names)}. "
+                        "Нажмите «Включить индексы» ещё раз для повторной попытки."
+                    ),
+                    extra_fields={
+                        "error_code": "INDEXES_ENABLE_ERROR",
+                        "error_text": err_detail[:2000],
+                    },
+                )
+                return
+
+            n_idx = len(result["enabled"]["indexes"])
+            n_con = len(result["enabled"]["constraints"])
+
+            mode = (m.get("migration_mode") or "CDC").upper()
+            if mode == "BULK_ONLY":
+                try:
+                    oracle_browser.enable_triggers(
+                        oracle_scn.open_oracle_conn(dst_cfg),
+                        m["target_schema"], m["target_table"],
+                    )
+                except Exception as exc:
+                    print(f"[orchestrator] {mid}: enable triggers warning: {exc}")
+
+                _safe_transition(
+                    mid, "INDEXES_ENABLING", "COMPLETED",
+                    message=(
+                        f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                        "Режим BULK_ONLY — миграция завершена"
+                    ),
+                    extra_fields={"error_code": None, "error_text": None},
+                )
+            else:
+                # Group-based CDC → CDC_APPLYING (not CDC_APPLY_STARTING)
+                _safe_transition(
+                    mid, "INDEXES_ENABLING", "CDC_APPLYING",
+                    message=(
+                        f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                        "Ожидание CDC apply-worker"
+                    ),
+                    extra_fields={"error_code": None, "error_text": None},
+                )
+        except Exception as exc:
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
+        finally:
+            _unmark_in_prog(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_cdc_applying(mid: str, m: dict) -> None:
+    """Wait for CDC worker heartbeat (group-based variant of CDC_APPLY_STARTING)."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT worker_heartbeat
+                FROM   migration_cdc_state
+                WHERE  migration_id = %s
+            """, (m["migration_id"],))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if row and row[0]:
+        _transition(mid, "CDC_CATCHING_UP",
+                    message="CDC apply-worker подключился")
+
+
+# ---------------------------------------------------------------------------
+# Group connector health check (runs every tick)
+# ---------------------------------------------------------------------------
+
+def _check_group_connectors() -> None:
+    """Poll all RUNNING connector groups.  If a group connector failed,
+    fail all active CDC migrations in that group."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT group_id, connector_name
+                FROM   connector_groups
+                WHERE  status = 'RUNNING'
+            """)
+            groups = cur.fetchall()
+    except Exception:
+        return  # table may not exist yet on first run
+    finally:
+        conn.close()
+
+    for group_id, connector_name in groups:
+        try:
+            status = debezium.get_connector_status(connector_name)
+        except Exception as exc:
+            print(f"[orchestrator] group {group_id} connector check error: {exc}")
+            continue
+
+        if status == "FAILED":
+            print(f"[orchestrator] group connector {connector_name} FAILED — failing group migrations")
+            connector_groups_svc.update_group_status(group_id, "FAILED", "Connector FAILED")
+
+            # Fail all active CDC migrations in this group
+            conn = _state["get_conn"]()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT migration_id FROM migrations
+                        WHERE  group_id = %s
+                          AND  phase NOT IN ('DRAFT', 'COMPLETED', 'CANCELLED', 'FAILED')
+                          AND  migration_mode != 'BULK_ONLY'
+                    """, (group_id,))
+                    for row in cur.fetchall():
+                        _fail(row[0],
+                              f"Коннектор группы {connector_name} перешёл в FAILED",
+                              "GROUP_CONNECTOR_FAILED")
+            finally:
+                conn.close()

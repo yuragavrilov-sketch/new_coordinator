@@ -5,12 +5,13 @@ import { SettingsModal } from "./components/SettingsModal";
 import { MigrationList } from "./components/MigrationList";
 import { TargetPrep } from "./components/TargetPrep";
 import { Checklist } from "./components/Checklist";
+import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "migrations" | "target-prep" | "checklist";
+type Tab = "migrations" | "connector-groups" | "target-prep" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -29,10 +30,11 @@ function useBackendHealth(): BackendStatus {
 
 const ACTIVE_PHASES_SET = new Set([
   "NEW", "PREPARING", "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "TOPIC_CREATING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
   "STAGE_VALIDATING", "STAGE_VALIDATED",
   "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
-  "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+  "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ]);
 
@@ -151,6 +153,11 @@ export default function App() {
           onClick={() => setActiveTab("migrations")}
         />
         <TabButton
+          label="Группы коннекторов"
+          active={activeTab === "connector-groups"}
+          onClick={() => setActiveTab("connector-groups")}
+        />
+        <TabButton
           label="Подготовка таргета"
           active={activeTab === "target-prep"}
           onClick={() => setActiveTab("target-prep")}
@@ -164,9 +171,10 @@ export default function App() {
 
       {/* Tab content */}
       <div style={{ marginTop: 16 }}>
-        {activeTab === "migrations"   && <MigrationList sseEvents={events} />}
-        {activeTab === "target-prep"  && <TargetPrep />}
-        {activeTab === "checklist"    && <Checklist />}
+        {activeTab === "migrations"       && <MigrationList sseEvents={events} />}
+        {activeTab === "connector-groups" && <ConnectorGroupsPanel />}
+        {activeTab === "target-prep"      && <TargetPrep />}
+        {activeTab === "checklist"        && <Checklist />}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
+import type { ConnectorGroup } from "../types/migration";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ interface FormData {
   target_table: string;
   migration_mode: "CDC" | "BULK_ONLY";
   migration_strategy: "STAGE" | "DIRECT";
+  group_id: string;
   connector_name: string;
   topic_prefix: string;
   consumer_group: string;
@@ -410,7 +412,7 @@ const INIT: FormData = {
   target_schema: "", target_table: "",
   migration_mode: "CDC",
   migration_strategy: "STAGE",
-  connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "PAYSTAGE",
+  group_id: "", connector_name: "", topic_prefix: "", consumer_group: "", stage_table_name: "", stage_tablespace: "PAYSTAGE",
   chunk_size: 1_000_000,
   max_parallel_workers: 1,
   baseline_parallel_degree: 4,
@@ -431,7 +433,16 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
   const [ensureResult, setEnsureResult] = useState<{ created: boolean; columns: any; objects: any } | null>(null);
   const [ensureErr,    setEnsureErr]    = useState("");
   const [existingMigrations, setExistingMigrations] = useState<{ source_schema: string; source_table: string; phase: string }[]>([]);
+  const [connGroups, setConnGroups] = useState<ConnectorGroup[]>([]);
   const nameTouched = useRef(false);
+
+  // Load connector groups
+  useEffect(() => {
+    fetch("/api/connector-groups")
+      .then(r => r.ok ? r.json() : [])
+      .then(setConnGroups)
+      .catch(() => {});
+  }, []);
 
   const setF = useCallback((up: Partial<FormData>) =>
     setFormRaw(f => ({ ...f, ...up })), []);
@@ -582,7 +593,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     if (!form.source_table)             e.source_table        = "Выберите таблицу";
     if (!form.target_schema)            e.target_schema       = "Выберите схему";
     if (!form.target_table)             e.target_table        = "Выберите таблицу";
-    if (form.migration_mode === "CDC") {
+    if (form.migration_mode === "CDC" && !form.group_id) {
       if (!form.connector_name.trim())  e.connector_name      = "Обязательное поле";
       if (!form.topic_prefix.trim())    e.topic_prefix        = "Обязательное поле";
       if (!form.consumer_group.trim())  e.consumer_group      = "Обязательное поле";
@@ -619,9 +630,10 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
       target_table:               form.target_table,
       stage_table_name:           form.migration_strategy === "STAGE" ? form.stage_table_name.trim() : "",
       stage_tablespace:           form.migration_strategy === "STAGE" ? form.stage_tablespace.trim() : "",
-      connector_name:             form.migration_mode === "CDC" ? form.connector_name.trim() : "",
-      topic_prefix:               form.migration_mode === "CDC" ? form.topic_prefix.trim() : "",
-      consumer_group:             form.migration_mode === "CDC" ? form.consumer_group.trim() : "",
+      group_id:                   form.group_id || undefined,
+      connector_name:             form.migration_mode === "CDC" && !form.group_id ? form.connector_name.trim() : "",
+      topic_prefix:               form.migration_mode === "CDC" && !form.group_id ? form.topic_prefix.trim() : "",
+      consumer_group:             form.migration_mode === "CDC" && !form.group_id ? form.consumer_group.trim() : "",
       chunk_size:                 form.chunk_size,
       max_parallel_workers:       form.max_parallel_workers,
       baseline_parallel_degree:   form.baseline_parallel_degree,
@@ -872,20 +884,47 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
             </Field>
             {form.migration_mode === "CDC" && (
               <>
-                <div style={S.row2}>
-                  <Field label="Connector name" required error={fieldErrs.connector_name}>
-                    <TextInput value={form.connector_name} hasError={!!fieldErrs.connector_name}
-                      onChange={v => setF({ connector_name: v })} />
-                  </Field>
-                  <Field label="Topic prefix" required error={fieldErrs.topic_prefix}>
-                    <TextInput value={form.topic_prefix} hasError={!!fieldErrs.topic_prefix}
-                      onChange={v => setF({ topic_prefix: v })} />
-                  </Field>
-                </div>
-                <Field label="Consumer group" required error={fieldErrs.consumer_group}>
-                  <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
-                    onChange={v => setF({ consumer_group: v })} />
+                <Field label="Группа коннектора" hint="Выберите группу для общего Debezium-коннектора или оставьте пустым для отдельного">
+                  <select
+                    value={form.group_id}
+                    onChange={e => setF({ group_id: e.target.value })}
+                    style={{
+                      ...S.input,
+                      cursor: "pointer",
+                      appearance: "auto" as const,
+                    }}
+                  >
+                    <option value="">-- Без группы (отдельный коннектор) --</option>
+                    {connGroups.map(g => (
+                      <option key={g.group_id} value={g.group_id}>
+                        {g.group_name} ({g.status}) — {g.connector_name}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
+                {!form.group_id && (
+                  <>
+                    <div style={S.row2}>
+                      <Field label="Connector name" required error={fieldErrs.connector_name}>
+                        <TextInput value={form.connector_name} hasError={!!fieldErrs.connector_name}
+                          onChange={v => setF({ connector_name: v })} />
+                      </Field>
+                      <Field label="Topic prefix" required error={fieldErrs.topic_prefix}>
+                        <TextInput value={form.topic_prefix} hasError={!!fieldErrs.topic_prefix}
+                          onChange={v => setF({ topic_prefix: v })} />
+                      </Field>
+                    </div>
+                    <Field label="Consumer group" required error={fieldErrs.consumer_group}>
+                      <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
+                        onChange={v => setF({ consumer_group: v })} />
+                    </Field>
+                  </>
+                )}
+                {form.group_id && (
+                  <div style={{ fontSize: 10, color: "#6ee7b7", padding: "4px 0" }}>
+                    Connector, topic prefix и consumer group будут унаследованы от группы
+                  </div>
+                )}
               </>
             )}
             <div style={S.row2}>

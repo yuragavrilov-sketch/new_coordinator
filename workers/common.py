@@ -347,7 +347,7 @@ def claim_cdc_migration(conn) -> Optional[dict]:
                    m.effective_key_columns_json
             FROM   migrations m
             LEFT JOIN migration_cdc_state cs ON cs.migration_id = m.migration_id
-            WHERE  m.phase IN ('CDC_APPLY_STARTING', 'CDC_CATCHING_UP', 'STEADY_STATE')
+            WHERE  m.phase IN ('CDC_APPLY_STARTING', 'CDC_APPLYING', 'CDC_CATCHING_UP', 'STEADY_STATE')
               AND  (
                      cs.worker_heartbeat IS NULL
                   OR cs.worker_heartbeat < NOW() - make_interval(mins => %s)

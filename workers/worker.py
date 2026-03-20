@@ -103,14 +103,19 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
 
 
 def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
-    """BULK/DIRECT: read from source AS OF SCN, write to stage or target."""
+    """BULK/DIRECT: read from source, write to stage or target.
+
+    If start_scn is set (legacy per-migration connector): read AS OF SCN.
+    If start_scn is NULL (group-based connector): read current data.
+    """
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
     tgt_schema  = chunk["target_schema"]
     strategy    = chunk.get("migration_strategy", "STAGE")
     dest_table  = chunk["target_table"] if strategy == "DIRECT" else chunk["stage_table"]
-    start_scn   = int(chunk["start_scn"])
+    raw_scn     = chunk.get("start_scn")
+    start_scn   = int(raw_scn) if raw_scn else None
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
@@ -121,12 +126,21 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
         with src_conn.cursor() as cur:
             cur.arraysize = BULK_BATCH_SIZE
             cur.prefetchrows = BULK_BATCH_SIZE + 1
-            cur.execute(
-                f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
-                f'AS OF SCN :p_scn '
-                f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
-                {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
-            )
+            if start_scn:
+                # Legacy mode: consistent snapshot via flashback query
+                cur.execute(
+                    f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
+                    f'AS OF SCN :p_scn '
+                    f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
+                    {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
+                )
+            else:
+                # Group mode: read current data (no flashback, CDC handles consistency)
+                cur.execute(
+                    f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
+                    f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
+                    {"p_start": rowid_start, "p_end": rowid_end},
+                )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
                 rows = cur.fetchmany(BULK_BATCH_SIZE)

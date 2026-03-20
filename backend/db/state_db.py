@@ -372,6 +372,39 @@ def init_db() -> None:
                 )
             """)
 
+            # ── connector_groups ──────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS connector_groups (
+                    group_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    group_name              VARCHAR(255) NOT NULL,
+                    source_connection_id    VARCHAR(64)  NOT NULL DEFAULT 'oracle_source',
+                    connector_name          VARCHAR(255) NOT NULL,
+                    topic_prefix            VARCHAR(255) NOT NULL,
+                    consumer_group_prefix   VARCHAR(255) NOT NULL DEFAULT '',
+                    status                  VARCHAR(32)  NOT NULL DEFAULT 'PENDING',
+                    error_text              TEXT,
+                    connector_config_json   JSONB,
+                    created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    updated_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    UNIQUE (connector_name)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_connector_groups_status
+                    ON connector_groups(status)
+            """)
+
+            # ── group_id FK on migrations ────────────────────────────────
+            cur.execute(
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "
+                "group_id UUID REFERENCES connector_groups(group_id)"
+            )
+            print("[state_db]   column ok: migrations.group_id")
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_migrations_group_id
+                    ON migrations(group_id)
+            """)
+
         conn.commit()
         print("[state_db] schema init complete")
     finally:
@@ -387,11 +420,12 @@ def get_active_migrations(conn) -> list[dict]:
     _ACTIVE_PHASES = (
         "NEW", "PREPARING", "SCN_FIXED",
         "CONNECTOR_STARTING", "CDC_BUFFERING",
+        "TOPIC_CREATING",
         "CHUNKING", "BULK_LOADING", "BULK_LOADED",
         "STAGE_VALIDATING", "STAGE_VALIDATED",
         "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
         "STAGE_DROPPING", "INDEXES_ENABLING",
-        "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+        "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",
         "CANCELLING",
     )

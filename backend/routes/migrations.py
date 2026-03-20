@@ -16,11 +16,12 @@ bp = Blueprint("migrations", __name__)
 _VALID_PHASES = {
     "DRAFT", "NEW", "PREPARING", "SCN_FIXED",
     "CONNECTOR_STARTING", "CDC_BUFFERING",
+    "TOPIC_CREATING",
     "CHUNKING", "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING", "INDEXES_ENABLING",
-    "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+    "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
     "STEADY_STATE", "PAUSED",
     "CANCELLING", "CANCELLED",
     "COMPLETED", "FAILED",
@@ -126,6 +127,28 @@ def create_migration():
                 if mode not in ("CDC", "BULK_ONLY"):
                     mode = "CDC"
 
+                # Group-based migration: derive connector fields from group
+                group_id = body.get("group_id") or None
+                connector_name = ""
+                topic_prefix = ""
+                consumer_group = ""
+
+                if group_id and mode == "CDC":
+                    from services.connector_groups import get_group as _get_group
+                    group = _get_group(group_id)
+                    if not group:
+                        return jsonify({"error": f"Группа {group_id} не найдена"}), 404
+                    connector_name = group["connector_name"]
+                    topic_prefix = group["topic_prefix"]
+                    src_schema = body.get("source_schema", "").upper()
+                    src_table = body.get("source_table", "").upper()
+                    prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
+                    consumer_group = f"{prefix}_{src_schema}_{src_table}"
+                elif mode == "CDC":
+                    connector_name = body.get("connector_name", "")
+                    topic_prefix = body.get("topic_prefix", "")
+                    consumer_group = body.get("consumer_group", "")
+
                 cur.execute("""
                     INSERT INTO migrations (
                         migration_id, migration_name, phase, state_changed_at,
@@ -138,6 +161,7 @@ def create_migration():
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
                         migration_strategy, migration_mode,
+                        group_id,
                         created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s,
@@ -150,6 +174,7 @@ def create_migration():
                         %s, %s,
                         %s, %s, %s,
                         %s, %s,
+                        %s,
                         %s, %s
                     )
                 """, (
@@ -160,9 +185,9 @@ def create_migration():
                     body.get("target_schema", ""), body.get("target_table", ""),
                     body.get("stage_table_name", ""),
                     body.get("stage_tablespace", "").strip().upper(),
-                    body.get("connector_name", "") if mode == "CDC" else "",
-                    body.get("topic_prefix", "")   if mode == "CDC" else "",
-                    body.get("consumer_group", "")  if mode == "CDC" else "",
+                    connector_name,
+                    topic_prefix,
+                    consumer_group,
                     body.get("chunk_size", 1_000_000),
                     max(1, int(body.get("max_parallel_workers",          1) or 1)),
                     max(1, int(body.get("baseline_parallel_degree",      4) or 4)),
@@ -171,6 +196,7 @@ def create_migration():
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
                     body.get("effective_key_columns_json", "[]"),
                     strategy, mode,
+                    group_id,
                     now, now,
                 ))
                 cur.execute("""
@@ -181,6 +207,14 @@ def create_migration():
             conn.commit()
         finally:
             conn.close()
+
+        # If group-based, update Debezium connector table list
+        if group_id and mode == "CDC":
+            try:
+                from services.connector_groups import refresh_connector_tables
+                refresh_connector_tables(group_id)
+            except Exception as exc:
+                print(f"[migrations] refresh_connector_tables warning: {exc}")
 
         _state["broadcast"]({
             "type":         "migration_phase",
