@@ -229,7 +229,22 @@ export function ConnectorGroupsPanel() {
               <span style={{ fontSize: 11, color: "#475569" }}>{configModal.name}</span>
               <span style={{ flex: 1 }} />
               <button
-                onClick={() => { navigator.clipboard.writeText(configModal.json); }}
+                onClick={() => {
+                  try {
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard.writeText(configModal.json);
+                    } else {
+                      const ta = document.createElement("textarea");
+                      ta.value = configModal.json;
+                      ta.style.position = "fixed";
+                      ta.style.opacity = "0";
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(ta);
+                    }
+                  } catch {}
+                }}
                 style={{
                   background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
                   color: "#94a3b8", padding: "3px 10px", fontSize: 10, cursor: "pointer",
