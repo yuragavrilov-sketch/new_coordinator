@@ -109,6 +109,17 @@ const S = {
 function toSnake(s: string) { return s.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase(); }
 function shortId() { return Math.random().toString(36).slice(2, 8); }
 
+/** Wildcard filter: no `*` → prefix match, with `*` → glob match (case-insensitive). */
+function matchesFilter(name: string, filter: string): boolean {
+  if (!filter) return true;
+  const f = filter.toUpperCase();
+  const n = name.toUpperCase();
+  if (!f.includes("*")) return n.startsWith(f);
+  // convert glob to regex: escape special chars, replace * with .*
+  const re = new RegExp("^" + f.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+  return re.test(n);
+}
+
 // ── Small components ──────────────────────────────────────────────────────────
 
 function Section({ title, accent, children }: {
@@ -509,8 +520,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
     }
     let list = schemaTables.filter(t => !excluded.has(t));
     if (tableFilter) {
-      const f = tableFilter.toLowerCase();
-      list = list.filter(t => t.toLowerCase().includes(f));
+      list = list.filter(t => matchesFilter(t, tableFilter));
     }
     return list;
   }, [schemaTables, existingMigs, selectedSchema, tables, tableFilter]);
@@ -769,58 +779,60 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
           {/* ── STEP 1: Tables + Key Config ── */}
           {step === 1 && (
             <>
-              {/* Available tables — fixed height, never shrinks */}
-              <Section title="Выбор таблиц" accent="#1d4ed8">
-                <div style={S.row2}>
-                  <Field label="Схема источника" required>
-                    <SearchableSelect
-                      items={schemas}
-                      value={selectedSchema}
-                      onChange={v => { setSelectedSchema(v); setTableFilter(""); }}
-                      disabled={loadingSchemas}
-                      placeholder={loadingSchemas ? "Загрузка\u2026" : "Выберите схему"}
-                    />
-                  </Field>
-                  <Field label="Фильтр таблиц">
-                    <input style={S.input} value={tableFilter}
-                      onChange={e => setTableFilter(e.target.value)}
-                      placeholder="Поиск по имени\u2026"
-                      disabled={!selectedSchema} />
-                  </Field>
-                </div>
-
-                {loadingTables && (
-                  <div style={{ fontSize: 11, color: "#475569" }}>Загрузка таблиц...</div>
-                )}
-
-                {!loadingTables && selectedSchema && (
-                  <div style={{
-                    height: 200, minHeight: 200, overflowY: "auto",
-                    border: "1px solid #334155", borderRadius: 5, background: "#1e293b",
-                  }}>
-                    {availableTables.length === 0 && (
-                      <div style={{ padding: "8px 10px", color: "#334155", fontSize: 12 }}>
-                        {tableFilter ? "Ничего не найдено" : "Нет доступных таблиц"}
-                      </div>
-                    )}
-                    {availableTables.map(t => (
-                      <div key={t}
-                        onClick={() => addTable(t)}
-                        style={{
-                          padding: "6px 10px", fontSize: 12, cursor: "pointer",
-                          color: "#e2e8f0", display: "flex", alignItems: "center", gap: 8,
-                          borderBottom: "1px solid #0f172a",
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.background = "#334155")}
-                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                      >
-                        <span style={{ color: "#3b82f6", fontSize: 14, fontWeight: 700 }}>+</span>
-                        <span style={{ fontFamily: "monospace" }}>{t}</span>
-                      </div>
-                    ))}
+              {/* Available tables — never shrinks */}
+              <div style={{ flexShrink: 0 }}>
+                <Section title="Выбор таблиц" accent="#1d4ed8">
+                  <div style={S.row2}>
+                    <Field label="Схема источника" required>
+                      <SearchableSelect
+                        items={schemas}
+                        value={selectedSchema}
+                        onChange={v => { setSelectedSchema(v); setTableFilter(""); }}
+                        disabled={loadingSchemas}
+                        placeholder={loadingSchemas ? "Загрузка\u2026" : "Выберите схему"}
+                      />
+                    </Field>
+                    <Field label="Фильтр таблиц" hint="PAY* или *LOG* или точное имя">
+                      <input style={S.input} value={tableFilter}
+                        onChange={e => setTableFilter(e.target.value)}
+                        placeholder="PAY* или *AUDIT*\u2026"
+                        disabled={!selectedSchema} />
+                    </Field>
                   </div>
-                )}
-              </Section>
+
+                  {loadingTables && (
+                    <div style={{ fontSize: 11, color: "#475569" }}>Загрузка таблиц...</div>
+                  )}
+
+                  {!loadingTables && selectedSchema && (
+                    <div style={{
+                      height: 200, overflowY: "auto",
+                      border: "1px solid #334155", borderRadius: 5, background: "#1e293b",
+                    }}>
+                      {availableTables.length === 0 && (
+                        <div style={{ padding: "8px 10px", color: "#334155", fontSize: 12 }}>
+                          {tableFilter ? "Ничего не найдено" : "Нет доступных таблиц"}
+                        </div>
+                      )}
+                      {availableTables.map(t => (
+                        <div key={t}
+                          onClick={() => addTable(t)}
+                          style={{
+                            padding: "6px 10px", fontSize: 12, cursor: "pointer",
+                            color: "#e2e8f0", display: "flex", alignItems: "center", gap: 8,
+                            borderBottom: "1px solid #0f172a",
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = "#334155")}
+                          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                        >
+                          <span style={{ color: "#3b82f6", fontSize: 14, fontWeight: 700 }}>+</span>
+                          <span style={{ fontFamily: "monospace" }}>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Section>
+              </div>
 
               {/* Selected tables with key config */}
               {tables.length > 0 && (
