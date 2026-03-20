@@ -50,7 +50,7 @@ const S = {
   },
   modal: {
     background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10,
-    width: "100%", maxWidth: 780,
+    width: "100%", maxWidth: 780, maxHeight: "calc(100vh - 80px)",
     display: "flex" as const, flexDirection: "column" as const,
     boxShadow: "0 24px 48px rgba(0,0,0,.55)",
   },
@@ -60,7 +60,7 @@ const S = {
   },
   body: {
     padding: 20, display: "flex" as const, flexDirection: "column" as const, gap: 16,
-    maxHeight: "calc(100vh - 200px)", overflowY: "auto" as const,
+    flex: "1 1 auto", minHeight: 0, overflowY: "auto" as const,
   },
   footer: {
     padding: "12px 20px", borderTop: "1px solid #1e293b",
@@ -834,58 +834,78 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                 </Section>
               </div>
 
-              {/* Selected tables with key config */}
+              {/* Selected tables with key config — scrollable */}
               {tables.length > 0 && (
-                <Section title={`Выбранные таблицы (${tables.length})`} accent="#16a34a">
-                  {tables.map((t, idx) => (
-                    <div key={`${t.schema}.${t.table}`} style={{
-                      border: "1px solid #1e293b", borderRadius: 6,
-                      background: "#0a111f", overflow: "hidden",
-                    }}>
-                      {/* table header */}
-                      <div style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "8px 12px", borderBottom: "1px solid #1e293b",
+                <div style={{
+                  border: "1px solid #16a34a50", borderRadius: 7,
+                  display: "flex", flexDirection: "column",
+                  minHeight: 0, flex: "1 1 auto",
+                }}>
+                  <div style={{
+                    padding: "7px 14px", background: "#0a111f",
+                    borderBottom: "1px solid #16a34a40",
+                    fontSize: 11, fontWeight: 700, color: "#16a34a",
+                    textTransform: "uppercase" as const, letterSpacing: 0.8,
+                    flexShrink: 0,
+                  }}>
+                    {`Выбранные таблицы (${tables.length})`}
+                  </div>
+                  <div style={{
+                    padding: 12, overflowY: "auto",
+                    display: "flex", flexDirection: "column", gap: 10,
+                    minHeight: 0,
+                  }}>
+                    {tables.map((t, idx) => (
+                      <div key={`${t.schema}.${t.table}`} style={{
+                        border: "1px solid #1e293b", borderRadius: 6,
+                        background: "#0a111f", overflow: "hidden",
+                        flexShrink: 0,
                       }}>
-                        <span style={{
-                          fontSize: 12, fontWeight: 700, color: "#e2e8f0",
-                          fontFamily: "monospace",
+                        {/* table header */}
+                        <div style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "8px 12px", borderBottom: "1px solid #1e293b",
                         }}>
-                          {t.schema}.{t.table}
-                        </span>
-                        <span style={{ fontSize: 10, color: "#475569" }}>
-                          {"\u2192"} {t.target_schema}.{t.target_table}
-                        </span>
-                        <span style={{ flex: 1 }} />
-                        <span style={{
-                          fontSize: 10, padding: "2px 6px", borderRadius: 3,
-                          background: t.migration_strategy === "STAGE" ? "#1e3a5f" : "#1e293b",
-                          color: t.migration_strategy === "STAGE" ? "#93c5fd" : "#64748b",
-                          border: `1px solid ${t.migration_strategy === "STAGE" ? "#3b82f6" : "#334155"}`,
-                          cursor: "pointer",
-                        }}
-                          onClick={() => updateTable(t.schema, t.table, {
-                            migration_strategy: t.migration_strategy === "STAGE" ? "DIRECT" : "STAGE",
-                          })}
-                        >
-                          {t.migration_strategy}
-                        </span>
-                        <button onClick={() => removeTable(t.schema, t.table)} style={{
-                          background: "none", border: "none", color: "#dc2626",
-                          cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px",
-                        }}>{"\u2715"}</button>
-                      </div>
+                          <span style={{
+                            fontSize: 12, fontWeight: 700, color: "#e2e8f0",
+                            fontFamily: "monospace",
+                          }}>
+                            {t.schema}.{t.table}
+                          </span>
+                          <span style={{ fontSize: 10, color: "#475569" }}>
+                            {"\u2192"} {t.target_schema}.{t.target_table}
+                          </span>
+                          <span style={{ flex: 1 }} />
+                          <span style={{
+                            fontSize: 10, padding: "2px 6px", borderRadius: 3,
+                            background: t.migration_strategy === "STAGE" ? "#1e3a5f" : "#1e293b",
+                            color: t.migration_strategy === "STAGE" ? "#93c5fd" : "#64748b",
+                            border: `1px solid ${t.migration_strategy === "STAGE" ? "#3b82f6" : "#334155"}`,
+                            cursor: "pointer",
+                          }}
+                            onClick={() => updateTable(t.schema, t.table, {
+                              migration_strategy: t.migration_strategy === "STAGE" ? "DIRECT" : "STAGE",
+                            })}
+                          >
+                            {t.migration_strategy}
+                          </span>
+                          <button onClick={() => removeTable(t.schema, t.table)} style={{
+                            background: "none", border: "none", color: "#dc2626",
+                            cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px",
+                          }}>{"\u2715"}</button>
+                        </div>
 
-                      {/* key config */}
-                      <div style={{ padding: "8px 12px" }}>
-                        <TableKeyConfig
-                          entry={t}
-                          onChange={upd => updateTable(t.schema, t.table, upd)}
-                        />
+                        {/* key config */}
+                        <div style={{ padding: "8px 12px" }}>
+                          <TableKeyConfig
+                            entry={t}
+                            onChange={upd => updateTable(t.schema, t.table, upd)}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </Section>
+                    ))}
+                  </div>
+                </div>
               )}
             </>
           )}
