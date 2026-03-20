@@ -50,3 +50,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Deploy
+deploy.bat
