@@ -182,6 +182,93 @@ def _oracle_cfg(source_connection_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Config preview (no side-effects)
+# ---------------------------------------------------------------------------
+
+def build_connector_config(group_id: str) -> dict:
+    """Build the Debezium connector config JSON without sending it anywhere."""
+    group = get_group(group_id)
+    if not group:
+        raise ValueError(f"Группа {group_id} не найдена")
+
+    oracle_cfg = _oracle_cfg(group["source_connection_id"])
+    table_list = _build_table_include_list(group_id)
+    key_columns = _build_key_columns(group_id)
+
+    import os
+    connector_name = group["connector_name"]
+    topic_prefix = group["topic_prefix"]
+    bootstrap = ""
+    try:
+        from . import debezium as _deb
+        bootstrap = _deb._kafka_bootstrap()
+    except Exception:
+        bootstrap = "(not configured)"
+
+    lob_enabled = os.getenv("DEBEZIUM_LOB_ENABLED", "true").lower() == "true"
+
+    config = {
+        "connector.class":              "io.debezium.connector.oracle.OracleConnector",
+        "tasks.max":                    "1",
+        "snapshot.mode":                "no_data",
+        "snapshot.locking.mode":        "none",
+        "log.mining.strategy":          "online_catalog",
+        "database.connection.adapter":  "logminer",
+        "log.mining.continuous.mine":   "true",
+        "heartbeat.interval.ms":        "30000",
+
+        "topic.prefix":      topic_prefix,
+        "database.hostname": oracle_cfg.get("host", ""),
+        "database.port":     str(oracle_cfg.get("port", 1521)),
+        "database.user":     oracle_cfg.get("user", ""),
+        "database.password": "********",
+        "database.dbname":   oracle_cfg.get("service_name", ""),
+
+        "table.include.list": table_list,
+
+        "topic.creation.default.replication.factor": os.getenv("DEBEZIUM_TOPIC_REPLICATION_FACTOR", "1"),
+        "topic.creation.default.partitions":         os.getenv("DEBEZIUM_TOPIC_PARTITIONS", "1"),
+        "topic.creation.default.cleanup.policy":     os.getenv("DEBEZIUM_TOPIC_CLEANUP_POLICY", "delete"),
+        "topic.creation.default.retention.ms":       os.getenv("DEBEZIUM_TOPIC_RETENTION_MS", "604800000"),
+        "topic.creation.default.compression.type":   os.getenv("DEBEZIUM_TOPIC_COMPRESSION_TYPE", "snappy"),
+
+        "lob.enabled":           "true" if lob_enabled else "false",
+        "lob.fetch.size":        os.getenv("DEBEZIUM_LOB_FETCH_SIZE", "0"),
+        "lob.fetch.buffer.size": os.getenv("DEBEZIUM_LOB_FETCH_BUFFER_SIZE", "0"),
+
+        "schema.history.internal.kafka.bootstrap.servers": bootstrap,
+        "schema.history.internal.kafka.topic":             f"schema-changes.{connector_name}",
+        "include.schema.changes": "false",
+
+        "key.converter":                 "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable":  "true",
+        "value.converter":               "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable": "true",
+
+        "decimal.handling.mode": "double",
+        "time.precision.mode":   "connect",
+
+        "provide.transaction.metadata": "false",
+        "tombstones.on.delete":          "true",
+        "skipped.operations":            "none",
+
+        "transforms":                              "unwrap,route",
+        "transforms.unwrap.type":                  "io.debezium.transforms.ExtractNewRecordState",
+        "transforms.unwrap.delete.handling.mode":  "rewrite",
+        "transforms.unwrap.add.fields":            "op,table,source.ts_ms",
+        "transforms.unwrap.add.fields.prefix":     "__",
+        "transforms.route.type":                   "io.debezium.transforms.ByLogicalTableRouter",
+        "transforms.route.topic.regex":            f"({topic_prefix}\\..*)",
+        "transforms.route.topic.replacement":      "$1",
+    }
+
+    if key_columns:
+        config["message.key.columns"] = key_columns
+
+    return {"name": connector_name, "config": config}
+
+
+# ---------------------------------------------------------------------------
 # Connector lifecycle
 # ---------------------------------------------------------------------------
 

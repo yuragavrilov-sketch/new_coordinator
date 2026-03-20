@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import ReactDOM from "react-dom";
 import type { ConnectorGroup, GroupStatus } from "../types/migration";
 import { CreateGroupWizard } from "./CreateGroupWizard";
 
@@ -17,6 +18,8 @@ export function ConnectorGroupsPanel() {
   const [showCreate, setShowCreate] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detail, setDetail] = useState<ConnectorGroup | null>(null);
+  const [configModal, setConfigModal] = useState<{ json: string; name: string } | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
 
   const load = () => {
     fetch("/api/connector-groups")
@@ -62,6 +65,18 @@ export function ConnectorGroupsPanel() {
     fetch(`/api/connector-groups/${gid}`, { method: "DELETE" })
       .then(() => load())
       .catch(() => {});
+  };
+
+  const showConfig = (gid: string, groupName: string) => {
+    setConfigLoading(true);
+    fetch(`/api/connector-groups/${gid}/debezium-config`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { alert(d.error); return; }
+        setConfigModal({ json: JSON.stringify(d, null, 2), name: groupName });
+      })
+      .catch(e => alert(String(e)))
+      .finally(() => setConfigLoading(false));
   };
 
   if (loading) return <div style={{ color: "#64748b", padding: 16 }}>Загрузка...</div>;
@@ -140,8 +155,20 @@ export function ConnectorGroupsPanel() {
                 {g.error_text && (
                   <div style={{ color: "#fca5a5", fontSize: 11, marginTop: 8 }}>{g.error_text}</div>
                 )}
-                <div style={{ fontSize: 11, color: "#475569", marginTop: 8 }}>
-                  Source: {detail.source_connection_id} | Prefix: {detail.consumer_group_prefix || detail.topic_prefix}
+                <div style={{ fontSize: 11, color: "#475569", marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>Source: {detail.source_connection_id} | Prefix: {detail.consumer_group_prefix || detail.topic_prefix}</span>
+                  <button
+                    onClick={() => showConfig(g.group_id, g.group_name)}
+                    disabled={configLoading}
+                    style={{
+                      marginLeft: "auto",
+                      background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
+                      color: "#94a3b8", padding: "2px 10px", fontSize: 10, cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {configLoading ? "..." : "Debezium Config"}
+                  </button>
                 </div>
                 <h4 style={{ color: "#64748b", fontSize: 12, margin: "12px 0 6px" }}>
                   Таблицы ({detail.migrations?.length || 0})
@@ -175,6 +202,57 @@ export function ConnectorGroupsPanel() {
           </div>
         );
       })}
+
+      {/* Debezium config modal */}
+      {configModal && ReactDOM.createPortal(
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.72)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setConfigModal(null); }}
+        >
+          <div style={{
+            background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10,
+            width: "100%", maxWidth: 720, maxHeight: "80vh",
+            display: "flex", flexDirection: "column",
+            boxShadow: "0 24px 48px rgba(0,0,0,.55)",
+          }}>
+            <div style={{
+              padding: "12px 20px", borderBottom: "1px solid #1e293b",
+              display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
+                Debezium Config
+              </span>
+              <span style={{ fontSize: 11, color: "#475569" }}>{configModal.name}</span>
+              <span style={{ flex: 1 }} />
+              <button
+                onClick={() => { navigator.clipboard.writeText(configModal.json); }}
+                style={{
+                  background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
+                  color: "#94a3b8", padding: "3px 10px", fontSize: 10, cursor: "pointer",
+                }}
+              >Copy</button>
+              <button
+                onClick={() => setConfigModal(null)}
+                style={{
+                  background: "none", border: "none", color: "#475569",
+                  cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 2px",
+                }}
+              >{"\u2715"}</button>
+            </div>
+            <pre style={{
+              padding: 20, margin: 0, overflowY: "auto",
+              fontSize: 11, lineHeight: 1.5, color: "#e2e8f0",
+              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+              whiteSpace: "pre-wrap", wordBreak: "break-all",
+            }}>{configModal.json}</pre>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

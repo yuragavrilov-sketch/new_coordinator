@@ -231,6 +231,19 @@ def delete_group(group_id: str):
     return "", 204
 
 
+@bp.get("/api/connector-groups/<group_id>/debezium-config")
+def debezium_config(group_id: str):
+    """Return the Debezium connector config that would be sent to Kafka Connect."""
+    from services.connector_groups import build_connector_config
+    try:
+        cfg = build_connector_config(group_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(cfg)
+
+
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 @bp.post("/api/connector-groups/<group_id>/start")
