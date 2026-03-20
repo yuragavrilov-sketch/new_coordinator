@@ -17,6 +17,15 @@ set IMAGE_FILE=migration-images.tar
 set COORDINATOR_IMAGE=front-coordinator
 set WORKER_IMAGE=front-worker
 
+:: ─── 0. Обновление из репозитория ────────────────────────────────────────────
+echo [0/4] Pulling latest changes...
+git pull
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: git pull failed!
+    exit /b 1
+)
+echo Pull OK.
+
 :: ─── 1. Сборка контейнеров ─────────────────────────────────────────────────
 echo [1/4] Building Docker images...
 docker compose build
