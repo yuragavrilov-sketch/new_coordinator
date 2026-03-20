@@ -459,6 +459,9 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
   // existing migrations (to exclude already-migrated)
   const [existingMigs, setExistingMigs] = useState<{ source_schema: string; source_table: string; phase: string }[]>([]);
 
+  // map "SCHEMA.TABLE" → group_name for tables already in some group
+  const [tableGroupMap, setTableGroupMap] = useState<Map<string, string>>(new Map());
+
   const setF = useCallback((up: Partial<GroupForm>) =>
     setFormRaw(f => ({ ...f, ...up })), []);
 
@@ -484,16 +487,29 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       .finally(() => setLoadingSchemas(false));
   }, []);
 
-  // Load existing migrations
+  // Load existing migrations + build table→group map
   useEffect(() => {
-    fetch("/api/migrations")
-      .then(r => r.json())
-      .then((data: any[]) =>
-        setExistingMigs(data.filter(m =>
+    Promise.all([
+      fetch("/api/migrations").then(r => r.json()),
+      fetch("/api/connector-groups").then(r => r.ok ? r.json() : []),
+    ]).then(([migs, groups]: [any[], any[]]) => {
+      setExistingMigs(
+        migs.filter((m: any) =>
           m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
-        ))
-      )
-      .catch(() => {});
+        )
+      );
+      // build map: "SCHEMA.TABLE" → group_name
+      const groupNames = new Map<string, string>();
+      for (const g of groups) groupNames.set(g.group_id, g.group_name);
+      const tgMap = new Map<string, string>();
+      for (const m of migs) {
+        if (m.group_id && m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED") {
+          const gname = groupNames.get(m.group_id);
+          if (gname) tgMap.set(`${m.source_schema}.${m.source_table}`, gname);
+        }
+      }
+      setTableGroupMap(tgMap);
+    }).catch(() => {});
   }, []);
 
   // Load tables when schema selected
@@ -814,21 +830,34 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                           {tableFilter ? "Ничего не найдено" : "Нет доступных таблиц"}
                         </div>
                       )}
-                      {availableTables.map(t => (
-                        <div key={t}
-                          onClick={() => addTable(t)}
-                          style={{
-                            padding: "6px 10px", fontSize: 12, cursor: "pointer",
-                            color: "#e2e8f0", display: "flex", alignItems: "center", gap: 8,
-                            borderBottom: "1px solid #0f172a",
-                          }}
-                          onMouseEnter={e => (e.currentTarget.style.background = "#334155")}
-                          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                        >
-                          <span style={{ color: "#3b82f6", fontSize: 14, fontWeight: 700 }}>+</span>
-                          <span style={{ fontFamily: "monospace" }}>{t}</span>
-                        </div>
-                      ))}
+                      {availableTables.map(t => {
+                        const groupName = tableGroupMap.get(`${selectedSchema}.${t}`);
+                        return (
+                          <div key={t}
+                            onClick={() => addTable(t)}
+                            style={{
+                              padding: "6px 10px", fontSize: 12, cursor: "pointer",
+                              color: "#e2e8f0", display: "flex", alignItems: "center", gap: 8,
+                              borderBottom: "1px solid #0f172a",
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = "#334155")}
+                            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                          >
+                            <span style={{ color: "#3b82f6", fontSize: 14, fontWeight: 700 }}>+</span>
+                            <span style={{ fontFamily: "monospace" }}>{t}</span>
+                            {groupName && (
+                              <span style={{
+                                marginLeft: "auto", fontSize: 9, fontWeight: 600,
+                                padding: "1px 6px", borderRadius: 3,
+                                background: "#431407", color: "#fdba74",
+                                border: "1px solid #ea580c44",
+                              }}>
+                                {groupName}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </Section>

@@ -35,7 +35,7 @@ _LIST_COLS = """
     error_code, error_text, failed_phase, retry_count,
     description, created_by,
     total_rows, total_chunks, chunks_done, chunks_failed, rows_loaded,
-    migration_strategy, migration_mode
+    migration_strategy, migration_mode, group_id
 """
 
 _state: dict = {}
