@@ -60,7 +60,7 @@ const S = {
   },
   body: {
     padding: 20, display: "flex" as const, flexDirection: "column" as const, gap: 16,
-    maxHeight: "70vh", overflowY: "auto" as const,
+    maxHeight: "calc(100vh - 200px)", overflowY: "auto" as const,
   },
   footer: {
     padding: "12px 20px", borderTop: "1px solid #1e293b",
@@ -769,6 +769,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
           {/* ── STEP 1: Tables + Key Config ── */}
           {step === 1 && (
             <>
+              {/* Available tables — fixed height, never shrinks */}
               <Section title="Выбор таблиц" accent="#1d4ed8">
                 <div style={S.row2}>
                   <Field label="Схема источника" required>
@@ -794,7 +795,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
 
                 {!loadingTables && selectedSchema && (
                   <div style={{
-                    maxHeight: 220, overflowY: "auto",
+                    height: 200, minHeight: 200, overflowY: "auto",
                     border: "1px solid #334155", borderRadius: 5, background: "#1e293b",
                   }}>
                     {availableTables.length === 0 && (
