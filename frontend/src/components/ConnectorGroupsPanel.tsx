@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { ConnectorGroup, GroupStatus } from "../types/migration";
+import { CreateGroupWizard } from "./CreateGroupWizard";
 
 const STATUS_COLORS: Record<GroupStatus, { bg: string; text: string }> = {
   PENDING:  { bg: "#1e293b", text: "#94a3b8" },
@@ -82,7 +83,7 @@ export function ConnectorGroupsPanel() {
         </button>
       </div>
 
-      {showCreate && <CreateGroupForm onDone={() => { setShowCreate(false); load(); }} onCancel={() => setShowCreate(false)} />}
+      {showCreate && <CreateGroupWizard onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); load(); }} />}
 
       {groups.length === 0 && !showCreate && (
         <div style={{ color: "#475569", padding: 24, textAlign: "center" }}>
@@ -177,78 +178,6 @@ export function ConnectorGroupsPanel() {
     </div>
   );
 }
-
-function CreateGroupForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [connector, setConnector] = useState("");
-  const [prefix, setPrefix] = useState("");
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const submit = () => {
-    if (!name || !connector || !prefix) {
-      setError("Все поля обязательны");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    fetch("/api/connector-groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        group_name: name,
-        connector_name: connector,
-        topic_prefix: prefix,
-      }),
-    })
-      .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || "Error")))
-      .then(() => onDone())
-      .catch(e => setError(String(e)))
-      .finally(() => setSaving(false));
-  };
-
-  return (
-    <div style={{
-      background: "#0f172a", border: "1px solid #1e293b", borderRadius: 8,
-      padding: 16, marginBottom: 12,
-    }}>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label style={labelStyle}>
-          <span style={labelText}>Имя группы</span>
-          <input value={name} onChange={e => setName(e.target.value)} style={inputStyle} placeholder="prod_batch_1" />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelText}>Имя коннектора</span>
-          <input value={connector} onChange={e => setConnector(e.target.value)} style={inputStyle} placeholder="mig-group-1" />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelText}>Topic prefix</span>
-          <input value={prefix} onChange={e => setPrefix(e.target.value)} style={inputStyle} placeholder="mig" />
-        </label>
-        <button onClick={submit} disabled={saving} style={{
-          background: "#1d4ed8", border: "none", borderRadius: 6,
-          color: "#fff", padding: "6px 16px", fontSize: 12, cursor: "pointer",
-        }}>
-          {saving ? "..." : "Создать"}
-        </button>
-        <button onClick={onCancel} style={{
-          background: "none", border: "1px solid #334155", borderRadius: 6,
-          color: "#64748b", padding: "6px 12px", fontSize: 12, cursor: "pointer",
-        }}>
-          Отмена
-        </button>
-      </div>
-      {error && <div style={{ color: "#fca5a5", fontSize: 11, marginTop: 6 }}>{error}</div>}
-    </div>
-  );
-}
-
-const labelStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 2 };
-const labelText: React.CSSProperties = { fontSize: 10, color: "#475569", fontWeight: 500 };
-const inputStyle: React.CSSProperties = {
-  background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
-  color: "#e2e8f0", padding: "5px 8px", fontSize: 12, width: 180,
-};
 
 function actionBtn(bg: string, border: string): React.CSSProperties {
   return {
