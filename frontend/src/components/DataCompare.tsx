@@ -11,13 +11,15 @@ interface CompareTask {
   compare_mode: "full" | "last_n";
   last_n: number | null;
   order_column: string | null;
-  status: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+  status: "PENDING" | "RUNNING" | "DONE" | "FAILED" | "CHUNKING";
   source_count: number | null;
   target_count: number | null;
   source_hash: string | null;
   target_hash: string | null;
   counts_match: boolean | null;
   hash_match: boolean | null;
+  chunks_total: number;
+  chunks_done: number;
   error_text: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -232,7 +234,7 @@ export function DataCompare() {
 
   // ----------- Poll while tasks are running -----------
   useEffect(() => {
-    const hasRunning = tasks.some(t => t.status === "PENDING" || t.status === "RUNNING");
+    const hasRunning = tasks.some(t => t.status === "PENDING" || t.status === "RUNNING" || t.status === "CHUNKING");
     if (!hasRunning) return;
     const id = setInterval(loadTasks, 3000);
     return () => clearInterval(id);
@@ -448,10 +450,11 @@ export function DataCompare() {
 
 function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: string) => void }) {
   const statusColors: Record<string, { bg: string; text: string }> = {
-    PENDING: { bg: "#1e293b", text: "#94a3b8" },
-    RUNNING: { bg: "#1e3a5f", text: "#93c5fd" },
-    DONE:    { bg: "#052e16", text: "#86efac" },
-    FAILED:  { bg: "#450a0a", text: "#fca5a5" },
+    PENDING:  { bg: "#1e293b", text: "#94a3b8" },
+    CHUNKING: { bg: "#2e1065", text: "#c4b5fd" },
+    RUNNING:  { bg: "#1e3a5f", text: "#93c5fd" },
+    DONE:     { bg: "#052e16", text: "#86efac" },
+    FAILED:   { bg: "#450a0a", text: "#fca5a5" },
   };
   const sc = statusColors[t.status] || statusColors.PENDING;
 
@@ -483,7 +486,7 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
 
   const elapsed = t.started_at && t.completed_at
     ? `${((new Date(t.completed_at).getTime() - new Date(t.started_at).getTime()) / 1000).toFixed(1)}с`
-    : t.status === "RUNNING" ? "..." : "—";
+    : (t.status === "RUNNING" || t.status === "CHUNKING") ? "..." : "—";
 
   return (
     <tr style={{ borderBottom: "1px solid #0f1624" }}>
@@ -512,13 +515,30 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
         <span style={{
           background: sc.bg, color: sc.text,
           padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
-          ...(t.status === "RUNNING" ? { animation: "pulse 1.5s infinite" } : {}),
+          ...((t.status === "RUNNING" || t.status === "CHUNKING") ? { animation: "pulse 1.5s infinite" } : {}),
         }}>
           {t.status}
         </span>
         {t.status === "FAILED" && t.error_text && (
           <div style={{ fontSize: 10, color: "#fca5a5", maxWidth: 200, marginTop: 3 }} title={t.error_text}>
             {t.error_text.length > 60 ? t.error_text.slice(0, 60) + "..." : t.error_text}
+          </div>
+        )}
+        {(t.status === "RUNNING" || t.status === "CHUNKING") && t.chunks_total > 0 && (
+          <div style={{ marginTop: 4 }}>
+            <div style={{
+              height: 4, borderRadius: 2, background: "#1e293b", overflow: "hidden", width: 100,
+            }}>
+              <div style={{
+                height: "100%", borderRadius: 2,
+                background: "#3b82f6",
+                width: `${Math.round((t.chunks_done / t.chunks_total) * 100)}%`,
+                transition: "width 0.3s",
+              }} />
+            </div>
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>
+              {t.chunks_done} / {t.chunks_total}
+            </div>
           </div>
         )}
       </td>

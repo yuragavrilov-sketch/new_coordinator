@@ -68,6 +68,7 @@ CDC_BATCH_SIZE     = int(os.environ.get("CDC_BATCH_SIZE",     500))
 CDC_CHECKIN_SEC    = int(os.environ.get("CDC_CHECKIN_SEC",    30))
 CDC_POLL_MS        = int(os.environ.get("CDC_POLL_MS",        1_000))
 CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  15))
+CMP_POLL_INTERVAL  = int(os.environ.get("CMP_POLL_INTERVAL",  5))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -617,6 +618,206 @@ def cdc_manager(stop_event: threading.Event) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DATA COMPARISON
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Column types to skip in hash computation (must match routes/data_compare.py)
+_CMP_SKIP_TYPES = frozenset({
+    "BLOB", "CLOB", "NCLOB", "BFILE", "LONG", "LONG RAW",
+    "XMLTYPE", "SDO_GEOMETRY", "ANYDATA", "URITYPE",
+})
+
+
+def _cmp_col_expr(col_name: str, col_type: str) -> str:
+    q = f'"{col_name}"'
+    if col_type == "DATE":
+        return f"NVL(TO_CHAR({q}, 'YYYY-MM-DD HH24:MI:SS'), CHR(0))"
+    if col_type.startswith("TIMESTAMP"):
+        return f"NVL(TO_CHAR({q}, 'YYYY-MM-DD HH24:MI:SS.FF6'), CHR(0))"
+    return f"NVL(TO_CHAR({q}), CHR(0))"
+
+
+def _get_comparable_columns(conn, schema: str, table: str) -> list:
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, data_type
+            FROM   all_tab_columns
+            WHERE  owner = :s AND table_name = :t
+            ORDER BY column_id
+        """, {"s": schema, "t": table})
+        return [
+            {"name": r[0], "data_type": r[1]}
+            for r in cur.fetchall()
+            if r[1] not in _CMP_SKIP_TYPES
+        ]
+
+
+def process_compare_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    """Process one data-compare chunk: COUNT(*) + SUM(hash) for a ROWID range."""
+    chunk_id    = chunk["chunk_id"]
+    side        = chunk["side"]
+    schema      = chunk["schema"]
+    table       = chunk["table"]
+    rowid_start = chunk["rowid_start"]
+    rowid_end   = chunk["rowid_end"]
+
+    print(f"[compare] chunk {chunk_id[:8]} side={side} seq={chunk['chunk_seq']}"
+          f" ({rowid_start}..{rowid_end})")
+
+    try:
+        ora_conn = db.open_oracle(chunk["connection_id"], configs)
+        try:
+            columns = _get_comparable_columns(ora_conn, schema, table)
+            hash_parts = [f"ORA_HASH({_cmp_col_expr(c['name'], c['data_type'])})"
+                          for c in columns]
+            row_hash = " + ".join(hash_parts) if hash_parts else "0"
+
+            sql = (
+                f'SELECT COUNT(*) AS cnt, SUM({row_hash}) AS hash_sum '
+                f'FROM "{schema}"."{table}" '
+                f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)'
+            )
+            with ora_conn.cursor() as cur:
+                cur.execute(sql, {"rs": rowid_start, "re": rowid_end})
+                row_count, hash_sum = cur.fetchone()
+        finally:
+            try:
+                ora_conn.close()
+            except Exception:
+                pass
+
+        task_id = db.complete_compare_chunk(pg_conn, chunk_id, row_count or 0, hash_sum)
+        print(f"[compare] chunk {chunk_id[:8]} DONE — {row_count} rows")
+
+        # Try to aggregate (check if all chunks are done)
+        if task_id:
+            _try_aggregate_from_worker(task_id, pg_conn)
+
+    except Exception as exc:
+        err = str(exc)
+        print(f"[compare] chunk {chunk_id[:8]} FAILED: {err}")
+        try:
+            db.fail_compare_chunk(pg_conn, chunk_id, err)
+        except Exception:
+            pass
+        raise
+
+
+def _try_aggregate_from_worker(task_id: str, pg_conn) -> None:
+    """Worker-side aggregation: check if all chunks done and finalize task."""
+    try:
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, chunks_total FROM data_compare_tasks "
+                "WHERE task_id = %s FOR UPDATE", (task_id,))
+            row = cur.fetchone()
+            if not row or row[0] != 'RUNNING':
+                pg_conn.rollback()
+                return
+
+            # Count statuses
+            cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'DONE')    AS done,
+                    COUNT(*) FILTER (WHERE status = 'FAILED')  AS failed,
+                    COUNT(*) FILTER (WHERE status IN ('PENDING', 'CLAIMED')) AS active
+                FROM data_compare_chunks
+                WHERE task_id = %s
+            """, (task_id,))
+            done, failed, active = cur.fetchone()
+
+            cur.execute(
+                "UPDATE data_compare_tasks SET chunks_done = %s WHERE task_id = %s",
+                (done, task_id))
+
+            if active > 0:
+                pg_conn.commit()
+                return
+
+            if failed > 0:
+                cur.execute("""
+                    UPDATE data_compare_tasks
+                    SET    status = 'FAILED', error_text = %s, completed_at = NOW()
+                    WHERE  task_id = %s
+                """, (f"{failed} chunk(s) failed", task_id))
+                pg_conn.commit()
+                return
+
+            # All done — aggregate per side
+            cur.execute("""
+                SELECT side, SUM(COALESCE(row_count, 0)), SUM(COALESCE(hash_sum, 0))
+                FROM   data_compare_chunks
+                WHERE  task_id = %s AND status = 'DONE'
+                GROUP BY side
+            """, (task_id,))
+            side_data = {}
+            for side, rc, hs in cur.fetchall():
+                side_data[side] = {"count": int(rc), "hash": hs}
+
+            src = side_data.get("source", {"count": 0, "hash": 0})
+            tgt = side_data.get("target", {"count": 0, "hash": 0})
+
+            counts_match = src["count"] == tgt["count"]
+            hash_match = src["hash"] == tgt["hash"]
+
+            cur.execute("""
+                UPDATE data_compare_tasks
+                SET    status = 'DONE',
+                       source_count = %s, target_count = %s,
+                       source_hash  = %s, target_hash  = %s,
+                       counts_match = %s, hash_match   = %s,
+                       chunks_done  = %s,
+                       completed_at = NOW()
+                WHERE  task_id = %s
+            """, (src["count"], tgt["count"],
+                  str(src["hash"]), str(tgt["hash"]),
+                  counts_match, hash_match, done, task_id))
+        pg_conn.commit()
+
+        print(f"[compare] task {task_id[:8]} DONE: "
+              f"src={src['count']} tgt={tgt['count']} "
+              f"counts={'OK' if counts_match else 'MISMATCH'} "
+              f"hash={'OK' if hash_match else 'MISMATCH'}")
+
+    except Exception as exc:
+        print(f"[compare] aggregate error: {exc}")
+        try:
+            pg_conn.rollback()
+        except Exception:
+            pass
+
+
+def compare_loop(stop_event: threading.Event) -> None:
+    """Background thread: continuously claim + process data-compare chunks."""
+    print(f"[compare] loop started (worker_id={WORKER_ID})")
+    pg = db.get_pg_conn_with_retry()
+    try:
+        while not stop_event.is_set():
+            try:
+                chunk = db.claim_compare_chunk(pg)
+                if chunk is None:
+                    time.sleep(CMP_POLL_INTERVAL)
+                    continue
+                configs = db.load_configs(pg)
+                process_compare_chunk(chunk, pg, configs)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                print(f"[compare] error: {exc}")
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+                pg = db.get_pg_conn()
+                time.sleep(CMP_POLL_INTERVAL)
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -627,11 +828,18 @@ def main() -> None:
           f"  cdc_scan={CDC_SCAN_INTERVAL}s")
 
     main_stop = threading.Event()
+
     mgr = threading.Thread(
         target=cdc_manager, args=(main_stop,),
         name="cdc-manager", daemon=True,
     )
     mgr.start()
+
+    cmp = threading.Thread(
+        target=compare_loop, args=(main_stop,),
+        name="compare-loop", daemon=True,
+    )
+    cmp.start()
 
     try:
         bulk_loop()
@@ -639,6 +847,7 @@ def main() -> None:
         print("[worker] shutting down…")
         main_stop.set()
         mgr.join(timeout=15)
+        cmp.join(timeout=10)
         print("[worker] stopped")
 
 

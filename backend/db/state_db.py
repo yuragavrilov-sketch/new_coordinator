@@ -452,6 +452,7 @@ def init_db() -> None:
                     compare_mode   VARCHAR(20)  NOT NULL DEFAULT 'full',
                     last_n         INTEGER,
                     order_column   VARCHAR(128),
+                    chunk_size     INTEGER NOT NULL DEFAULT 100000,
                     status         VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
                     source_count   BIGINT,
                     target_count   BIGINT,
@@ -459,11 +460,44 @@ def init_db() -> None:
                     target_hash    NUMERIC,
                     counts_match   BOOLEAN,
                     hash_match     BOOLEAN,
+                    chunks_total   INTEGER NOT NULL DEFAULT 0,
+                    chunks_done    INTEGER NOT NULL DEFAULT 0,
                     error_text     TEXT,
                     started_at     TIMESTAMPTZ,
                     completed_at   TIMESTAMPTZ,
                     created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
                 )
+            """)
+
+            # ── data_compare_chunks ───────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS data_compare_chunks (
+                    chunk_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    task_id      UUID NOT NULL REFERENCES data_compare_tasks(task_id) ON DELETE CASCADE,
+                    side         VARCHAR(10)  NOT NULL,
+                    chunk_seq    INTEGER      NOT NULL,
+                    rowid_start  VARCHAR(20)  NOT NULL,
+                    rowid_end    VARCHAR(20)  NOT NULL,
+                    status       VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+                    row_count    BIGINT,
+                    hash_sum     NUMERIC,
+                    worker_id    VARCHAR(200),
+                    claimed_at   TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
+                    error_text   TEXT,
+                    retry_count  INTEGER NOT NULL DEFAULT 0,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (task_id, side, chunk_seq)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dcc_task_status
+                    ON data_compare_chunks(task_id, status)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_dcc_pending
+                    ON data_compare_chunks(status, created_at)
+                    WHERE status = 'PENDING'
             """)
 
             # ── group_id FK on migrations ────────────────────────────────

@@ -420,6 +420,139 @@ def cdc_checkin(conn, migration_id: str, total_lag: int,
     conn.commit()
 
 
+# ---------------------------------------------------------------------------
+# Data comparison chunks
+# ---------------------------------------------------------------------------
+
+_MAX_COMPARE_RETRIES = 3
+
+
+def claim_compare_chunk(conn) -> Optional[dict]:
+    """Atomically claim one PENDING data-compare chunk.
+
+    Returns chunk dict with task context, or None.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH candidate AS (
+                SELECT c.chunk_id
+                FROM   data_compare_chunks c
+                JOIN   data_compare_tasks  t ON t.task_id = c.task_id
+                WHERE  c.status = 'PENDING'
+                  AND  t.status = 'RUNNING'
+                ORDER BY c.created_at, c.chunk_seq
+                FOR UPDATE OF c SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE data_compare_chunks
+            SET    status     = 'CLAIMED',
+                   worker_id  = %s,
+                   claimed_at = NOW()
+            WHERE  chunk_id = (SELECT chunk_id FROM candidate)
+            RETURNING chunk_id, task_id, side, chunk_seq, rowid_start, rowid_end
+        """, (WORKER_ID,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+
+        chunk_id, task_id, side, chunk_seq, rowid_start, rowid_end = row
+
+        cur.execute("""
+            SELECT source_schema, source_table, target_schema, target_table
+            FROM   data_compare_tasks
+            WHERE  task_id = %s
+        """, (task_id,))
+        trow = cur.fetchone()
+        if not trow:
+            conn.rollback()
+            return None
+
+        src_schema, src_table, tgt_schema, tgt_table = trow
+
+    conn.commit()
+
+    schema = src_schema if side == "source" else tgt_schema
+    table = src_table if side == "source" else tgt_table
+    conn_id = "oracle_source" if side == "source" else "oracle_target"
+
+    return {
+        "chunk_id":      str(chunk_id),
+        "task_id":       str(task_id),
+        "side":          side,
+        "chunk_seq":     chunk_seq,
+        "rowid_start":   rowid_start,
+        "rowid_end":     rowid_end,
+        "schema":        schema,
+        "table":         table,
+        "connection_id": conn_id,
+    }
+
+
+def complete_compare_chunk(conn, chunk_id: str, row_count: int, hash_sum) -> str:
+    """Mark a compare chunk DONE and increment task.chunks_done.
+    Returns the task_id.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE data_compare_chunks
+            SET    status       = 'DONE',
+                   row_count    = %s,
+                   hash_sum     = %s,
+                   completed_at = NOW()
+            WHERE  chunk_id     = %s
+            RETURNING task_id
+        """, (row_count, str(hash_sum) if hash_sum is not None else None, chunk_id))
+        row = cur.fetchone()
+        task_id = str(row[0]) if row else None
+
+        if task_id:
+            cur.execute("""
+                UPDATE data_compare_tasks
+                SET    chunks_done = chunks_done + 1
+                WHERE  task_id = %s
+            """, (task_id,))
+    conn.commit()
+    return task_id
+
+
+def fail_compare_chunk(conn, chunk_id: str, error_text: str) -> Optional[str]:
+    """Handle compare chunk failure with retry logic. Returns task_id."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT retry_count, task_id
+            FROM   data_compare_chunks
+            WHERE  chunk_id = %s
+            FOR UPDATE
+        """, (chunk_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        retry_count, task_id = row
+
+        if retry_count < _MAX_COMPARE_RETRIES:
+            cur.execute("""
+                UPDATE data_compare_chunks
+                SET    status      = 'PENDING',
+                       worker_id   = NULL,
+                       claimed_at  = NULL,
+                       error_text  = %s,
+                       retry_count = retry_count + 1
+                WHERE  chunk_id    = %s
+            """, (error_text[:2000], chunk_id))
+        else:
+            cur.execute("""
+                UPDATE data_compare_chunks
+                SET    status       = 'FAILED',
+                       error_text   = %s,
+                       completed_at = NOW()
+                WHERE  chunk_id     = %s
+            """, (error_text[:2000], chunk_id))
+    conn.commit()
+    return str(task_id)
+
+
 def trigger_lag_zero(conn, migration_id: str) -> None:
     """
     Transition migration CDC_CATCHING_UP → CDC_CAUGHT_UP when lag reaches 0.
