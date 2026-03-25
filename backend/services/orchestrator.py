@@ -1627,7 +1627,7 @@ def _check_group_connectors() -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT group_id, connector_name
+                SELECT group_id, connector_name, COALESCE(run_id, '') as run_id
                 FROM   connector_groups
                 WHERE  status = 'RUNNING'
             """)
@@ -1637,15 +1637,16 @@ def _check_group_connectors() -> None:
     finally:
         conn.close()
 
-    for group_id, connector_name in groups:
+    for group_id, connector_name, run_id in groups:
+        active_name = f"{connector_name}_{run_id}" if run_id else connector_name
         try:
-            status = debezium.get_connector_status(connector_name)
+            status = debezium.get_connector_status(active_name)
         except Exception as exc:
             print(f"[orchestrator] group {group_id} connector check error: {exc}")
             continue
 
         if status == "FAILED":
-            print(f"[orchestrator] group connector {connector_name} FAILED — failing group migrations")
+            print(f"[orchestrator] group connector {active_name} FAILED — failing group migrations")
             connector_groups_svc.update_group_status(group_id, "FAILED", "Connector FAILED")
 
             # Fail all active CDC migrations in this group

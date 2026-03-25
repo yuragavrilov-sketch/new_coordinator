@@ -389,6 +389,10 @@ def init_db() -> None:
                     UNIQUE (connector_name)
                 )
             """)
+            cur.execute(
+                "ALTER TABLE connector_groups ADD COLUMN IF NOT EXISTS "
+                "run_id VARCHAR(8) NOT NULL DEFAULT ''"
+            )
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_connector_groups_status
                     ON connector_groups(status)

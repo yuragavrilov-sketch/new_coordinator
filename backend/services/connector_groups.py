@@ -8,6 +8,8 @@ Tables are stored in the `group_tables` table, decoupled from migrations.
 
 import json
 import os
+import random
+import string
 import uuid
 
 from . import debezium
@@ -32,6 +34,23 @@ def _conn():
 
 def _r2d(cur, row):
     return _state["row_to_dict"](cur, row)
+
+
+def _gen_run_id() -> str:
+    """Short random id for each start cycle (e.g. 'a7x9b2')."""
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+
+def _active_connector_name(group: dict) -> str:
+    """Debezium connector name for the current run: base_name + '_' + run_id."""
+    run_id = group.get("run_id") or ""
+    base = group["connector_name"]
+    return f"{base}_{run_id}" if run_id else base
+
+
+def _schema_topic_name(group: dict) -> str:
+    """Schema history topic for the current run."""
+    return f"schema-changes.{_active_connector_name(group)}"
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +105,11 @@ def list_groups() -> list[dict]:
 
 
 def delete_group(group_id: str) -> None:
-    """Delete group.  Raises if any non-terminal migrations reference it."""
+    """Delete group.  Cleans up Debezium connector and Kafka topics."""
+    group = get_group(group_id)
+    if not group:
+        raise ValueError(f"Группа {group_id} не найдена")
+
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -100,11 +123,22 @@ def delete_group(group_id: str) -> None:
                 raise ValueError(
                     f"Нельзя удалить группу: {active} активных миграций"
                 )
-            # group_tables deleted by ON DELETE CASCADE
+            # group_tables + group_state_history deleted by ON DELETE CASCADE
             cur.execute("DELETE FROM connector_groups WHERE group_id = %s", (group_id,))
         conn.commit()
     finally:
         conn.close()
+
+    # Cleanup: delete Debezium connector + all Kafka topics
+    try:
+        connector_name = _active_connector_name(group)
+        debezium.delete_connector(connector_name)
+    except Exception as exc:
+        print(f"[connector_groups] cleanup connector error: {exc}")
+    try:
+        _delete_group_topics(group)
+    except Exception as exc:
+        print(f"[connector_groups] cleanup topics error: {exc}")
 
 
 def transition_group(group_id: str, to_status: str,
@@ -313,7 +347,7 @@ def build_connector_config(group_id: str) -> dict:
     table_list = _build_table_include_list(group_id)
     key_columns = _build_key_columns(group_id)
 
-    connector_name = group["connector_name"]
+    connector_name = _active_connector_name(group)
     topic_prefix = group["topic_prefix"]
     bootstrap = ""
     try:
@@ -406,6 +440,27 @@ def create_group_topics(group_id: str) -> list[dict]:
     return results
 
 
+def _delete_group_topics(group: dict) -> None:
+    """Delete all Kafka topics for a group: data topics + schema-changes topic."""
+    from . import kafka_topics
+
+    group_id = group["group_id"]
+    # Data topics
+    topics = _build_topic_names(group_id)
+    for topic in topics:
+        try:
+            kafka_topics.delete_topic(topic_name=topic)
+        except Exception as exc:
+            print(f"[connector_groups] failed to delete topic {topic}: {exc}")
+
+    # Schema-changes topic
+    schema_topic = _schema_topic_name(group)
+    try:
+        kafka_topics.delete_topic(topic_name=schema_topic)
+    except Exception as exc:
+        print(f"[connector_groups] failed to delete schema topic {schema_topic}: {exc}")
+
+
 def get_topic_message_counts(group_id: str) -> list[dict]:
     """Return message counts for each topic in the group."""
     from kafka import KafkaConsumer
@@ -450,6 +505,8 @@ def get_topic_message_counts(group_id: str) -> list[dict]:
 def request_start(group_id: str) -> dict:
     """Validate and initiate the async start lifecycle.
 
+    Generates a unique run_id for this start cycle so that connector name
+    and schema-changes topic don't collide with previous runs.
     Sets group to TOPICS_CREATING — the orchestrator picks it up from there.
     """
     group = get_group(group_id)
@@ -464,8 +521,22 @@ def request_start(group_id: str) -> dict:
     if not oracle_cfg.get("host"):
         raise ValueError("Oracle source не настроен — проверьте Настройки")
 
-    transition_group(group_id, "TOPICS_CREATING", "Запуск инициирован пользователем")
-    return {"group_id": group_id, "status": "TOPICS_CREATING"}
+    # Generate unique run_id for this start cycle
+    run_id = _gen_run_id()
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE connector_groups SET run_id = %s, updated_at = NOW()
+                WHERE group_id = %s
+            """, (run_id, group_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    transition_group(group_id, "TOPICS_CREATING",
+                     f"Запуск инициирован (run_id={run_id})")
+    return {"group_id": group_id, "status": "TOPICS_CREATING", "run_id": run_id}
 
 
 def do_create_topics(group_id: str) -> list[dict]:
@@ -474,17 +545,18 @@ def do_create_topics(group_id: str) -> list[dict]:
 
 
 def do_start_connector(group_id: str) -> dict:
-    """Phase handler: create Debezium connector."""
+    """Phase handler: create Debezium connector with run_id in name."""
     group = get_group(group_id)
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
 
+    connector_name = _active_connector_name(group)
     oracle_cfg = _oracle_cfg(group["source_connection_id"])
     table_list = _build_table_include_list(group_id)
     key_columns = _build_key_columns(group_id)
 
     return debezium.create_group_connector(
-        connector_name=group["connector_name"],
+        connector_name=connector_name,
         topic_prefix=group["topic_prefix"],
         oracle_cfg=oracle_cfg,
         table_include_list=table_list,
@@ -501,11 +573,18 @@ def request_stop(group_id: str) -> None:
 
 
 def do_stop_connector(group_id: str) -> None:
-    """Phase handler: delete Debezium connector."""
+    """Phase handler: delete Debezium connector + all Kafka topics."""
     group = get_group(group_id)
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
-    debezium.delete_connector(group["connector_name"])
+
+    connector_name = _active_connector_name(group)
+
+    # 1. Delete Debezium connector
+    debezium.delete_connector(connector_name)
+
+    # 2. Delete all data topics + schema-changes topic
+    _delete_group_topics(group)
 
 
 def refresh_connector_tables(group_id: str) -> None:
@@ -518,7 +597,8 @@ def refresh_connector_tables(group_id: str) -> None:
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
 
-    status = debezium.get_connector_status(group["connector_name"])
+    connector_name = _active_connector_name(group)
+    status = debezium.get_connector_status(connector_name)
     if status == "NOT_FOUND":
         return  # connector not running, nothing to update
 
@@ -526,7 +606,7 @@ def refresh_connector_tables(group_id: str) -> None:
     key_columns = _build_key_columns(group_id)
 
     debezium.update_connector_tables(
-        connector_name=group["connector_name"],
+        connector_name=connector_name,
         table_include_list=table_list,
         key_columns=key_columns,
     )
@@ -538,7 +618,7 @@ def get_connector_status(group_id: str) -> str:
     if not group:
         return "NOT_FOUND"
     try:
-        status = debezium.get_connector_status(group["connector_name"])
+        status = debezium.get_connector_status(_active_connector_name(group))
         update_group_status(group_id, status if status != "NOT_FOUND" else "STOPPED")
         return status
     except Exception:
