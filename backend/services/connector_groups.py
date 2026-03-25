@@ -332,6 +332,15 @@ def _oracle_cfg(source_connection_id: str) -> dict:
     return configs.get(source_connection_id, {})
 
 
+def _kafka_bootstrap() -> list[str]:
+    """Get Kafka bootstrap servers from UI settings, fall back to env var."""
+    configs = _state["load_configs"]()
+    servers = configs.get("kafka", {}).get("bootstrap_servers", "").strip()
+    if not servers:
+        servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
+    return [s.strip() for s in servers.split(",")]
+
+
 # ---------------------------------------------------------------------------
 # Config preview (no side-effects)
 # ---------------------------------------------------------------------------
@@ -428,11 +437,12 @@ def create_group_topics(group_id: str) -> list[dict]:
     """
     from . import kafka_topics
 
+    bootstrap = _kafka_bootstrap()
     topics = _build_topic_names(group_id)
     results = []
     for topic in topics:
         try:
-            kafka_topics.create_topic(topic_name=topic)
+            kafka_topics.create_topic(bootstrap_servers=bootstrap, topic_name=topic)
             results.append({"topic_name": topic, "status": "ok"})
         except Exception as exc:
             results.append({"topic_name": topic, "status": "error", "error": str(exc)})
@@ -443,19 +453,20 @@ def _delete_group_topics(group: dict) -> None:
     """Delete all Kafka topics for a group: data topics + schema-changes topic."""
     from . import kafka_topics
 
+    bootstrap = _kafka_bootstrap()
     group_id = group["group_id"]
     # Data topics
     topics = _build_topic_names(group_id)
     for topic in topics:
         try:
-            kafka_topics.delete_topic(topic_name=topic)
+            kafka_topics.delete_topic(bootstrap_servers=bootstrap, topic_name=topic)
         except Exception as exc:
             print(f"[connector_groups] failed to delete topic {topic}: {exc}")
 
     # Schema-changes topic
     schema_topic = _schema_topic_name(group)
     try:
-        kafka_topics.delete_topic(topic_name=schema_topic)
+        kafka_topics.delete_topic(bootstrap_servers=bootstrap, topic_name=schema_topic)
     except Exception as exc:
         print(f"[connector_groups] failed to delete schema topic {schema_topic}: {exc}")
 
@@ -469,7 +480,7 @@ def get_topic_message_counts(group_id: str) -> list[dict]:
     if not topics:
         return []
 
-    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092").split(",")
+    bootstrap = _kafka_bootstrap()
 
     results = []
     consumer = None

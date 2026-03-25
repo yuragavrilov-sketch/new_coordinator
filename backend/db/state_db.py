@@ -107,6 +107,10 @@ def get_conn() -> _PooledConn:
 
 def _clean_value(v):
     if isinstance(v, datetime):
+        # If timezone-aware, convert to UTC and use Z suffix
+        if v.tzinfo is not None:
+            from datetime import timezone
+            v = v.astimezone(timezone.utc).replace(tzinfo=None)
         return v.isoformat() + "Z"
     if isinstance(v, decimal.Decimal):
         return str(v)
