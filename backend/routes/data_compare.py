@@ -151,7 +151,7 @@ def _create_chunks_and_start(task_id: str, configs: dict,
                 "WHERE task_id = %s", (task_id,))
         conn.commit()
 
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "CHUNKING"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "CHUNKING"})
 
         src_cfg = configs.get("oracle_source", {})
         tgt_cfg = configs.get("oracle_target", {})
@@ -188,7 +188,7 @@ def _create_chunks_and_start(task_id: str, configs: dict,
 
         print(f"[data_compare] task {task_id[:8]} chunked: "
               f"{len(src_chunks)} src + {len(tgt_chunks)} tgt = {total}")
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "RUNNING"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "RUNNING"})
 
     except Exception as exc:
         traceback.print_exc()
@@ -201,7 +201,7 @@ def _create_chunks_and_start(task_id: str, configs: dict,
             conn.commit()
         except Exception:
             pass
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "FAILED"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "FAILED"})
     finally:
         conn.close()
 
@@ -270,7 +270,7 @@ def _run_last_n_comparison(task_id: str, configs: dict,
                   str(tgt_hash) if tgt_hash else None,
                   counts_match, hash_match, task_id))
         conn.commit()
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "DONE"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "DONE"})
 
     except Exception as exc:
         traceback.print_exc()
@@ -283,7 +283,7 @@ def _run_last_n_comparison(task_id: str, configs: dict,
             conn.commit()
         except Exception:
             pass
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "FAILED"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "FAILED"})
     finally:
         conn.close()
 
@@ -382,7 +382,7 @@ def try_aggregate(task_id: str) -> None:
               f"src={src['count']} tgt={tgt['count']} "
               f"counts={'OK' if counts_match else 'MISMATCH'} "
               f"hash={'OK' if hash_match else 'MISMATCH'}")
-        _state["broadcast"]("data_compare", {"task_id": task_id, "status": "DONE"})
+        _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "DONE"})
 
     except Exception as exc:
         print(f"[data_compare] aggregate error: {exc}")
