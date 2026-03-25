@@ -12,14 +12,33 @@ const STATUS_COLORS: Record<GroupStatus, { bg: string; text: string }> = {
   FAILED:   { bg: "#450a0a", text: "#fca5a5" },
 };
 
+interface TopicCount {
+  topic_name: string;
+  count: number;
+  exists: boolean;
+}
+
+interface GroupTable {
+  id: string;
+  source_schema: string;
+  source_table: string;
+  target_schema: string;
+  target_table: string;
+  effective_key_type: string;
+  topic_name: string;
+  migration_strategy: string;
+}
+
 export function ConnectorGroupsPanel() {
   const [groups, setGroups] = useState<ConnectorGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [detail, setDetail] = useState<ConnectorGroup | null>(null);
+  const [detail, setDetail] = useState<(ConnectorGroup & { tables?: GroupTable[] }) | null>(null);
   const [configModal, setConfigModal] = useState<{ json: string; name: string } | null>(null);
   const [configLoading, setConfigLoading] = useState(false);
+  const [topicCounts, setTopicCounts] = useState<Map<string, TopicCount>>(new Map());
+  const [topicLoading, setTopicLoading] = useState(false);
 
   const load = () => {
     fetch("/api/connector-groups")
@@ -39,13 +58,30 @@ export function ConnectorGroupsPanel() {
     if (expanded === gid) {
       setExpanded(null);
       setDetail(null);
+      setTopicCounts(new Map());
     } else {
       setExpanded(gid);
       fetch(`/api/connector-groups/${gid}`)
         .then(r => r.ok ? r.json() : Promise.reject())
-        .then(setDetail)
+        .then(d => {
+          setDetail(d);
+          loadTopicCounts(gid);
+        })
         .catch(() => setDetail(null));
     }
+  };
+
+  const loadTopicCounts = (gid: string) => {
+    setTopicLoading(true);
+    fetch(`/api/connector-groups/${gid}/topic-counts`)
+      .then(r => r.ok ? r.json() : [])
+      .then((counts: TopicCount[]) => {
+        const map = new Map<string, TopicCount>();
+        for (const c of counts) map.set(c.topic_name, c);
+        setTopicCounts(map);
+      })
+      .catch(() => {})
+      .finally(() => setTopicLoading(false));
   };
 
   const startGroup = (gid: string) => {
@@ -63,7 +99,13 @@ export function ConnectorGroupsPanel() {
   const deleteGroup = (gid: string) => {
     if (!confirm("Удалить группу?")) return;
     fetch(`/api/connector-groups/${gid}`, { method: "DELETE" })
-      .then(() => load())
+      .then(() => { load(); if (expanded === gid) { setExpanded(null); setDetail(null); } })
+      .catch(() => {});
+  };
+
+  const createTopics = (gid: string) => {
+    fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" })
+      .then(() => loadTopicCounts(gid))
       .catch(() => {});
   };
 
@@ -155,13 +197,34 @@ export function ConnectorGroupsPanel() {
                 {g.error_text && (
                   <div style={{ color: "#fca5a5", fontSize: 11, marginTop: 8 }}>{g.error_text}</div>
                 )}
-                <div style={{ fontSize: 11, color: "#475569", marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 11, color: "#475569", marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>Source: {detail.source_connection_id} | Prefix: {detail.consumer_group_prefix || detail.topic_prefix}</span>
+                  <span style={{ flex: 1 }} />
+                  <button
+                    onClick={() => createTopics(g.group_id)}
+                    style={{
+                      background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
+                      color: "#94a3b8", padding: "2px 10px", fontSize: 10, cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Create Topics
+                  </button>
+                  <button
+                    onClick={() => loadTopicCounts(g.group_id)}
+                    disabled={topicLoading}
+                    style={{
+                      background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
+                      color: "#94a3b8", padding: "2px 10px", fontSize: 10, cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {topicLoading ? "..." : "Refresh Counts"}
+                  </button>
                   <button
                     onClick={() => showConfig(g.group_id, g.group_name)}
                     disabled={configLoading}
                     style={{
-                      marginLeft: "auto",
                       background: "#1e293b", border: "1px solid #334155", borderRadius: 4,
                       color: "#94a3b8", padding: "2px 10px", fontSize: 10, cursor: "pointer",
                       fontWeight: 600,
@@ -170,32 +233,104 @@ export function ConnectorGroupsPanel() {
                     {configLoading ? "..." : "Debezium Config"}
                   </button>
                 </div>
+
+                {/* Group tables */}
                 <h4 style={{ color: "#64748b", fontSize: 12, margin: "12px 0 6px" }}>
-                  Таблицы ({detail.migrations?.length || 0})
+                  Таблицы ({detail.tables?.length || 0})
                 </h4>
-                {detail.migrations && detail.migrations.length > 0 ? (
+                {detail.tables && detail.tables.length > 0 ? (
                   <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ color: "#475569", textAlign: "left" }}>
                         <th style={{ padding: "4px 8px" }}>Таблица</th>
-                        <th style={{ padding: "4px 8px" }}>Фаза</th>
-                        <th style={{ padding: "4px 8px" }}>Режим</th>
+                        <th style={{ padding: "4px 8px" }}>Target</th>
+                        <th style={{ padding: "4px 8px" }}>Ключ</th>
+                        <th style={{ padding: "4px 8px" }}>Стратегия</th>
+                        <th style={{ padding: "4px 8px" }}>Топик</th>
+                        <th style={{ padding: "4px 8px", textAlign: "right" }}>Сообщений</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {detail.migrations.map(m => (
-                        <tr key={m.migration_id} style={{ borderTop: "1px solid #1e293b" }}>
-                          <td style={{ padding: "4px 8px", color: "#e2e8f0" }}>
-                            {m.source_schema}.{m.source_table}
-                          </td>
-                          <td style={{ padding: "4px 8px", color: "#94a3b8" }}>{m.phase}</td>
-                          <td style={{ padding: "4px 8px", color: "#64748b" }}>{m.migration_mode}</td>
-                        </tr>
-                      ))}
+                      {detail.tables.map(t => {
+                        const tc = topicCounts.get(t.topic_name);
+                        return (
+                          <tr key={t.id} style={{ borderTop: "1px solid #1e293b" }}>
+                            <td style={{ padding: "4px 8px", color: "#e2e8f0", fontFamily: "monospace" }}>
+                              {t.source_schema}.{t.source_table}
+                            </td>
+                            <td style={{ padding: "4px 8px", color: "#64748b", fontFamily: "monospace" }}>
+                              {t.target_schema}.{t.target_table}
+                            </td>
+                            <td style={{ padding: "4px 8px" }}>
+                              <span style={{
+                                fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                                background: t.effective_key_type === "PRIMARY_KEY" ? "#052e16" :
+                                  t.effective_key_type === "UNIQUE_KEY" ? "#2e1065" :
+                                  t.effective_key_type === "USER_DEFINED" ? "#1e3a5f" : "#1e293b",
+                                color: t.effective_key_type === "PRIMARY_KEY" ? "#86efac" :
+                                  t.effective_key_type === "UNIQUE_KEY" ? "#c4b5fd" :
+                                  t.effective_key_type === "USER_DEFINED" ? "#93c5fd" : "#64748b",
+                              }}>
+                                {t.effective_key_type}
+                              </span>
+                            </td>
+                            <td style={{ padding: "4px 8px", color: "#64748b" }}>
+                              {t.migration_strategy}
+                            </td>
+                            <td style={{ padding: "4px 8px", color: "#475569", fontSize: 10, fontFamily: "monospace" }}>
+                              {t.topic_name}
+                            </td>
+                            <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                              {tc === undefined ? (
+                                <span style={{ color: "#334155" }}>—</span>
+                              ) : !tc.exists ? (
+                                <span style={{ color: "#fca5a5", fontSize: 9 }}>no topic</span>
+                              ) : (
+                                <span style={{
+                                  color: tc.count > 0 ? "#86efac" : "#64748b",
+                                  fontWeight: tc.count > 0 ? 700 : 400,
+                                  fontFamily: "monospace",
+                                }}>
+                                  {tc.count.toLocaleString()}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 ) : (
-                  <div style={{ color: "#475569", fontSize: 11 }}>Нет миграций в группе</div>
+                  <div style={{ color: "#475569", fontSize: 11 }}>Нет таблиц в группе</div>
+                )}
+
+                {/* Migrations linked to this group */}
+                {detail.migrations && detail.migrations.length > 0 && (
+                  <>
+                    <h4 style={{ color: "#64748b", fontSize: 12, margin: "12px 0 6px" }}>
+                      Миграции ({detail.migrations.length})
+                    </h4>
+                    <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ color: "#475569", textAlign: "left" }}>
+                          <th style={{ padding: "4px 8px" }}>Таблица</th>
+                          <th style={{ padding: "4px 8px" }}>Фаза</th>
+                          <th style={{ padding: "4px 8px" }}>Режим</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.migrations.map(m => (
+                          <tr key={m.migration_id} style={{ borderTop: "1px solid #1e293b" }}>
+                            <td style={{ padding: "4px 8px", color: "#e2e8f0" }}>
+                              {m.source_schema}.{m.source_table}
+                            </td>
+                            <td style={{ padding: "4px 8px", color: "#94a3b8" }}>{m.phase}</td>
+                            <td style={{ padding: "4px 8px", color: "#64748b" }}>{m.migration_mode}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
                 )}
               </div>
             )}

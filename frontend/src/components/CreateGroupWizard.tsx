@@ -31,10 +31,6 @@ interface GroupForm {
   connector_name: string;
   topic_prefix: string;
   migration_strategy: "STAGE" | "DIRECT";
-  chunk_size: number;
-  max_parallel_workers: number;
-  baseline_parallel_degree: number;
-  validate_hash_sample: boolean;
   stage_tablespace: string;
 }
 
@@ -80,7 +76,6 @@ const S = {
     padding: 12, display: "flex" as const, flexDirection: "column" as const, gap: 10,
   },
   row2: { display: "grid" as const, gridTemplateColumns: "1fr 1fr", gap: 10 },
-  row3: { display: "grid" as const, gridTemplateColumns: "1fr 1fr 1fr", gap: 10 },
   field: { display: "flex" as const, flexDirection: "column" as const, gap: 4 },
   label: { fontSize: 11, color: "#64748b", fontWeight: 600 as const, letterSpacing: 0.3 },
   req: { color: "#ef4444", marginLeft: 2 },
@@ -115,7 +110,6 @@ function matchesFilter(name: string, filter: string): boolean {
   const f = filter.toUpperCase();
   const n = name.toUpperCase();
   if (!f.includes("*")) return n.startsWith(f);
-  // convert glob to regex: escape special chars, replace * with .*
   const re = new RegExp("^" + f.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
   return re.test(n);
 }
@@ -431,10 +425,6 @@ const INIT_FORM: GroupForm = {
   connector_name: "",
   topic_prefix: "",
   migration_strategy: "STAGE",
-  chunk_size: 1_000_000,
-  max_parallel_workers: 1,
-  baseline_parallel_degree: 4,
-  validate_hash_sample: false,
   stage_tablespace: "PAYSTAGE",
 };
 
@@ -455,9 +445,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
   const [schemaTables, setSchemaTables] = useState<string[]>([]);
   const [loadingTables, setLoadingTables] = useState(false);
   const [tableFilter, setTableFilter] = useState("");
-
-  // existing migrations (to exclude already-migrated)
-  const [existingMigs, setExistingMigs] = useState<{ source_schema: string; source_table: string; phase: string }[]>([]);
 
   // map "SCHEMA.TABLE" → group_name for tables already in some group
   const [tableGroupMap, setTableGroupMap] = useState<Map<string, string>>(new Map());
@@ -487,29 +474,25 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       .finally(() => setLoadingSchemas(false));
   }, []);
 
-  // Load existing migrations + build table→group map
+  // Build table→group map from existing group_tables
   useEffect(() => {
-    Promise.all([
-      fetch("/api/migrations").then(r => r.json()),
-      fetch("/api/connector-groups").then(r => r.ok ? r.json() : []),
-    ]).then(([migs, groups]: [any[], any[]]) => {
-      setExistingMigs(
-        migs.filter((m: any) =>
-          m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
-        )
-      );
-      // build map: "SCHEMA.TABLE" → group_name
-      const groupNames = new Map<string, string>();
-      for (const g of groups) groupNames.set(g.group_id, g.group_name);
-      const tgMap = new Map<string, string>();
-      for (const m of migs) {
-        if (m.group_id && m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED") {
-          const gname = groupNames.get(m.group_id);
-          if (gname) tgMap.set(`${m.source_schema}.${m.source_table}`, gname);
+    fetch("/api/connector-groups")
+      .then(r => r.ok ? r.json() : [])
+      .then(async (groups: any[]) => {
+        const tgMap = new Map<string, string>();
+        for (const g of groups) {
+          try {
+            const resp = await fetch(`/api/connector-groups/${g.group_id}/tables`);
+            if (!resp.ok) continue;
+            const gTables: any[] = await resp.json();
+            for (const t of gTables) {
+              tgMap.set(`${t.source_schema}.${t.source_table}`, g.group_name);
+            }
+          } catch {}
         }
-      }
-      setTableGroupMap(tgMap);
-    }).catch(() => {});
+        setTableGroupMap(tgMap);
+      })
+      .catch(() => {});
   }, []);
 
   // Load tables when schema selected
@@ -524,22 +507,18 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       .finally(() => setLoadingTables(false));
   }, [selectedSchema]);
 
-  // Filter out already-migrated tables
+  // Filter out already-selected tables
   const availableTables = React.useMemo(() => {
-    const excluded = new Set<string>();
-    for (const m of existingMigs) {
-      if (m.source_schema === selectedSchema) excluded.add(m.source_table);
-    }
-    // also exclude already-selected from other schemas? No — only same schema
+    const alreadySelected = new Set<string>();
     for (const t of tables) {
-      if (t.schema === selectedSchema) excluded.add(t.table);
+      if (t.schema === selectedSchema) alreadySelected.add(t.table);
     }
-    let list = schemaTables.filter(t => !excluded.has(t));
+    let list = schemaTables.filter(t => !alreadySelected.has(t));
     if (tableFilter) {
       list = list.filter(t => matchesFilter(t, tableFilter));
     }
     return list;
-  }, [schemaTables, existingMigs, selectedSchema, tables, tableFilter]);
+  }, [schemaTables, selectedSchema, tables, tableFilter]);
 
   // Add table to selection
   function addTable(tableName: string) {
@@ -610,7 +589,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
     if (!form.group_name.trim()) e.group_name = "Обязательное поле";
     if (!form.connector_name.trim()) e.connector_name = "Обязательное поле";
     if (!form.topic_prefix.trim()) e.topic_prefix = "Обязательное поле";
-    if (form.chunk_size <= 0) e.chunk_size = "Должно быть > 0";
     setFieldErrs(e);
     return Object.keys(e).length === 0;
   }
@@ -660,10 +638,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       consumer_group_prefix: form.topic_prefix.trim(),
       source_connection_id: "oracle_source",
       migration_strategy: form.migration_strategy,
-      chunk_size: form.chunk_size,
-      max_parallel_workers: form.max_parallel_workers,
-      baseline_parallel_degree: form.baseline_parallel_degree,
-      validate_hash_sample: form.validate_hash_sample,
       stage_tablespace: form.stage_tablespace,
       tables: tables.map(t => ({
         source_schema: t.schema,
@@ -745,7 +719,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                 </div>
               </Section>
 
-              <Section title="Общие настройки миграций">
+              <Section title="Настройки по умолчанию для таблиц">
                 <div style={S.row2}>
                   <Field label="Стратегия по умолчанию">
                     <div style={{ display: "flex", gap: 8 }}>
@@ -766,28 +740,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                       onChange={e => setF({ stage_tablespace: e.target.value })} />
                   </Field>
                 </div>
-                <div style={S.row3}>
-                  <Field label="Chunk size" error={fieldErrs.chunk_size}>
-                    <input style={S.input} type="number"
-                      value={form.chunk_size}
-                      onChange={e => setF({ chunk_size: parseInt(e.target.value) || 0 })} />
-                  </Field>
-                  <Field label="Parallel workers">
-                    <input style={S.input} type="number" min={1}
-                      value={form.max_parallel_workers}
-                      onChange={e => setF({ max_parallel_workers: parseInt(e.target.value) || 1 })} />
-                  </Field>
-                  <Field label="Baseline parallel">
-                    <input style={S.input} type="number" min={1}
-                      value={form.baseline_parallel_degree}
-                      onChange={e => setF({ baseline_parallel_degree: parseInt(e.target.value) || 4 })} />
-                  </Field>
-                </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input type="checkbox" checked={form.validate_hash_sample}
-                    onChange={e => setF({ validate_hash_sample: e.target.checked })} />
-                  <span style={{ fontSize: 12, color: "#94a3b8" }}>Валидация hash/sample</span>
-                </label>
               </Section>
             </>
           )}
@@ -795,7 +747,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
           {/* ── STEP 1: Tables + Key Config ── */}
           {step === 1 && (
             <>
-              {/* Available tables — never shrinks */}
+              {/* Available tables — fixed height, never shrinks */}
               <div style={{ flexShrink: 0 }}>
                 <Section title="Выбор таблиц" accent="#1d4ed8">
                   <div style={S.row2}>
@@ -884,7 +836,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                     display: "flex", flexDirection: "column", gap: 10,
                     minHeight: 0,
                   }}>
-                    {tables.map((t, idx) => (
+                    {tables.map(t => (
                       <div key={`${t.schema}.${t.table}`} style={{
                         border: "1px solid #1e293b", borderRadius: 6,
                         background: "#0a111f", overflow: "hidden",

@@ -1,4 +1,4 @@
-"""Connector Groups — CRUD + lifecycle API."""
+"""Connector Groups — CRUD + lifecycle + tables API."""
 
 import json
 import uuid
@@ -41,10 +41,15 @@ def list_groups():
 
 @bp.get("/api/connector-groups/<group_id>")
 def get_group(group_id: str):
-    from services.connector_groups import get_group as svc_get, get_group_migrations
+    from services.connector_groups import (
+        get_group as svc_get,
+        get_group_tables,
+        get_group_migrations,
+    )
     group = svc_get(group_id)
     if not group:
         return jsonify({"error": "Группа не найдена"}), 404
+    group["tables"] = get_group_tables(group_id)
     group["migrations"] = get_group_migrations(group_id)
     return jsonify(group)
 
@@ -73,7 +78,7 @@ def create_group():
 
 @bp.post("/api/connector-groups/wizard")
 def create_group_wizard():
-    """Create a connector group AND migrations for selected tables atomically."""
+    """Create a connector group AND add tables atomically."""
     body = request.get_json(force=True)
 
     # ── validate group fields ──────────────────────────────────────────────
@@ -86,22 +91,11 @@ def create_group_wizard():
     if not tables or not isinstance(tables, list) or len(tables) == 0:
         return jsonify({"error": "Нужно выбрать хотя бы одну таблицу"}), 400
 
-    # ── common defaults ────────────────────────────────────────────────────
-    strategy = (body.get("migration_strategy") or "STAGE").strip().upper()
-    if strategy not in ("STAGE", "DIRECT"):
-        strategy = "STAGE"
-    chunk_size = body.get("chunk_size", 1_000_000)
-    max_workers = max(1, int(body.get("max_parallel_workers", 1) or 1))
-    baseline_deg = max(1, int(body.get("baseline_parallel_degree", 4) or 4))
-    validate_hash = body.get("validate_hash_sample", False)
-    stage_tablespace = (body.get("stage_tablespace") or "").strip().upper()
     source_conn_id = body.get("source_connection_id", "oracle_source")
-
-    gid = str(uuid.uuid4())
     topic_prefix = body["topic_prefix"]
     consumer_prefix = body.get("consumer_group_prefix") or topic_prefix
-    now = datetime.utcnow()
 
+    gid = str(uuid.uuid4())
     get_conn = _state["get_conn"]
     r2d = _state["row_to_dict"]
 
@@ -119,83 +113,38 @@ def create_group_wizard():
                   body["connector_name"], topic_prefix, consumer_prefix))
             group_row = r2d(cur, cur.fetchone())
 
-            # ── create migrations for each table ───────────────────────────
-            migration_ids = []
+            # ── add tables to group_tables ─────────────────────────────────
+            table_rows = []
             for t in tables:
-                mid = str(uuid.uuid4())
+                tid = str(uuid.uuid4())
                 src_schema = t.get("source_schema", "")
                 src_table = t.get("source_table", "")
                 tgt_schema = t.get("target_schema", src_schema)
                 tgt_table = t.get("target_table", src_table)
-
-                t_strategy = (t.get("migration_strategy") or strategy).strip().upper()
-                if t_strategy not in ("STAGE", "DIRECT"):
-                    t_strategy = strategy
-                t_stage_name = t.get("stage_table_name") or f"STG_{src_schema}_{src_table}".upper()
-
-                connector_name = body["connector_name"]
-                cg = f"{consumer_prefix}_{src_schema}_{src_table}".upper()
-
-                key_source_map = {
-                    "PRIMARY_KEY": "PK", "UNIQUE_KEY": "UK",
-                    "USER_DEFINED": "USER", "NONE": "NONE",
-                }
-                ekt = t.get("effective_key_type", "")
-                eks = key_source_map.get(ekt, "NONE")
+                strategy = (t.get("migration_strategy") or
+                            body.get("migration_strategy", "STAGE")).strip().upper()
+                if strategy not in ("STAGE", "DIRECT"):
+                    strategy = "STAGE"
+                stage_name = t.get("stage_table_name") or f"STG_{src_schema}_{src_table}".upper()
+                ekt = t.get("effective_key_type", "NONE")
                 ekc = json.dumps(t.get("effective_key_columns", []))
-
-                mig_name = t.get("migration_name") or f"{src_schema}.{src_table} → {tgt_schema}.{tgt_table}"
+                pk = t.get("source_pk_exists", False)
+                uk = t.get("source_uk_exists", False)
+                topic = f"{topic_prefix}.{src_schema}.{src_table}".upper()
 
                 cur.execute("""
-                    INSERT INTO migrations (
-                        migration_id, migration_name, phase, state_changed_at,
-                        source_connection_id, target_connection_id,
-                        source_schema, source_table, target_schema, target_table,
-                        stage_table_name, stage_tablespace,
-                        connector_name, topic_prefix, consumer_group,
-                        chunk_size, max_parallel_workers, baseline_parallel_degree,
-                        validate_hash_sample,
-                        source_pk_exists, source_uk_exists,
-                        effective_key_type, effective_key_source, effective_key_columns_json,
-                        migration_strategy, migration_mode,
-                        group_id,
-                        created_at, updated_at
-                    ) VALUES (
-                        %s, %s, 'DRAFT', %s,
-                        %s, 'oracle_target',
-                        %s, %s, %s, %s,
-                        %s, %s,
-                        %s, %s, %s,
-                        %s, %s, %s,
-                        %s,
-                        %s, %s,
-                        %s, %s, %s,
-                        %s, 'CDC',
-                        %s,
-                        %s, %s
-                    )
-                """, (
-                    mid, mig_name, now,
-                    source_conn_id,
-                    src_schema, src_table, tgt_schema, tgt_table,
-                    t_stage_name if t_strategy == "STAGE" else "",
-                    stage_tablespace if t_strategy == "STAGE" else "",
-                    connector_name, topic_prefix, cg,
-                    chunk_size, max_workers, baseline_deg,
-                    validate_hash,
-                    t.get("source_pk_exists", False),
-                    t.get("source_uk_exists", False),
-                    ekt, eks, ekc,
-                    t_strategy,
-                    gid,
-                    now, now,
-                ))
-                cur.execute("""
-                    INSERT INTO migration_state_history
-                        (migration_id, from_phase, to_phase, message, actor_type)
-                    VALUES (%s, NULL, 'DRAFT', %s, 'USER')
-                """, (mid, f"Created via group wizard: {body['group_name']}"))
-                migration_ids.append({"migration_id": mid, "source_table": f"{src_schema}.{src_table}"})
+                    INSERT INTO group_tables
+                        (id, group_id, source_schema, source_table,
+                         target_schema, target_table,
+                         migration_strategy, stage_table_name,
+                         effective_key_type, effective_key_columns_json,
+                         source_pk_exists, source_uk_exists, topic_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (tid, gid, src_schema, src_table,
+                      tgt_schema, tgt_table, strategy, stage_name,
+                      ekt, ekc, pk, uk, topic))
+                table_rows.append(r2d(cur, cur.fetchone()))
 
         conn.commit()
     except Exception as exc:
@@ -204,21 +153,13 @@ def create_group_wizard():
     finally:
         conn.close()
 
-    # broadcast events
     _state["broadcast"]({
         "type": "connector_group_status",
         "group_id": gid,
         "status": "PENDING",
     })
-    for m in migration_ids:
-        _state["broadcast"]({
-            "type": "migration_phase",
-            "migration_id": m["migration_id"],
-            "phase": "DRAFT",
-            "ts": now.isoformat() + "Z",
-        })
 
-    return jsonify({"group": group_row, "migrations": migration_ids}), 201
+    return jsonify({"group": group_row, "tables": table_rows}), 201
 
 
 @bp.delete("/api/connector-groups/<group_id>")
@@ -231,6 +172,37 @@ def delete_group(group_id: str):
     return "", 204
 
 
+# ── Group tables ──────────────────────────────────────────────────────────────
+
+@bp.get("/api/connector-groups/<group_id>/tables")
+def list_group_tables(group_id: str):
+    from services.connector_groups import get_group_tables
+    return jsonify(get_group_tables(group_id))
+
+
+@bp.post("/api/connector-groups/<group_id>/tables")
+def add_group_tables(group_id: str):
+    body = request.get_json(force=True)
+    tables = body.get("tables", [])
+    if not tables:
+        return jsonify({"error": "Нужно указать хотя бы одну таблицу"}), 400
+    from services.connector_groups import add_tables
+    try:
+        rows = add_tables(group_id, tables)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(rows), 201
+
+
+@bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
+def remove_group_table(group_id: str, source_schema: str, source_table: str):
+    from services.connector_groups import remove_table
+    remove_table(group_id, source_schema, source_table)
+    return "", 204
+
+
+# ── Debezium config preview ──────────────────────────────────────────────────
+
 @bp.get("/api/connector-groups/<group_id>/debezium-config")
 def debezium_config(group_id: str):
     """Return the Debezium connector config that would be sent to Kafka Connect."""
@@ -242,6 +214,30 @@ def debezium_config(group_id: str):
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify(cfg)
+
+
+# ── Kafka topics ──────────────────────────────────────────────────────────────
+
+@bp.post("/api/connector-groups/<group_id>/create-topics")
+def create_topics(group_id: str):
+    """Pre-create Kafka topics for all tables in the group."""
+    from services.connector_groups import create_group_topics
+    try:
+        results = create_group_topics(group_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(results)
+
+
+@bp.get("/api/connector-groups/<group_id>/topic-counts")
+def topic_counts(group_id: str):
+    """Return message counts for each topic in the group."""
+    from services.connector_groups import get_topic_message_counts
+    try:
+        counts = get_topic_message_counts(group_id)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(counts)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -288,7 +284,7 @@ def group_status(group_id: str):
 
 @bp.post("/api/connector-groups/<group_id>/refresh-tables")
 def refresh_tables(group_id: str):
-    """Re-sync table.include.list and message.key.columns from current migrations."""
+    """Re-sync table.include.list and message.key.columns from group_tables."""
     from services.connector_groups import refresh_connector_tables
     try:
         refresh_connector_tables(group_id)

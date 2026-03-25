@@ -394,6 +394,31 @@ def init_db() -> None:
                     ON connector_groups(status)
             """)
 
+            # ── group_tables (tables belonging to a group, decoupled from migrations) ──
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS group_tables (
+                    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    group_id                UUID NOT NULL REFERENCES connector_groups(group_id) ON DELETE CASCADE,
+                    source_schema           VARCHAR(128) NOT NULL,
+                    source_table            VARCHAR(128) NOT NULL,
+                    target_schema           VARCHAR(128) NOT NULL,
+                    target_table            VARCHAR(128) NOT NULL,
+                    migration_strategy      VARCHAR(16)  NOT NULL DEFAULT 'STAGE',
+                    stage_table_name        VARCHAR(255) NOT NULL DEFAULT '',
+                    effective_key_type      VARCHAR(32)  NOT NULL DEFAULT 'NONE',
+                    effective_key_columns_json TEXT NOT NULL DEFAULT '[]',
+                    source_pk_exists        BOOLEAN NOT NULL DEFAULT FALSE,
+                    source_uk_exists        BOOLEAN NOT NULL DEFAULT FALSE,
+                    topic_name              VARCHAR(512) NOT NULL DEFAULT '',
+                    created_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    UNIQUE (group_id, source_schema, source_table)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_group_tables_group_id
+                    ON group_tables(group_id)
+            """)
+
             # ── group_id FK on migrations ────────────────────────────────
             cur.execute(
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "

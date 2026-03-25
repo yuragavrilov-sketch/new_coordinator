@@ -2,9 +2,12 @@
 
 A connector group is a single Debezium connector that captures CDC events
 for multiple tables.  One LogMiner session serves all tables in the group.
+
+Tables are stored in the `group_tables` table, decoupled from migrations.
 """
 
 import json
+import os
 import uuid
 
 from . import debezium
@@ -32,7 +35,7 @@ def _r2d(cur, row):
 
 
 # ---------------------------------------------------------------------------
-# CRUD
+# CRUD — groups
 # ---------------------------------------------------------------------------
 
 def create_group(
@@ -97,6 +100,7 @@ def delete_group(group_id: str) -> None:
                 raise ValueError(
                     f"Нельзя удалить группу: {active} активных миграций"
                 )
+            # group_tables deleted by ON DELETE CASCADE
             cur.execute("DELETE FROM connector_groups WHERE group_id = %s", (group_id,))
         conn.commit()
     finally:
@@ -118,7 +122,86 @@ def update_group_status(group_id: str, status: str, error_text: str | None = Non
 
 
 # ---------------------------------------------------------------------------
-# Group members (migrations)
+# CRUD — group_tables
+# ---------------------------------------------------------------------------
+
+def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
+    """Add tables to a group.  Returns inserted rows."""
+    group = get_group(group_id)
+    if not group:
+        raise ValueError(f"Группа {group_id} не найдена")
+
+    topic_prefix = group["topic_prefix"]
+    conn = _conn()
+    try:
+        rows = []
+        with conn.cursor() as cur:
+            for t in tables:
+                tid = str(uuid.uuid4())
+                src_schema = t["source_schema"]
+                src_table = t["source_table"]
+                tgt_schema = t.get("target_schema", src_schema)
+                tgt_table = t.get("target_table", src_table)
+                strategy = t.get("migration_strategy", "STAGE")
+                stage_name = t.get("stage_table_name", f"STG_{src_schema}_{src_table}".upper())
+                ekt = t.get("effective_key_type", "NONE")
+                ekc = json.dumps(t.get("effective_key_columns", []))
+                pk = t.get("source_pk_exists", False)
+                uk = t.get("source_uk_exists", False)
+                topic = f"{topic_prefix}.{src_schema}.{src_table}".upper()
+
+                cur.execute("""
+                    INSERT INTO group_tables
+                        (id, group_id, source_schema, source_table,
+                         target_schema, target_table,
+                         migration_strategy, stage_table_name,
+                         effective_key_type, effective_key_columns_json,
+                         source_pk_exists, source_uk_exists, topic_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (group_id, source_schema, source_table) DO NOTHING
+                    RETURNING *
+                """, (tid, group_id, src_schema, src_table,
+                      tgt_schema, tgt_table, strategy, stage_name,
+                      ekt, ekc, pk, uk, topic))
+                row = cur.fetchone()
+                if row:
+                    rows.append(_r2d(cur, row))
+        conn.commit()
+        return rows
+    finally:
+        conn.close()
+
+
+def get_group_tables(group_id: str) -> list[dict]:
+    """Return all tables in a group."""
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT * FROM group_tables
+                WHERE  group_id = %s
+                ORDER BY source_schema, source_table
+            """, (group_id,))
+            return [_r2d(cur, r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def remove_table(group_id: str, source_schema: str, source_table: str) -> None:
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM group_tables
+                WHERE group_id = %s AND source_schema = %s AND source_table = %s
+            """, (group_id, source_schema, source_table))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Legacy: group members via migrations (for backward compat)
 # ---------------------------------------------------------------------------
 
 def get_group_migrations(group_id: str) -> list[dict]:
@@ -140,19 +223,14 @@ def get_group_migrations(group_id: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _build_table_include_list(group_id: str) -> str:
-    """Collect SCHEMA.TABLE for all CDC migrations in the group."""
-    migrations = get_group_migrations(group_id)
-    tables = []
-    for m in migrations:
-        mode = (m.get("migration_mode") or "CDC").upper()
-        if mode == "BULK_ONLY":
-            continue
-        schema = m["source_schema"].upper()
-        table = m["source_table"].upper()
-        entry = f"{schema}.{table}"
-        if entry not in tables:
-            tables.append(entry)
-    return ",".join(tables)
+    """Collect SCHEMA.TABLE from group_tables."""
+    tables = get_group_tables(group_id)
+    entries = []
+    for t in tables:
+        entry = f"{t['source_schema'].upper()}.{t['source_table'].upper()}"
+        if entry not in entries:
+            entries.append(entry)
+    return ",".join(entries)
 
 
 def _build_key_columns(group_id: str) -> str:
@@ -161,19 +239,25 @@ def _build_key_columns(group_id: str) -> str:
     Format: "SCHEMA.T1:col1,col2;SCHEMA.T2:colA,colB"
     Tables WITH PK/UK are omitted — Debezium auto-detects their keys.
     """
-    migrations = get_group_migrations(group_id)
+    tables = get_group_tables(group_id)
     parts = []
-    for m in migrations:
-        if m.get("source_pk_exists") or m.get("source_uk_exists"):
+    for t in tables:
+        if t.get("source_pk_exists") or t.get("source_uk_exists"):
             continue
-        key_cols_json = m.get("effective_key_columns_json") or "[]"
+        key_cols_json = t.get("effective_key_columns_json") or "[]"
         key_cols = json.loads(key_cols_json) if isinstance(key_cols_json, str) else key_cols_json
         if key_cols:
-            schema = m["source_schema"].upper()
-            table = m["source_table"].upper()
+            schema = t["source_schema"].upper()
+            table = t["source_table"].upper()
             cols_csv = ",".join(c.upper() for c in key_cols)
             parts.append(f"{schema}.{table}:{cols_csv}")
     return ";".join(parts)
+
+
+def _build_topic_names(group_id: str) -> list[str]:
+    """Return list of topic names for all tables in the group."""
+    tables = get_group_tables(group_id)
+    return [t["topic_name"] for t in tables if t.get("topic_name")]
 
 
 def _oracle_cfg(source_connection_id: str) -> dict:
@@ -195,7 +279,6 @@ def build_connector_config(group_id: str) -> dict:
     table_list = _build_table_include_list(group_id)
     key_columns = _build_key_columns(group_id)
 
-    import os
     connector_name = group["connector_name"]
     topic_prefix = group["topic_prefix"]
     bootstrap = ""
@@ -269,11 +352,69 @@ def build_connector_config(group_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Kafka topics — pre-create and monitor
+# ---------------------------------------------------------------------------
+
+def create_group_topics(group_id: str) -> list[dict]:
+    """Pre-create Kafka topics for all tables in the group.
+    Returns list of {topic_name, status} dicts.
+    """
+    from . import kafka_topics
+
+    topics = _build_topic_names(group_id)
+    results = []
+    for topic in topics:
+        try:
+            kafka_topics.create_topic(topic_name=topic)
+            results.append({"topic_name": topic, "status": "ok"})
+        except Exception as exc:
+            results.append({"topic_name": topic, "status": "error", "error": str(exc)})
+    return results
+
+
+def get_topic_message_counts(group_id: str) -> list[dict]:
+    """Return message counts for each topic in the group."""
+    from kafka import KafkaConsumer
+    from kafka.structs import TopicPartition
+
+    topics = _build_topic_names(group_id)
+    if not topics:
+        return []
+
+    bootstrap = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092").split(",")
+
+    results = []
+    consumer = None
+    try:
+        consumer = KafkaConsumer(bootstrap_servers=bootstrap)
+        for topic_name in topics:
+            try:
+                partitions = consumer.partitions_for_topic(topic_name)
+                if partitions is None:
+                    results.append({"topic_name": topic_name, "count": -1, "exists": False})
+                    continue
+                tps = [TopicPartition(topic_name, p) for p in partitions]
+                end_offsets = consumer.end_offsets(tps)
+                begin_offsets = consumer.beginning_offsets(tps)
+                total = sum(end_offsets[tp] - begin_offsets[tp] for tp in tps)
+                results.append({"topic_name": topic_name, "count": total, "exists": True})
+            except Exception:
+                results.append({"topic_name": topic_name, "count": -1, "exists": False})
+    except Exception:
+        for topic_name in topics:
+            results.append({"topic_name": topic_name, "count": -1, "exists": False})
+    finally:
+        if consumer:
+            consumer.close()
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Connector lifecycle
 # ---------------------------------------------------------------------------
 
 def start_connector(group_id: str) -> dict:
-    """Create and start the Debezium connector for a group.
+    """Pre-create Kafka topics, then create and start the Debezium connector.
 
     Unlike per-migration connectors, group connectors do NOT use
     log.mining.start.scn — they mine from the current redo position.
@@ -295,9 +436,20 @@ def start_connector(group_id: str) -> dict:
         raise ValueError("Oracle source не настроен — проверьте Настройки")
 
     table_list = _build_table_include_list(group_id)
+    if not table_list:
+        raise ValueError("В группе нет таблиц — добавьте таблицы перед запуском")
     key_columns = _build_key_columns(group_id)
 
     update_group_status(group_id, "STARTING")
+
+    # Pre-create Kafka topics
+    try:
+        create_group_topics(group_id)
+    except Exception as exc:
+        update_group_status(group_id, "FAILED", f"Ошибка создания топиков: {exc}")
+        raise
+
+    # Start Debezium connector
     try:
         result = debezium.create_group_connector(
             connector_name=connector_name,
@@ -328,9 +480,9 @@ def stop_connector(group_id: str) -> None:
 
 
 def refresh_connector_tables(group_id: str) -> None:
-    """Re-read migrations and update Debezium table.include.list + key columns.
+    """Re-read group_tables and update Debezium table.include.list + key columns.
 
-    Called when a new migration is added or removed from the group while
+    Called when tables are added/removed from the group while
     the connector is already running.
     """
     group = get_group(group_id)
