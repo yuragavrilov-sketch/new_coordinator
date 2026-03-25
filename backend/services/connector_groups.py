@@ -216,7 +216,7 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
                 ekc = json.dumps(t.get("effective_key_columns", []))
                 pk = t.get("source_pk_exists", False)
                 uk = t.get("source_uk_exists", False)
-                topic = f"{topic_prefix}.{src_schema}.{src_table}".upper().replace("#", "_")
+                topic = f"{topic_prefix}.{src_schema.upper()}.{src_table.upper()}".replace("#", "_")
 
                 cur.execute("""
                     INSERT INTO group_tables
