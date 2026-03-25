@@ -441,6 +441,31 @@ def init_db() -> None:
                     ON group_state_history(group_id, created_at DESC)
             """)
 
+            # ── data_compare_tasks ─────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS data_compare_tasks (
+                    task_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    source_schema  VARCHAR(128) NOT NULL,
+                    source_table   VARCHAR(128) NOT NULL,
+                    target_schema  VARCHAR(128) NOT NULL,
+                    target_table   VARCHAR(128) NOT NULL,
+                    compare_mode   VARCHAR(20)  NOT NULL DEFAULT 'full',
+                    last_n         INTEGER,
+                    order_column   VARCHAR(128),
+                    status         VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+                    source_count   BIGINT,
+                    target_count   BIGINT,
+                    source_hash    NUMERIC,
+                    target_hash    NUMERIC,
+                    counts_match   BOOLEAN,
+                    hash_match     BOOLEAN,
+                    error_text     TEXT,
+                    started_at     TIMESTAMPTZ,
+                    completed_at   TIMESTAMPTZ,
+                    created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+                )
+            """)
+
             # ── group_id FK on migrations ────────────────────────────────
             cur.execute(
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "

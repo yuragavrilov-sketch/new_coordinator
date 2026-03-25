@@ -6,12 +6,13 @@ import { MigrationList } from "./components/MigrationList";
 import { TargetPrep } from "./components/TargetPrep";
 import { Checklist } from "./components/Checklist";
 import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
+import { DataCompare } from "./components/DataCompare";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "migrations" | "connector-groups" | "target-prep" | "checklist";
+type Tab = "migrations" | "connector-groups" | "target-prep" | "data-compare" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -163,6 +164,11 @@ export default function App() {
           onClick={() => setActiveTab("target-prep")}
         />
         <TabButton
+          label="Сравнение данных"
+          active={activeTab === "data-compare"}
+          onClick={() => setActiveTab("data-compare")}
+        />
+        <TabButton
           label="Чек-лист"
           active={activeTab === "checklist"}
           onClick={() => setActiveTab("checklist")}
@@ -174,6 +180,7 @@ export default function App() {
         {activeTab === "migrations"       && <MigrationList sseEvents={events} />}
         {activeTab === "connector-groups" && <ConnectorGroupsPanel />}
         {activeTab === "target-prep"      && <TargetPrep />}
+        {activeTab === "data-compare"    && <DataCompare />}
         {activeTab === "checklist"        && <Checklist />}
       </div>
     </div>

@@ -146,6 +146,17 @@ from routes.target_prep import bp as target_prep_bp
 target_prep_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(target_prep_bp)
 
+# ── Data comparison blueprint ────────────────────────────────────────────────
+import routes.data_compare as data_compare_mod
+from routes.data_compare import bp as data_compare_bp
+
+data_compare_mod.init(
+    get_conn_fn=get_conn,
+    load_configs_fn=_load_cfg,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(data_compare_bp)
+
 # ── Connector Groups blueprint ───────────────────────────────────────────────
 import routes.connector_groups as cg_mod
 from routes.connector_groups import bp as cg_bp
