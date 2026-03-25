@@ -52,6 +52,13 @@ def _active_connector_name(group: dict) -> str:
     return f"{base}_{run_id}" if run_id else base
 
 
+def _active_topic_prefix(group: dict) -> str:
+    """Topic prefix for the current run: base_prefix + '.' + run_id."""
+    run_id = group.get("run_id") or ""
+    base = group["topic_prefix"]
+    return f"{base}.{run_id}" if run_id else base
+
+
 def _schema_topic_name(group: dict) -> str:
     """Schema history topic for the current run."""
     return f"schema-changes.{_active_connector_name(group)}"
@@ -205,7 +212,7 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
 
-    topic_prefix = group["topic_prefix"]
+    topic_prefix = _active_topic_prefix(group)
     conn = _conn()
     try:
         rows = []
@@ -244,9 +251,9 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
 
 
 def get_group_tables(group_id: str) -> list[dict]:
-    """Return all tables in a group with correct topic_name."""
+    """Return all tables in a group with correct topic_name (includes run_id)."""
     group = get_group(group_id)
-    prefix = group["topic_prefix"] if group else ""
+    prefix = _active_topic_prefix(group) if group else ""
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -378,7 +385,7 @@ def build_connector_config(group_id: str) -> dict:
     key_columns = _build_key_columns(group_id)
 
     connector_name = _active_connector_name(group)
-    topic_prefix = group["topic_prefix"]
+    topic_prefix = _active_topic_prefix(group)
     bootstrap = ""
     try:
         from . import debezium as _deb
@@ -594,7 +601,7 @@ def do_start_connector(group_id: str) -> dict:
 
     return debezium.create_group_connector(
         connector_name=connector_name,
-        topic_prefix=group["topic_prefix"],
+        topic_prefix=_active_topic_prefix(group),
         oracle_cfg=oracle_cfg,
         table_include_list=table_list,
         key_columns=key_columns,
