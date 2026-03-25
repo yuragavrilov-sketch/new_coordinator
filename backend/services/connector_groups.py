@@ -256,7 +256,10 @@ def get_group_tables(group_id: str) -> list[dict]:
         conn.close()
     # Always compute topic_name from prefix (DB value may be stale)
     for r in rows:
+        old = r.get("topic_name", "")
         r["topic_name"] = _topic_name(prefix, r["source_schema"], r["source_table"])
+        if old != r["topic_name"]:
+            print(f"[connector_groups] get_group_tables: overrode topic_name {old!r} -> {r['topic_name']!r}")
     return rows
 
 
@@ -329,13 +332,17 @@ def _build_key_columns(group_id: str) -> str:
 
 def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
     """Build topic name matching Debezium convention: {prefix}.{SCHEMA}.{TABLE} with # → _."""
-    return f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
+    result = f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
+    print(f"[connector_groups] _topic_name(prefix={topic_prefix!r}, schema={schema!r}, table={table!r}) -> {result!r}")
+    return result
 
 
 def _build_topic_names(group_id: str) -> list[str]:
     """Generate topic names from group's topic_prefix + table names."""
     tables = get_group_tables(group_id)
-    return [t["topic_name"] for t in tables if t.get("topic_name")]
+    names = [t["topic_name"] for t in tables if t.get("topic_name")]
+    print(f"[connector_groups] _build_topic_names(group_id={group_id}) -> {names}")
+    return names
 
 
 def _oracle_cfg(source_connection_id: str) -> dict:
@@ -449,13 +456,18 @@ def create_group_topics(group_id: str) -> list[dict]:
     from . import kafka_topics
 
     bootstrap = _kafka_bootstrap()
+    print(f"[connector_groups] create_group_topics: bootstrap={bootstrap}")
     topics = _build_topic_names(group_id)
+    print(f"[connector_groups] create_group_topics: will create {len(topics)} topics: {topics}")
     results = []
     for topic in topics:
         try:
+            print(f"[connector_groups] creating topic: {topic!r}")
             kafka_topics.create_topic(bootstrap_servers=bootstrap, topic_name=topic)
             results.append({"topic_name": topic, "status": "ok"})
+            print(f"[connector_groups] topic created ok: {topic!r}")
         except Exception as exc:
+            print(f"[connector_groups] topic create FAILED: {topic!r} -> {exc}")
             results.append({"topic_name": topic, "status": "error", "error": str(exc)})
     return results
 
