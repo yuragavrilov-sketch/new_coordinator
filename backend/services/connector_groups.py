@@ -324,7 +324,7 @@ def _build_key_columns(group_id: str) -> str:
 def _build_topic_names(group_id: str) -> list[str]:
     """Return list of topic names for all tables in the group."""
     tables = get_group_tables(group_id)
-    return [t["topic_name"] for t in tables if t.get("topic_name")]
+    return [t["topic_name"].replace("#", "_") for t in tables if t.get("topic_name")]
 
 
 def _oracle_cfg(source_connection_id: str) -> dict:
