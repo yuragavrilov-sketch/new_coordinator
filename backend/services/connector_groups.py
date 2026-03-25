@@ -240,7 +240,9 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
 
 
 def get_group_tables(group_id: str) -> list[dict]:
-    """Return all tables in a group."""
+    """Return all tables in a group with correct topic_name."""
+    group = get_group(group_id)
+    prefix = group["topic_prefix"] if group else ""
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -249,9 +251,13 @@ def get_group_tables(group_id: str) -> list[dict]:
                 WHERE  group_id = %s
                 ORDER BY source_schema, source_table
             """, (group_id,))
-            return [_r2d(cur, r) for r in cur.fetchall()]
+            rows = [_r2d(cur, r) for r in cur.fetchall()]
     finally:
         conn.close()
+    # Always compute topic_name from prefix (DB value may be stale)
+    for r in rows:
+        r["topic_name"] = _topic_name(prefix, r["source_schema"], r["source_table"])
+    return rows
 
 
 def remove_table(group_id: str, source_schema: str, source_table: str) -> None:
@@ -321,10 +327,15 @@ def _build_key_columns(group_id: str) -> str:
     return ";".join(parts)
 
 
+def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
+    """Build topic name matching Debezium convention: {prefix}.{SCHEMA}.{TABLE} with # → _."""
+    return f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
+
+
 def _build_topic_names(group_id: str) -> list[str]:
-    """Return list of topic names for all tables in the group."""
+    """Generate topic names from group's topic_prefix + table names."""
     tables = get_group_tables(group_id)
-    return [t["topic_name"].replace("#", "_") for t in tables if t.get("topic_name")]
+    return [t["topic_name"] for t in tables if t.get("topic_name")]
 
 
 def _oracle_cfg(source_connection_id: str) -> dict:
