@@ -16,7 +16,6 @@ import uuid
 from . import debezium
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 
 # ---------------------------------------------------------------------------
@@ -267,10 +266,7 @@ def get_group_tables(group_id: str) -> list[dict]:
         conn.close()
     # Always compute topic_name from prefix (DB value may be stale)
     for r in rows:
-        old = r.get("topic_name", "")
         r["topic_name"] = _topic_name(prefix, r["source_schema"], r["source_table"])
-        if old != r["topic_name"]:
-            log.warning("get_group_tables: overrode topic_name %r -> %r", old, r["topic_name"])
     return rows
 
 
@@ -343,17 +339,13 @@ def _build_key_columns(group_id: str) -> str:
 
 def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
     """Build topic name matching Debezium convention: {prefix}.{SCHEMA}.{TABLE} with # → _."""
-    result = f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
-    log.warning("_topic_name(prefix=%r, schema=%r, table=%r) -> %r", topic_prefix, schema, table, result)
-    return result
+    return f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
 
 
 def _build_topic_names(group_id: str) -> list[str]:
     """Generate topic names from group's topic_prefix + table names."""
     tables = get_group_tables(group_id)
-    names = [t["topic_name"] for t in tables if t.get("topic_name")]
-    log.warning("_build_topic_names(group_id=%s) -> %s", group_id, names)
-    return names
+    return [t["topic_name"] for t in tables if t.get("topic_name")]
 
 
 def _oracle_cfg(source_connection_id: str) -> dict:
@@ -467,18 +459,13 @@ def create_group_topics(group_id: str) -> list[dict]:
     from . import kafka_topics
 
     bootstrap = _kafka_bootstrap()
-    log.warning("create_group_topics: bootstrap=%s", bootstrap)
     topics = _build_topic_names(group_id)
-    log.warning("create_group_topics: will create %d topics: %s", len(topics), topics)
     results = []
     for topic in topics:
         try:
-            log.warning("creating topic: %r", topic)
             kafka_topics.create_topic(bootstrap_servers=bootstrap, topic_name=topic)
             results.append({"topic_name": topic, "status": "ok"})
-            log.warning("topic created ok: %r", topic)
         except Exception as exc:
-            log.warning("topic create FAILED: %r -> %s", topic, exc)
             results.append({"topic_name": topic, "status": "error", "error": str(exc)})
     return results
 
