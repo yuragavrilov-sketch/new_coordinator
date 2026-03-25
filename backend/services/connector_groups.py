@@ -394,8 +394,11 @@ def build_connector_config(group_id: str) -> dict:
         "snapshot.locking.mode":        "none",
         "log.mining.strategy":          "online_catalog",
         "database.connection.adapter":  "logminer",
-        "log.mining.continuous.mine":   "true",
-        "heartbeat.interval.ms":        "30000",
+        "log.mining.continuous.mine":          "true",
+        "log.mining.batch.size.max":           os.getenv("DEBEZIUM_LOG_MINING_BATCH_SIZE_MAX", "5000"),
+        "log.mining.sleep.time.increment.ms":  os.getenv("DEBEZIUM_LOG_MINING_SLEEP_TIME_INCREMENT_MS", "400"),
+        "log.mining.sleep.time.max.ms":        os.getenv("DEBEZIUM_LOG_MINING_SLEEP_TIME_MAX_MS", "1000"),
+        "heartbeat.interval.ms":               "30000",
 
         "topic.prefix":      topic_prefix,
         "database.hostname": oracle_cfg.get("host", ""),
