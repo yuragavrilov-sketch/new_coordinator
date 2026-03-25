@@ -238,34 +238,38 @@ def topic_counts(group_id: str):
 
 @bp.post("/api/connector-groups/<group_id>/start")
 def start_group(group_id: str):
-    from services.connector_groups import start_connector
+    from services.connector_groups import request_start
     try:
-        result = start_connector(group_id)
+        result = request_start(group_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
     _state["broadcast"]({
         "type": "connector_group_status",
         "group_id": group_id,
-        "status": "RUNNING",
+        "status": result["status"],
     })
     return jsonify(result)
 
 
 @bp.post("/api/connector-groups/<group_id>/stop")
 def stop_group(group_id: str):
-    from services.connector_groups import stop_connector
+    from services.connector_groups import request_stop
     try:
-        stop_connector(group_id)
+        request_stop(group_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
     _state["broadcast"]({
         "type": "connector_group_status",
         "group_id": group_id,
-        "status": "STOPPED",
+        "status": "STOPPING",
     })
-    return "", 204
+    return jsonify({"status": "STOPPING"})
 
 
 @bp.get("/api/connector-groups/<group_id>/status")
@@ -274,6 +278,12 @@ def group_status(group_id: str):
     status = get_connector_status(group_id)
     group = svc_get(group_id)
     return jsonify({"status": status, "group": group})
+
+
+@bp.get("/api/connector-groups/<group_id>/history")
+def group_history(group_id: str):
+    from services.connector_groups import get_group_history
+    return jsonify(get_group_history(group_id))
 
 
 @bp.post("/api/connector-groups/<group_id>/refresh-tables")

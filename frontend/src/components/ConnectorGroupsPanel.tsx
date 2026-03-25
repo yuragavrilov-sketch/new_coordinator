@@ -4,12 +4,13 @@ import type { ConnectorGroup, GroupStatus } from "../types/migration";
 import { CreateGroupWizard } from "./CreateGroupWizard";
 
 const STATUS_COLORS: Record<GroupStatus, { bg: string; text: string }> = {
-  PENDING:  { bg: "#1e293b", text: "#94a3b8" },
-  STARTING: { bg: "#1e3a5f", text: "#93c5fd" },
-  RUNNING:  { bg: "#052e16", text: "#86efac" },
-  STOPPING: { bg: "#431407", text: "#fdba74" },
-  STOPPED:  { bg: "#1c1917", text: "#78716c" },
-  FAILED:   { bg: "#450a0a", text: "#fca5a5" },
+  PENDING:            { bg: "#1e293b", text: "#94a3b8" },
+  TOPICS_CREATING:    { bg: "#1e3a5f", text: "#93c5fd" },
+  CONNECTOR_STARTING: { bg: "#1e3a5f", text: "#93c5fd" },
+  RUNNING:            { bg: "#052e16", text: "#86efac" },
+  STOPPING:           { bg: "#431407", text: "#fdba74" },
+  STOPPED:            { bg: "#1c1917", text: "#78716c" },
+  FAILED:             { bg: "#450a0a", text: "#fca5a5" },
 };
 
 interface TopicCount {
@@ -38,6 +39,7 @@ export function ConnectorGroupsPanel() {
   const [configLoading, setConfigLoading] = useState(false);
   const [topicCounts, setTopicCounts] = useState<Map<string, TopicCount>>(new Map());
   const [topicLoading, setTopicLoading] = useState(false);
+  const [history, setHistory] = useState<{ from_status: string | null; to_status: string; message: string | null; created_at: string }[]>([]);
 
   const load = () => {
     fetch("/api/connector-groups")
@@ -58,6 +60,7 @@ export function ConnectorGroupsPanel() {
       setExpanded(null);
       setDetail(null);
       setTopicCounts(new Map());
+      setHistory([]);
     } else {
       setExpanded(gid);
       fetch(`/api/connector-groups/${gid}`)
@@ -65,9 +68,17 @@ export function ConnectorGroupsPanel() {
         .then(d => {
           setDetail(d);
           loadTopicCounts(gid);
+          loadHistory(gid);
         })
         .catch(() => setDetail(null));
     }
+  };
+
+  const loadHistory = (gid: string) => {
+    fetch(`/api/connector-groups/${gid}/history`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setHistory)
+      .catch(() => setHistory([]));
   };
 
   const loadTopicCounts = (gid: string) => {
@@ -325,6 +336,49 @@ export function ConnectorGroupsPanel() {
                         ))}
                       </tbody>
                     </table>
+                  </>
+                )}
+
+                {/* State history */}
+                {history.length > 0 && (
+                  <>
+                    <h4 style={{ color: "#64748b", fontSize: 12, margin: "12px 0 6px" }}>
+                      История ({history.length})
+                    </h4>
+                    <div style={{
+                      maxHeight: 180, overflowY: "auto",
+                      border: "1px solid #1e293b", borderRadius: 5,
+                    }}>
+                      {history.map((h, i) => {
+                        const hsc = STATUS_COLORS[(h.to_status as GroupStatus)] || STATUS_COLORS.PENDING;
+                        return (
+                          <div key={i} style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "5px 10px", fontSize: 10,
+                            borderBottom: i < history.length - 1 ? "1px solid #1e293b" : "none",
+                          }}>
+                            <span style={{ color: "#475569", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                              {new Date(h.created_at).toLocaleString()}
+                            </span>
+                            {h.from_status && (
+                              <span style={{ color: "#475569" }}>{h.from_status}</span>
+                            )}
+                            <span style={{ color: "#475569" }}>{"\u2192"}</span>
+                            <span style={{
+                              background: hsc.bg, color: hsc.text,
+                              padding: "1px 6px", borderRadius: 3, fontWeight: 600,
+                            }}>
+                              {h.to_status}
+                            </span>
+                            {h.message && (
+                              <span style={{ color: "#64748b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {h.message}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </>
                 )}
               </div>

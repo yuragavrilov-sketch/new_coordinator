@@ -417,6 +417,22 @@ def init_db() -> None:
                     ON group_tables(group_id)
             """)
 
+            # ── group_state_history ───────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS group_state_history (
+                    id              BIGSERIAL PRIMARY KEY,
+                    group_id        UUID NOT NULL REFERENCES connector_groups(group_id) ON DELETE CASCADE,
+                    from_status     VARCHAR(32),
+                    to_status       VARCHAR(32) NOT NULL,
+                    message         TEXT,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_gsh_group_created
+                    ON group_state_history(group_id, created_at DESC)
+            """)
+
             # ── group_id FK on migrations ────────────────────────────────
             cur.execute(
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "

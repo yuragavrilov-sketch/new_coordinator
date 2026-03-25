@@ -119,6 +119,9 @@ def _tick() -> None:
             print(f"[orchestrator] migration {mid} phase {phase} error: {exc}")
             _fail(mid, str(exc))
 
+    # Drive connector group lifecycle
+    _tick_groups()
+
     # Check connector group health
     _check_group_connectors()
 
@@ -1457,6 +1460,160 @@ def _handle_cdc_applying(mid: str, m: dict) -> None:
     if row and row[0]:
         _transition(mid, "CDC_CATCHING_UP",
                     message="CDC apply-worker подключился")
+
+
+# ---------------------------------------------------------------------------
+# Group lifecycle tick (TOPICS_CREATING → CONNECTOR_STARTING → RUNNING)
+# ---------------------------------------------------------------------------
+
+_group_in_progress: set[str] = set()
+_group_in_progress_lock = threading.Lock()
+
+
+def _tick_groups() -> None:
+    """Drive connector-group lifecycle phases."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT group_id, status, connector_name
+                FROM   connector_groups
+                WHERE  status IN ('TOPICS_CREATING', 'CONNECTOR_STARTING', 'STOPPING')
+            """)
+            groups = [{"group_id": r[0], "status": r[1], "connector_name": r[2]}
+                      for r in cur.fetchall()]
+    except Exception:
+        return
+    finally:
+        conn.close()
+
+    for g in groups:
+        gid = g["group_id"]
+        status = g["status"]
+        try:
+            if status == "TOPICS_CREATING":
+                _handle_group_topics_creating(gid)
+            elif status == "CONNECTOR_STARTING":
+                _handle_group_connector_starting(gid)
+            elif status == "STOPPING":
+                _handle_group_stopping(gid)
+        except Exception as exc:
+            print(f"[orchestrator] group {gid} status {status} error: {exc}")
+            connector_groups_svc.transition_group(gid, "FAILED", str(exc))
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": gid,
+                "status": "FAILED",
+            })
+
+
+def _handle_group_topics_creating(group_id: str) -> None:
+    """Create Kafka topics, then move to CONNECTOR_STARTING."""
+    with _group_in_progress_lock:
+        if group_id in _group_in_progress:
+            return
+        _group_in_progress.add(group_id)
+
+    def _run():
+        try:
+            results = connector_groups_svc.do_create_topics(group_id)
+            errors = [r for r in results if r.get("status") == "error"]
+            if errors:
+                msg = "; ".join(f"{r['topic_name']}: {r.get('error','?')}" for r in errors)
+                connector_groups_svc.transition_group(
+                    group_id, "FAILED", f"Ошибка создания топиков: {msg}")
+                _broadcast({
+                    "type": "connector_group_status",
+                    "group_id": group_id, "status": "FAILED",
+                })
+                return
+
+            ok_topics = [r["topic_name"] for r in results if r.get("status") == "ok"]
+            connector_groups_svc.transition_group(
+                group_id, "CONNECTOR_STARTING",
+                f"Создано {len(ok_topics)} топиков")
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "CONNECTOR_STARTING",
+            })
+        except Exception as exc:
+            connector_groups_svc.transition_group(
+                group_id, "FAILED", str(exc))
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "FAILED",
+            })
+        finally:
+            with _group_in_progress_lock:
+                _group_in_progress.discard(group_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_group_connector_starting(group_id: str) -> None:
+    """Create and start Debezium connector, then move to RUNNING."""
+    with _group_in_progress_lock:
+        if group_id in _group_in_progress:
+            return
+        _group_in_progress.add(group_id)
+
+    def _run():
+        try:
+            result = connector_groups_svc.do_start_connector(group_id)
+            connector_groups_svc.transition_group(
+                group_id, "RUNNING",
+                f"Коннектор запущен: {result.get('name', '?')}")
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "RUNNING",
+            })
+        except Exception as exc:
+            connector_groups_svc.transition_group(
+                group_id, "FAILED", str(exc))
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "FAILED",
+            })
+        finally:
+            with _group_in_progress_lock:
+                _group_in_progress.discard(group_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_group_stopping(group_id: str) -> None:
+    """Stop and delete Debezium connector, then move to STOPPED."""
+    with _group_in_progress_lock:
+        if group_id in _group_in_progress:
+            return
+        _group_in_progress.add(group_id)
+
+    def _run():
+        try:
+            connector_groups_svc.do_stop_connector(group_id)
+            connector_groups_svc.transition_group(
+                group_id, "STOPPED", "Коннектор остановлен")
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "STOPPED",
+            })
+        except Exception as exc:
+            connector_groups_svc.transition_group(
+                group_id, "FAILED", str(exc))
+            _broadcast({
+                "type": "connector_group_status",
+                "group_id": group_id, "status": "FAILED",
+            })
+        finally:
+            with _group_in_progress_lock:
+                _group_in_progress.discard(group_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _broadcast(event: dict) -> None:
+    """Send SSE event."""
+    _state["broadcast"](event)
 
 
 # ---------------------------------------------------------------------------

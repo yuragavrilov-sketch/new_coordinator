@@ -74,7 +74,7 @@ export interface Migration {
 
 // ── Connector Groups ──────────────────────────────────────────────────────────
 
-export type GroupStatus = "PENDING" | "STARTING" | "RUNNING" | "STOPPING" | "STOPPED" | "FAILED";
+export type GroupStatus = "PENDING" | "TOPICS_CREATING" | "CONNECTOR_STARTING" | "RUNNING" | "STOPPING" | "STOPPED" | "FAILED";
 
 export interface ConnectorGroup {
   group_id: string;
