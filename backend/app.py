@@ -27,6 +27,9 @@ from flask import Flask, jsonify, send_from_directory
 
 load_dotenv(Path(__file__).parent / ".env")
 
+import logging
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
 sys.path.insert(0, os.path.dirname(__file__))   # make local packages importable
 
 # ── Static dir (React build) ──────────────────────────────────────────────────

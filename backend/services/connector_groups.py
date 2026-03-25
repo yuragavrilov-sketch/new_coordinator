@@ -7,12 +7,16 @@ Tables are stored in the `group_tables` table, decoupled from migrations.
 """
 
 import json
+import logging
 import os
 import random
 import string
 import uuid
 
 from . import debezium
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +137,11 @@ def delete_group(group_id: str) -> None:
     try:
         debezium.delete_connector(_active_connector_name(group))
     except Exception as exc:
-        print(f"[connector_groups] cleanup connector error: {exc}")
+        log.warning("cleanup connector error: %s", exc)
     try:
         _delete_group_topics(group)
     except Exception as exc:
-        print(f"[connector_groups] cleanup topics error: {exc}")
+        log.warning("cleanup topics error: %s", exc)
 
 
 def transition_group(group_id: str, to_status: str,
@@ -259,7 +263,7 @@ def get_group_tables(group_id: str) -> list[dict]:
         old = r.get("topic_name", "")
         r["topic_name"] = _topic_name(prefix, r["source_schema"], r["source_table"])
         if old != r["topic_name"]:
-            print(f"[connector_groups] get_group_tables: overrode topic_name {old!r} -> {r['topic_name']!r}")
+            log.warning("get_group_tables: overrode topic_name %r -> %r", old, r["topic_name"])
     return rows
 
 
@@ -333,7 +337,7 @@ def _build_key_columns(group_id: str) -> str:
 def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
     """Build topic name matching Debezium convention: {prefix}.{SCHEMA}.{TABLE} with # → _."""
     result = f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
-    print(f"[connector_groups] _topic_name(prefix={topic_prefix!r}, schema={schema!r}, table={table!r}) -> {result!r}")
+    log.warning("_topic_name(prefix=%r, schema=%r, table=%r) -> %r", topic_prefix, schema, table, result)
     return result
 
 
@@ -341,7 +345,7 @@ def _build_topic_names(group_id: str) -> list[str]:
     """Generate topic names from group's topic_prefix + table names."""
     tables = get_group_tables(group_id)
     names = [t["topic_name"] for t in tables if t.get("topic_name")]
-    print(f"[connector_groups] _build_topic_names(group_id={group_id}) -> {names}")
+    log.warning("_build_topic_names(group_id=%s) -> %s", group_id, names)
     return names
 
 
@@ -456,18 +460,18 @@ def create_group_topics(group_id: str) -> list[dict]:
     from . import kafka_topics
 
     bootstrap = _kafka_bootstrap()
-    print(f"[connector_groups] create_group_topics: bootstrap={bootstrap}")
+    log.warning("create_group_topics: bootstrap=%s", bootstrap)
     topics = _build_topic_names(group_id)
-    print(f"[connector_groups] create_group_topics: will create {len(topics)} topics: {topics}")
+    log.warning("create_group_topics: will create %d topics: %s", len(topics), topics)
     results = []
     for topic in topics:
         try:
-            print(f"[connector_groups] creating topic: {topic!r}")
+            log.warning("creating topic: %r", topic)
             kafka_topics.create_topic(bootstrap_servers=bootstrap, topic_name=topic)
             results.append({"topic_name": topic, "status": "ok"})
-            print(f"[connector_groups] topic created ok: {topic!r}")
+            log.warning("topic created ok: %r", topic)
         except Exception as exc:
-            print(f"[connector_groups] topic create FAILED: {topic!r} -> {exc}")
+            log.warning("topic create FAILED: %r -> %s", topic, exc)
             results.append({"topic_name": topic, "status": "error", "error": str(exc)})
     return results
 
@@ -484,14 +488,14 @@ def _delete_group_topics(group: dict) -> None:
         try:
             kafka_topics.delete_topic(bootstrap_servers=bootstrap, topic_name=topic)
         except Exception as exc:
-            print(f"[connector_groups] failed to delete topic {topic}: {exc}")
+            log.warning("failed to delete topic %s: %s", topic, exc)
 
     # Schema-changes topic
     schema_topic = _schema_topic_name(group)
     try:
         kafka_topics.delete_topic(bootstrap_servers=bootstrap, topic_name=schema_topic)
     except Exception as exc:
-        print(f"[connector_groups] failed to delete schema topic {schema_topic}: {exc}")
+        log.warning("failed to delete schema topic %s: %s", schema_topic, exc)
 
 
 def get_topic_message_counts(group_id: str) -> list[dict]:
