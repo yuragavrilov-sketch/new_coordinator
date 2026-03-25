@@ -213,7 +213,7 @@ def claim_chunk(conn) -> Optional[dict]:
         "target_schema":        tgt_schema,
         "target_table":         tgt_table,
         "stage_table":          stage_table,
-        "start_scn":            str(start_scn),
+        "start_scn":            str(start_scn) if start_scn is not None else None,
         "migration_strategy":   (migration_strategy or "STAGE").upper(),
     }
 

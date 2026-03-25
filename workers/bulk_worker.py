@@ -56,7 +56,8 @@ def process_chunk(chunk: dict) -> None:
     src_table  = chunk["source_table"]
     tgt_schema = chunk["target_schema"]
     stage      = chunk["stage_table"]
-    start_scn  = int(chunk["start_scn"])
+    raw_scn    = chunk.get("start_scn")
+    start_scn  = int(raw_scn) if raw_scn else None
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
@@ -70,12 +71,19 @@ def process_chunk(chunk: dict) -> None:
 
     try:
         with src_conn.cursor() as cur:
-            cur.execute(
-                f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
-                f'AS OF SCN :scn '
-                f'WHERE ROWID BETWEEN CHARTOROWID(:start) AND CHARTOROWID(:end)',
-                {"scn": start_scn, "start": rowid_start, "end": rowid_end},
-            )
+            if start_scn:
+                cur.execute(
+                    f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
+                    f'AS OF SCN :scn '
+                    f'WHERE ROWID BETWEEN CHARTOROWID(:start) AND CHARTOROWID(:end)',
+                    {"scn": start_scn, "start": rowid_start, "end": rowid_end},
+                )
+            else:
+                cur.execute(
+                    f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
+                    f'WHERE ROWID BETWEEN CHARTOROWID(:start) AND CHARTOROWID(:end)',
+                    {"start": rowid_start, "end": rowid_end},
+                )
 
             # Build INSERT from cursor metadata
             insert_sql = _build_insert(cur.description, tgt_schema, stage)

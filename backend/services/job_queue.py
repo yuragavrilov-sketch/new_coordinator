@@ -85,7 +85,7 @@ def claim_chunk(conn, worker_id: str) -> Optional[dict]:
         "source_table":         src_table,
         "target_schema":        tgt_schema,
         "stage_table":          stage_table,
-        "start_scn":            str(start_scn),
+        "start_scn":            str(start_scn) if start_scn is not None else None,
     }
 
 
