@@ -125,7 +125,7 @@ def create_group_wizard():
                 ekc = json.dumps(t.get("effective_key_columns", []))
                 pk = t.get("source_pk_exists", False)
                 uk = t.get("source_uk_exists", False)
-                topic = f"{topic_prefix}.{src_schema}.{src_table}".upper()
+                topic = f"{topic_prefix}.{src_schema}.{src_table}".upper().replace("#", "_")
 
                 cur.execute("""
                     INSERT INTO group_tables

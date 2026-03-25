@@ -1327,7 +1327,7 @@ def _handle_topic_creating(mid: str, m: dict) -> None:
             topic_prefix = m.get("topic_prefix", "")
             src_schema = m["source_schema"].upper()
             src_table = m["source_table"].upper()
-            topic_name = f"{topic_prefix}.{src_schema}.{src_table}"
+            topic_name = f"{topic_prefix}.{src_schema}.{src_table}".replace("#", "_")
 
             # Get Kafka bootstrap servers
             configs = _configs()
