@@ -469,6 +469,14 @@ def init_db() -> None:
                 )
             """)
 
+            # Column migrations for data_compare_tasks (upgrade from older schema)
+            for col_sql in [
+                "ALTER TABLE data_compare_tasks ADD COLUMN IF NOT EXISTS chunk_size    INTEGER NOT NULL DEFAULT 100000",
+                "ALTER TABLE data_compare_tasks ADD COLUMN IF NOT EXISTS chunks_total  INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE data_compare_tasks ADD COLUMN IF NOT EXISTS chunks_done   INTEGER NOT NULL DEFAULT 0",
+            ]:
+                cur.execute(col_sql)
+
             # ── data_compare_chunks ───────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS data_compare_chunks (
