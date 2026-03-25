@@ -403,8 +403,6 @@ def init_db() -> None:
                     source_table            VARCHAR(128) NOT NULL,
                     target_schema           VARCHAR(128) NOT NULL,
                     target_table            VARCHAR(128) NOT NULL,
-                    migration_strategy      VARCHAR(16)  NOT NULL DEFAULT 'STAGE',
-                    stage_table_name        VARCHAR(255) NOT NULL DEFAULT '',
                     effective_key_type      VARCHAR(32)  NOT NULL DEFAULT 'NONE',
                     effective_key_columns_json TEXT NOT NULL DEFAULT '[]',
                     source_pk_exists        BOOLEAN NOT NULL DEFAULT FALSE,

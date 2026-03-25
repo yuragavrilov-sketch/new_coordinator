@@ -26,7 +26,6 @@ interface GroupTable {
   target_table: string;
   effective_key_type: string;
   topic_name: string;
-  migration_strategy: string;
 }
 
 export function ConnectorGroupsPanel() {
@@ -245,7 +244,6 @@ export function ConnectorGroupsPanel() {
                         <th style={{ padding: "4px 8px" }}>Таблица</th>
                         <th style={{ padding: "4px 8px" }}>Target</th>
                         <th style={{ padding: "4px 8px" }}>Ключ</th>
-                        <th style={{ padding: "4px 8px" }}>Стратегия</th>
                         <th style={{ padding: "4px 8px" }}>Топик</th>
                         <th style={{ padding: "4px 8px", textAlign: "right" }}>Сообщений</th>
                       </tr>
@@ -273,9 +271,6 @@ export function ConnectorGroupsPanel() {
                               }}>
                                 {t.effective_key_type}
                               </span>
-                            </td>
-                            <td style={{ padding: "4px 8px", color: "#64748b" }}>
-                              {t.migration_strategy}
                             </td>
                             <td style={{ padding: "4px 8px", color: "#475569", fontSize: 10, fontFamily: "monospace" }}>
                               {t.topic_name}

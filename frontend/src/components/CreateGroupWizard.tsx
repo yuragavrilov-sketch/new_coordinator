@@ -22,16 +22,12 @@ interface TableEntry {
   selected_uk_index: number;
   target_schema: string;
   target_table: string;
-  migration_strategy: "STAGE" | "DIRECT";
-  stage_table_name: string;
 }
 
 interface GroupForm {
   group_name: string;
   connector_name: string;
   topic_prefix: string;
-  migration_strategy: "STAGE" | "DIRECT";
-  stage_tablespace: string;
 }
 
 // ── Style tokens ──────────────────────────────────────────────────────────────
@@ -424,8 +420,6 @@ const INIT_FORM: GroupForm = {
   group_name: "",
   connector_name: "",
   topic_prefix: "",
-  migration_strategy: "STAGE",
-  stage_tablespace: "PAYSTAGE",
 };
 
 const STEP_LABELS = ["Группа", "Таблицы и ключи"];
@@ -533,8 +527,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       selected_uk_index: 0,
       target_schema: selectedSchema,
       target_table: tableName,
-      migration_strategy: form.migration_strategy,
-      stage_table_name: `STG_${selectedSchema}_${tableName}`.toUpperCase(),
     };
     setTables(prev => [...prev, entry]);
 
@@ -637,8 +629,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
       topic_prefix: form.topic_prefix.trim(),
       consumer_group_prefix: form.topic_prefix.trim(),
       source_connection_id: "oracle_source",
-      migration_strategy: form.migration_strategy,
-      stage_tablespace: form.stage_tablespace,
       tables: tables.map(t => ({
         source_schema: t.schema,
         source_table: t.table,
@@ -648,8 +638,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
         effective_key_columns: t.effective_key_columns,
         source_pk_exists: (t.tableInfo?.pk_columns.length ?? 0) > 0,
         source_uk_exists: (t.tableInfo?.uk_constraints.length ?? 0) > 0,
-        migration_strategy: t.migration_strategy,
-        stage_table_name: t.stage_table_name,
       })),
     };
 
@@ -715,29 +703,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                     <input style={fieldErrs.topic_prefix ? S.inputErr : S.input}
                       value={form.topic_prefix}
                       onChange={e => setF({ topic_prefix: e.target.value })} />
-                  </Field>
-                </div>
-              </Section>
-
-              <Section title="Настройки по умолчанию для таблиц">
-                <div style={S.row2}>
-                  <Field label="Стратегия по умолчанию">
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {(["STAGE", "DIRECT"] as const).map(s => (
-                        <button key={s} onClick={() => setF({ migration_strategy: s })} style={{
-                          padding: "5px 14px", fontSize: 11, fontWeight: 700, borderRadius: 5,
-                          border: `1px solid ${form.migration_strategy === s ? "#3b82f6" : "#334155"}`,
-                          background: form.migration_strategy === s ? "#1e3a5f" : "#1e293b",
-                          color: form.migration_strategy === s ? "#93c5fd" : "#64748b",
-                          cursor: "pointer",
-                        }}>{s}</button>
-                      ))}
-                    </div>
-                  </Field>
-                  <Field label="Stage Tablespace">
-                    <input style={S.input}
-                      value={form.stage_tablespace}
-                      onChange={e => setF({ stage_tablespace: e.target.value })} />
                   </Field>
                 </div>
               </Section>
@@ -857,19 +822,6 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                             {"\u2192"} {t.target_schema}.{t.target_table}
                           </span>
                           <span style={{ flex: 1 }} />
-                          <span style={{
-                            fontSize: 10, padding: "2px 6px", borderRadius: 3,
-                            background: t.migration_strategy === "STAGE" ? "#1e3a5f" : "#1e293b",
-                            color: t.migration_strategy === "STAGE" ? "#93c5fd" : "#64748b",
-                            border: `1px solid ${t.migration_strategy === "STAGE" ? "#3b82f6" : "#334155"}`,
-                            cursor: "pointer",
-                          }}
-                            onClick={() => updateTable(t.schema, t.table, {
-                              migration_strategy: t.migration_strategy === "STAGE" ? "DIRECT" : "STAGE",
-                            })}
-                          >
-                            {t.migration_strategy}
-                          </span>
                           <button onClick={() => removeTable(t.schema, t.table)} style={{
                             background: "none", border: "none", color: "#dc2626",
                             cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "0 2px",

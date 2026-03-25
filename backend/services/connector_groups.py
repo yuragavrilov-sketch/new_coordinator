@@ -142,8 +142,6 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
                 src_table = t["source_table"]
                 tgt_schema = t.get("target_schema", src_schema)
                 tgt_table = t.get("target_table", src_table)
-                strategy = t.get("migration_strategy", "STAGE")
-                stage_name = t.get("stage_table_name", f"STG_{src_schema}_{src_table}".upper())
                 ekt = t.get("effective_key_type", "NONE")
                 ekc = json.dumps(t.get("effective_key_columns", []))
                 pk = t.get("source_pk_exists", False)
@@ -154,14 +152,13 @@ def add_tables(group_id: str, tables: list[dict]) -> list[dict]:
                     INSERT INTO group_tables
                         (id, group_id, source_schema, source_table,
                          target_schema, target_table,
-                         migration_strategy, stage_table_name,
                          effective_key_type, effective_key_columns_json,
                          source_pk_exists, source_uk_exists, topic_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (group_id, source_schema, source_table) DO NOTHING
                     RETURNING *
                 """, (tid, group_id, src_schema, src_table,
-                      tgt_schema, tgt_table, strategy, stage_name,
+                      tgt_schema, tgt_table,
                       ekt, ekc, pk, uk, topic))
                 row = cur.fetchone()
                 if row:
