@@ -105,11 +105,7 @@ def list_groups() -> list[dict]:
 
 
 def delete_group(group_id: str) -> None:
-    """Delete group.  Cleans up Debezium connector and Kafka topics."""
-    group = get_group(group_id)
-    if not group:
-        raise ValueError(f"Группа {group_id} не найдена")
-
+    """Delete group record only. Connector and topics must be stopped first."""
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -128,17 +124,6 @@ def delete_group(group_id: str) -> None:
         conn.commit()
     finally:
         conn.close()
-
-    # Cleanup: delete Debezium connector + all Kafka topics
-    try:
-        connector_name = _active_connector_name(group)
-        debezium.delete_connector(connector_name)
-    except Exception as exc:
-        print(f"[connector_groups] cleanup connector error: {exc}")
-    try:
-        _delete_group_topics(group)
-    except Exception as exc:
-        print(f"[connector_groups] cleanup topics error: {exc}")
 
 
 def transition_group(group_id: str, to_status: str,
