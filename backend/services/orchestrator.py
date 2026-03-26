@@ -518,9 +518,31 @@ def _create_chunks_and_transition(mid: str, m: dict) -> None:
                 mid,
             )
             if not chunks:
-                _fail(mid,
-                      "DBMS_PARALLEL_EXECUTE вернул 0 чанков — таблица пуста или нет прав",
-                      "NO_CHUNKS")
+                # Table might genuinely be empty — check before failing
+                src_conn = oracle_scn.open_oracle_conn(src_cfg)
+                try:
+                    with src_conn.cursor() as cur:
+                        cur.execute(
+                            f'SELECT 1 FROM "{m["source_schema"].upper()}"'
+                            f'."{m["source_table"].upper()}" WHERE ROWNUM = 1'
+                        )
+                        has_rows = cur.fetchone() is not None
+                finally:
+                    src_conn.close()
+
+                if has_rows:
+                    _fail(mid,
+                          "DBMS_PARALLEL_EXECUTE вернул 0 чанков, но таблица не пуста — "
+                          "проверьте привилегии EXECUTE ON DBMS_PARALLEL_EXECUTE",
+                          "NO_CHUNKS")
+                    return
+
+                # Source table is genuinely empty — skip bulk loading,
+                # go straight to enabling indexes and then CDC listener
+                _update(mid, {"total_chunks": 0})
+                _transition(mid, "INDEXES_ENABLING",
+                            message="Таблица-источник пуста (0 строк), "
+                                    "пропуск bulk-загрузки — включение индексов и запуск CDC")
                 return
 
             pg_conn = _state["get_conn"]()
