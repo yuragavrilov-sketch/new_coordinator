@@ -6,6 +6,7 @@ config loading.  Workers operate directly on the state DB — no HTTP to Flask.
 import json
 import os
 import socket
+from datetime import datetime
 from typing import Optional
 
 import re
@@ -105,11 +106,20 @@ def open_oracle(connection_id: str, configs: dict):
             f"Oracle '{connection_id}' not configured — "
             "check Settings in the UI."
         )
-    return oracledb.connect(
+    conn = oracledb.connect(
         user=user,
         password=password,
         dsn=f"{host}:{port}/{service_name}",
     )
+
+    # By default oracledb binds Python datetime as Oracle DATE which has no
+    # fractional seconds.  Override to TIMESTAMP so .microsecond is preserved.
+    def _input_type_handler(cursor, value, arraysize):
+        if isinstance(value, datetime):
+            return cursor.var(oracledb.DB_TYPE_TIMESTAMP, arraysize=arraysize)
+
+    conn.inputtypehandler = _input_type_handler
+    return conn
 
 
 # ---------------------------------------------------------------------------
