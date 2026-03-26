@@ -480,7 +480,7 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
     topic_prefix   = migration["topic_prefix"]
     consumer_group = migration["consumer_group"]
     key_cols       = json.loads(migration.get("effective_key_columns_json") or "[]")
-    topic          = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}"
+    topic          = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}".replace("#", "_")
     tag            = migration_id[:8]
 
     print(f"[cdc:{tag}] thread started  topic={topic}  group={consumer_group}")

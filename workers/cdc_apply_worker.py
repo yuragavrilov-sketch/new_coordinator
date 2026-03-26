@@ -156,7 +156,7 @@ def main(migration_id: str) -> None:
     key_cols = json.loads(migration.get("effective_key_columns_json") or "[]")
 
     # Kafka topic: {topic_prefix}.{source_schema}.{source_table}
-    topic = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}"
+    topic = f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}".replace("#", "_")
 
     configs         = get_configs(force=True)
     kafka_cfg       = configs.get("kafka", {})
