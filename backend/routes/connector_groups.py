@@ -363,9 +363,10 @@ def create_migration_from_table(group_id: str):
         "USER_DEFINED": "USER", "NONE": "NONE",
     }
 
+    from services.connector_groups import _active_topic_prefix
     connector_name = group["connector_name"]
-    topic_prefix = group["topic_prefix"]
-    prefix = group.get("consumer_group_prefix") or topic_prefix
+    topic_prefix = _active_topic_prefix(group)
+    prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
     consumer_group = f"{prefix}_{src_schema}_{src_table}"
 
     migration_mode = body.get("migration_mode", "CDC").upper()

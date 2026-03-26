@@ -138,8 +138,9 @@ def create_migration():
                     group = _get_group(group_id)
                     if not group:
                         return jsonify({"error": f"Группа {group_id} не найдена"}), 404
+                    from services.connector_groups import _active_topic_prefix
                     connector_name = group["connector_name"]
-                    topic_prefix = group["topic_prefix"]
+                    topic_prefix = _active_topic_prefix(group)
                     src_schema = body.get("source_schema", "").upper()
                     src_table = body.get("source_table", "").upper()
                     prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
