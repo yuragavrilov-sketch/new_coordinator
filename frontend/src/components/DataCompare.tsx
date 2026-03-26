@@ -446,9 +446,82 @@ export function DataCompare() {
   );
 }
 
+// ── Column diff detail ───────────────────────────────────────────────────────
+
+interface ColDiff {
+  column: string;
+  data_type: string;
+  source_hash: string | null;
+  target_hash: string | null;
+  match: boolean;
+}
+
+function ColumnDiffPanel({ taskId }: { taskId: string }) {
+  const [cols, setCols] = useState<ColDiff[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/data-compare/column-diff/${taskId}`)
+      .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || "error")))
+      .then(d => setCols(d.columns))
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  if (loading) return <div style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>Загрузка поколоночного сравнения...</div>;
+  if (error) return <div style={{ padding: "8px 10px", fontSize: 11, color: "#fca5a5" }}>{error}</div>;
+  if (!cols || cols.length === 0) return <div style={{ padding: "8px 10px", fontSize: 11, color: "#475569" }}>Нет колонок для сравнения</div>;
+
+  const mismatched = cols.filter(c => !c.match);
+  const displayed = showAll ? cols : mismatched;
+
+  return (
+    <div style={{ padding: "8px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+          Различия в {mismatched.length} из {cols.length} колонок
+        </span>
+        <label style={{ fontSize: 11, color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+          <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} style={{ accentColor: "#3b82f6" }} />
+          Показать все
+        </label>
+      </div>
+      <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
+        <thead>
+          <tr>
+            {["Колонка", "Тип", "Source hash", "Target hash", ""].map(h => (
+              <th key={h} style={{ padding: "4px 8px", textAlign: "left", color: "#64748b", fontWeight: 500, borderBottom: "1px solid #1e293b" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {displayed.map(c => (
+            <tr key={c.column} style={{ background: c.match ? "transparent" : "#1c0a0a" }}>
+              <td style={{ padding: "3px 8px", color: c.match ? "#94a3b8" : "#fca5a5", fontWeight: c.match ? 400 : 600 }}>{c.column}</td>
+              <td style={{ padding: "3px 8px", color: "#64748b" }}>{c.data_type}</td>
+              <td style={{ padding: "3px 8px", color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{c.source_hash ?? "NULL"}</td>
+              <td style={{ padding: "3px 8px", color: "#94a3b8", fontVariantNumeric: "tabular-nums" }}>{c.target_hash ?? "NULL"}</td>
+              <td style={{ padding: "3px 8px" }}>
+                {c.match
+                  ? <span style={{ color: "#22c55e" }}>OK</span>
+                  : <span style={{ color: "#ef4444", fontWeight: 600 }}>DIFF</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Task result row ──────────────────────────────────────────────────────────
 
 function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = t.status === "DONE" && t.hash_match === false;
+
   const statusColors: Record<string, { bg: string; text: string }> = {
     PENDING:  { bg: "#1e293b", text: "#94a3b8" },
     CHUNKING: { bg: "#2e1065", text: "#c4b5fd" },
@@ -489,7 +562,8 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
     : (t.status === "RUNNING" || t.status === "CHUNKING") ? "..." : "—";
 
   return (
-    <tr style={{ borderBottom: "1px solid #0f1624" }}>
+    <>
+    <tr style={{ borderBottom: expanded ? "none" : "1px solid #0f1624" }}>
       {/* Table */}
       <td style={{ padding: "6px 10px" }}>
         <div style={{ fontSize: 12, color: "#e2e8f0" }}>
@@ -562,7 +636,25 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
 
       {/* Hash match */}
       <td style={{ padding: "6px 10px" }}>
-        {matchBadge(t.hash_match, "Diff")}
+        {canExpand ? (
+          <span
+            onClick={() => setExpanded(v => !v)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              fontSize: 11, fontWeight: 600, color: "#ef4444",
+              cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted",
+            }}
+            title="Показать разницу по колонкам"
+          >
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: "#ef4444", display: "inline-block",
+            }} />
+            Diff {expanded ? "▲" : "▼"}
+          </span>
+        ) : (
+          matchBadge(t.hash_match, "Diff")
+        )}
       </td>
 
       {/* Time */}
@@ -586,5 +678,13 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
         </button>
       </td>
     </tr>
+    {expanded && (
+      <tr style={{ borderBottom: "1px solid #0f1624" }}>
+        <td colSpan={9} style={{ background: "#0a0f1a", padding: 0 }}>
+          <ColumnDiffPanel taskId={t.task_id} />
+        </td>
+      </tr>
+    )}
+    </>
   );
 }

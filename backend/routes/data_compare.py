@@ -472,6 +472,83 @@ def run_compare():
     return jsonify({"task_id": task_id, "status": "PENDING"}), 201
 
 
+@bp.get("/api/data-compare/column-diff/<task_id>")
+def column_diff(task_id: str):
+    """Per-column hash breakdown to show which columns differ between source and target."""
+    pg = _state["get_conn"]()
+    try:
+        with pg.cursor() as cur:
+            cur.execute(
+                "SELECT source_schema, source_table, target_schema, target_table, "
+                "compare_mode, last_n, order_column, status "
+                "FROM data_compare_tasks WHERE task_id = %s", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "task not found"}), 404
+    finally:
+        pg.close()
+
+    src_schema, src_table, tgt_schema, tgt_table, mode, last_n, order_col, status = row
+    if status != "DONE":
+        return jsonify({"error": "task not DONE"}), 400
+
+    configs = _state["load_configs"]()
+    src_conn = get_oracle_conn("source", configs)
+    tgt_conn = get_oracle_conn("target", configs)
+    try:
+        src_cols = get_comparable_columns(src_conn, src_schema, src_table)
+        tgt_cols = get_comparable_columns(tgt_conn, tgt_schema, tgt_table)
+        tgt_names = {c["name"] for c in tgt_cols}
+        common_cols = [c for c in src_cols if c["name"] in tgt_names]
+
+        if not common_cols:
+            return jsonify({"columns": []})
+
+        # Build per-column SUM(ORA_HASH(...)) selects
+        col_parts = []
+        for c in common_cols:
+            expr = col_expr(c["name"], c["data_type"])
+            col_parts.append(f'SUM(ORA_HASH({expr})) AS "{c["name"]}"')
+        select_list = ", ".join(col_parts)
+
+        if mode == "last_n" and last_n and order_col:
+            def _sql(schema, table):
+                return (
+                    f"SELECT {select_list} FROM ("
+                    f'SELECT * FROM "{schema}"."{table}" '
+                    f'ORDER BY "{order_col}" DESC '
+                    f"FETCH FIRST {int(last_n)} ROWS ONLY)"
+                )
+        else:
+            def _sql(schema, table):
+                return f'SELECT {select_list} FROM "{schema}"."{table}"'
+
+        with src_conn.cursor() as cur:
+            cur.execute(_sql(src_schema, src_table))
+            src_row = cur.fetchone()
+
+        with tgt_conn.cursor() as cur:
+            cur.execute(_sql(tgt_schema, tgt_table))
+            tgt_row = cur.fetchone()
+
+        result = []
+        for i, c in enumerate(common_cols):
+            s_hash = src_row[i] if src_row else None
+            t_hash = tgt_row[i] if tgt_row else None
+            result.append({
+                "column": c["name"],
+                "data_type": c["data_type"],
+                "source_hash": str(s_hash) if s_hash is not None else None,
+                "target_hash": str(t_hash) if t_hash is not None else None,
+                "match": s_hash == t_hash,
+            })
+
+        return jsonify({"columns": result})
+    finally:
+        src_conn.close()
+        tgt_conn.close()
+
+
 @bp.delete("/api/data-compare/tasks/<task_id>")
 def delete_task(task_id: str):
     conn = _state["get_conn"]()
