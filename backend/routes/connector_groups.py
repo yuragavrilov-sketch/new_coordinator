@@ -295,3 +295,172 @@ def refresh_tables(group_id: str):
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify({"ok": True})
+
+
+# ── Create migration from group table ─────────────────────────────────────────
+
+@bp.post("/api/connector-groups/<group_id>/create-migration")
+def create_migration_from_table(group_id: str):
+    """Create a migration for a specific table in the group and start it."""
+    from services.connector_groups import (
+        get_group as svc_get,
+        get_group_tables,
+        refresh_connector_tables,
+    )
+
+    body = request.get_json(force=True) or {}
+    table_id = body.get("table_id", "").strip()
+    if not table_id:
+        return jsonify({"error": "table_id is required"}), 400
+
+    # ── look up group ─────────────────────────────────────────────────────
+    group = svc_get(group_id)
+    if not group:
+        return jsonify({"error": "Группа не найдена"}), 404
+
+    # ── find the table in group_tables ────────────────────────────────────
+    tables = get_group_tables(group_id)
+    tbl = next((t for t in tables if t["id"] == table_id), None)
+    if not tbl:
+        return jsonify({"error": "Таблица не найдена в группе"}), 404
+
+    src_schema = tbl["source_schema"].upper()
+    src_table = tbl["source_table"].upper()
+    tgt_schema = tbl["target_schema"].upper()
+    tgt_table = tbl["target_table"].upper()
+
+    # ── check for active duplicate ────────────────────────────────────────
+    get_conn = _state["get_conn"]
+    r2d = _state["row_to_dict"]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT migration_id, migration_name, phase
+                FROM   migrations
+                WHERE  group_id = %s
+                  AND  source_schema = %s AND source_table = %s
+                  AND  phase NOT IN ('CANCELLED', 'FAILED', 'COMPLETED')
+                LIMIT 1
+            """, (group_id, src_schema, src_table))
+            dup = cur.fetchone()
+            if dup:
+                d = r2d(cur, dup)
+                return jsonify({
+                    "error": f"Уже есть активная миграция \"{d['migration_name']}\" "
+                             f"({d['phase']}) для {src_schema}.{src_table}"
+                }), 409
+    finally:
+        conn.close()
+
+    # ── derive fields ─────────────────────────────────────────────────────
+    ekt = tbl.get("effective_key_type", "NONE")
+    ekc_json = tbl.get("effective_key_columns_json", "[]")
+    pk_exists = tbl.get("source_pk_exists", False)
+    uk_exists = tbl.get("source_uk_exists", False)
+    key_source_map = {
+        "PRIMARY_KEY": "PK", "UNIQUE_KEY": "UK",
+        "USER_DEFINED": "USER", "NONE": "NONE",
+    }
+
+    connector_name = group["connector_name"]
+    topic_prefix = group["topic_prefix"]
+    prefix = group.get("consumer_group_prefix") or topic_prefix
+    consumer_group = f"{prefix}_{src_schema}_{src_table}"
+
+    migration_mode = body.get("migration_mode", "CDC").upper()
+    if migration_mode not in ("CDC", "BULK_ONLY"):
+        migration_mode = "CDC"
+    migration_strategy = body.get("migration_strategy", "STAGE").upper()
+    if migration_strategy not in ("STAGE", "DIRECT"):
+        migration_strategy = "STAGE"
+
+    stage_name = f"STG_{src_schema}_{src_table}" if migration_strategy == "STAGE" else ""
+    stage_tablespace = body.get("stage_tablespace", "PAYSTAGE") if migration_strategy == "STAGE" else ""
+
+    migration_name = (body.get("migration_name", "").strip()
+                      or f"{src_schema}.{src_table} → {tgt_schema}.{tgt_table}")
+
+    mid = str(uuid.uuid4())
+    now = datetime.utcnow()
+    initial_phase = "NEW"
+
+    # ── insert migration ──────────────────────────────────────────────────
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO migrations (
+                    migration_id, migration_name, phase, state_changed_at,
+                    source_connection_id, target_connection_id,
+                    source_schema, source_table, target_schema, target_table,
+                    stage_table_name, stage_tablespace,
+                    connector_name, topic_prefix, consumer_group,
+                    chunk_size, max_parallel_workers, baseline_parallel_degree,
+                    validate_hash_sample,
+                    source_pk_exists, source_uk_exists,
+                    effective_key_type, effective_key_source, effective_key_columns_json,
+                    migration_strategy, migration_mode,
+                    group_id,
+                    created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s,
+                    %s,
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s,
+                    %s,
+                    %s, %s
+                )
+            """, (
+                mid, migration_name, initial_phase, now,
+                "oracle_source", "oracle_target",
+                src_schema, src_table, tgt_schema, tgt_table,
+                stage_name, stage_tablespace.strip().upper(),
+                connector_name, topic_prefix, consumer_group,
+                body.get("chunk_size", 1_000_000),
+                max(1, int(body.get("max_parallel_workers", 1) or 1)),
+                max(1, int(body.get("baseline_parallel_degree", 4) or 4)),
+                body.get("validate_hash_sample", False),
+                pk_exists, uk_exists,
+                ekt, key_source_map.get(ekt, "NONE"), ekc_json,
+                migration_strategy, migration_mode,
+                group_id,
+                now, now,
+            ))
+            cur.execute("""
+                INSERT INTO migration_state_history
+                    (migration_id, from_phase, to_phase, message, actor_type)
+                VALUES (%s, NULL, %s, %s, 'USER')
+            """, (mid, initial_phase, "Migration created from connector group"))
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+    # ── refresh Debezium table list ───────────────────────────────────────
+    if migration_mode == "CDC":
+        try:
+            refresh_connector_tables(group_id)
+        except Exception as exc:
+            print(f"[create-migration] refresh_connector_tables warning: {exc}")
+
+    _state["broadcast"]({
+        "type":         "migration_phase",
+        "migration_id": mid,
+        "phase":        initial_phase,
+        "ts":           now.isoformat() + "Z",
+    })
+
+    return jsonify({
+        "migration_id": mid,
+        "migration_name": migration_name,
+        "phase": initial_phase,
+    }), 201

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
-import type { ConnectorGroup, GroupStatus } from "../types/migration";
+import type { ConnectorGroup, GroupStatus, MigrationSummary } from "../types/migration";
+import { phaseColor } from "../types/migration";
 import { CreateGroupWizard } from "./CreateGroupWizard";
 
 const STATUS_COLORS: Record<GroupStatus, { bg: string; text: string }> = {
@@ -40,6 +41,7 @@ export function ConnectorGroupsPanel() {
   const [topicCounts, setTopicCounts] = useState<Map<string, TopicCount>>(new Map());
   const [topicLoading, setTopicLoading] = useState(false);
   const [history, setHistory] = useState<{ from_status: string | null; to_status: string; message: string | null; created_at: string }[]>([]);
+  const [migratingTableId, setMigratingTableId] = useState<string | null>(null);
 
   const load = () => {
     fetch("/api/connector-groups")
@@ -130,6 +132,44 @@ export function ConnectorGroupsPanel() {
       .catch(e => alert(String(e)))
       .finally(() => setConfigLoading(false));
   };
+
+  const createMigration = async (gid: string, tableId: string) => {
+    setMigratingTableId(tableId);
+    try {
+      const r = await fetch(`/api/connector-groups/${gid}/create-migration`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table_id: tableId }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        alert(d.error || "Ошибка создания миграции");
+        return;
+      }
+      // Refresh detail to show new migration
+      fetch(`/api/connector-groups/${gid}`)
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(setDetail)
+        .catch(() => {});
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setMigratingTableId(null);
+    }
+  };
+
+  // Build a map: "SCHEMA.TABLE" -> migration summary for the current group
+  const tableMigrationMap = new Map<string, MigrationSummary>();
+  if (detail?.migrations) {
+    for (const m of detail.migrations) {
+      const key = `${m.source_schema}.${m.source_table}`;
+      // Keep the most recent active migration (non-terminal)
+      const existing = tableMigrationMap.get(key);
+      if (!existing || (existing.phase === "CANCELLED" || existing.phase === "FAILED" || existing.phase === "COMPLETED")) {
+        tableMigrationMap.set(key, m);
+      }
+    }
+  }
 
   if (loading) return <div style={{ color: "#64748b", padding: 16 }}>Загрузка...</div>;
 
@@ -257,11 +297,17 @@ export function ConnectorGroupsPanel() {
                         <th style={{ padding: "4px 8px" }}>Ключ</th>
                         <th style={{ padding: "4px 8px" }}>Топик</th>
                         <th style={{ padding: "4px 8px", textAlign: "right" }}>Сообщений</th>
+                        <th style={{ padding: "4px 8px", textAlign: "center" }}>Миграция</th>
                       </tr>
                     </thead>
                     <tbody>
                       {detail.tables.map(t => {
                         const tc = topicCounts.get(t.topic_name);
+                        const tableKey = `${t.source_schema}.${t.source_table}`;
+                        const mig = tableMigrationMap.get(tableKey);
+                        const isTerminal = mig && (mig.phase === "CANCELLED" || mig.phase === "FAILED" || mig.phase === "COMPLETED");
+                        const hasActive = mig && !isTerminal;
+                        const isMigrating = migratingTableId === t.id;
                         return (
                           <tr key={t.id} style={{ borderTop: "1px solid #1e293b" }}>
                             <td style={{ padding: "4px 8px", color: "#e2e8f0", fontFamily: "monospace" }}>
@@ -299,6 +345,34 @@ export function ConnectorGroupsPanel() {
                                 }}>
                                   {tc.count.toLocaleString()}
                                 </span>
+                              )}
+                            </td>
+                            <td style={{ padding: "4px 8px", textAlign: "center" }}>
+                              {hasActive ? (() => {
+                                const pc = phaseColor(mig.phase);
+                                return (
+                                  <span style={{
+                                    fontSize: 9, padding: "1px 6px", borderRadius: 3,
+                                    background: pc.bg, color: pc.text,
+                                    border: `1px solid ${pc.border}`,
+                                    fontWeight: 600,
+                                  }}>
+                                    {mig.phase}
+                                  </span>
+                                );
+                              })() : (
+                                <button
+                                  disabled={isMigrating}
+                                  onClick={() => createMigration(g.group_id, t.id)}
+                                  style={{
+                                    background: "#052e16", border: "1px solid #16a34a", borderRadius: 4,
+                                    color: "#86efac", padding: "1px 8px", fontSize: 10,
+                                    cursor: isMigrating ? "not-allowed" : "pointer",
+                                    fontWeight: 600, opacity: isMigrating ? 0.5 : 1,
+                                  }}
+                                >
+                                  {isMigrating ? "..." : "Migrate"}
+                                </button>
                               )}
                             </td>
                           </tr>
