@@ -41,7 +41,7 @@ export function ConnectorGroupsPanel() {
   const [topicCounts, setTopicCounts] = useState<Map<string, TopicCount>>(new Map());
   const [topicLoading, setTopicLoading] = useState(false);
   const [history, setHistory] = useState<{ from_status: string | null; to_status: string; message: string | null; created_at: string }[]>([]);
-  const [migratingTableId, setMigratingTableId] = useState<string | null>(null);
+  const [migrateModal, setMigrateModal] = useState<{ groupId: string; table: GroupTable } | null>(null);
 
   const load = () => {
     fetch("/api/connector-groups")
@@ -133,29 +133,12 @@ export function ConnectorGroupsPanel() {
       .finally(() => setConfigLoading(false));
   };
 
-  const createMigration = async (gid: string, tableId: string) => {
-    setMigratingTableId(tableId);
-    try {
-      const r = await fetch(`/api/connector-groups/${gid}/create-migration`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ table_id: tableId }),
-      });
-      const d = await r.json();
-      if (!r.ok) {
-        alert(d.error || "Ошибка создания миграции");
-        return;
-      }
-      // Refresh detail to show new migration
-      fetch(`/api/connector-groups/${gid}`)
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(setDetail)
-        .catch(() => {});
-    } catch (e) {
-      alert(String(e));
-    } finally {
-      setMigratingTableId(null);
-    }
+  const onMigrationCreated = (gid: string) => {
+    setMigrateModal(null);
+    fetch(`/api/connector-groups/${gid}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(setDetail)
+      .catch(() => {});
   };
 
   // Build a map: "SCHEMA.TABLE" -> migration summary for the current group
@@ -307,7 +290,6 @@ export function ConnectorGroupsPanel() {
                         const mig = tableMigrationMap.get(tableKey);
                         const isTerminal = mig && (mig.phase === "CANCELLED" || mig.phase === "FAILED" || mig.phase === "COMPLETED");
                         const hasActive = mig && !isTerminal;
-                        const isMigrating = migratingTableId === t.id;
                         return (
                           <tr key={t.id} style={{ borderTop: "1px solid #1e293b" }}>
                             <td style={{ padding: "4px 8px", color: "#e2e8f0", fontFamily: "monospace" }}>
@@ -362,16 +344,14 @@ export function ConnectorGroupsPanel() {
                                 );
                               })() : (
                                 <button
-                                  disabled={isMigrating}
-                                  onClick={() => createMigration(g.group_id, t.id)}
+                                  onClick={() => setMigrateModal({ groupId: g.group_id, table: t })}
                                   style={{
                                     background: "#052e16", border: "1px solid #16a34a", borderRadius: 4,
                                     color: "#86efac", padding: "1px 8px", fontSize: 10,
-                                    cursor: isMigrating ? "not-allowed" : "pointer",
-                                    fontWeight: 600, opacity: isMigrating ? 0.5 : 1,
+                                    cursor: "pointer", fontWeight: 600,
                                   }}
                                 >
-                                  {isMigrating ? "..." : "Migrate"}
+                                  Migrate
                                 </button>
                               )}
                             </td>
@@ -461,6 +441,16 @@ export function ConnectorGroupsPanel() {
         );
       })}
 
+      {/* Migrate modal */}
+      {migrateModal && (
+        <MigrateModal
+          groupId={migrateModal.groupId}
+          table={migrateModal.table}
+          onClose={() => setMigrateModal(null)}
+          onCreated={() => onMigrationCreated(migrateModal.groupId)}
+        />
+      )}
+
       {/* Debezium config modal */}
       {configModal && ReactDOM.createPortal(
         <div
@@ -527,6 +517,256 @@ export function ConnectorGroupsPanel() {
         document.body,
       )}
     </div>
+  );
+}
+
+// ── Migrate modal ────────────────────────────────────────────────────────────
+
+interface MigrateParams {
+  migration_mode: "CDC" | "BULK_ONLY";
+  migration_strategy: "STAGE" | "DIRECT";
+  chunk_size: number;
+  max_parallel_workers: number;
+  baseline_parallel_degree: number;
+  stage_tablespace: string;
+  validate_hash_sample: boolean;
+}
+
+const MIGRATE_DEFAULTS: MigrateParams = {
+  migration_mode: "CDC",
+  migration_strategy: "STAGE",
+  chunk_size: 1_000_000,
+  max_parallel_workers: 1,
+  baseline_parallel_degree: 4,
+  stage_tablespace: "PAYSTAGE",
+  validate_hash_sample: false,
+};
+
+function MigrateModal({ groupId, table, onClose, onCreated }: {
+  groupId: string;
+  table: GroupTable;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [params, setParams] = useState<MigrateParams>(MIGRATE_DEFAULTS);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const set = (up: Partial<MigrateParams>) => setParams(p => ({ ...p, ...up }));
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setError("");
+    try {
+      const r = await fetch(`/api/connector-groups/${groupId}/create-migration`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table_id: table.id, ...params }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setError(d.error || "Ошибка создания миграции");
+        return;
+      }
+      onCreated();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const inp: React.CSSProperties = {
+    background: "#1e293b", border: "1px solid #334155", borderRadius: 5,
+    color: "#e2e8f0", padding: "6px 10px", fontSize: 12, width: "100%",
+  };
+
+  const lbl: React.CSSProperties = {
+    fontSize: 11, color: "#64748b", fontWeight: 600, letterSpacing: 0.3,
+    marginBottom: 3,
+  };
+
+  const hint: React.CSSProperties = { fontSize: 10, color: "#475569", marginTop: 2 };
+
+  function ModeBtn({ value, label, activeColor }: {
+    value: string; label: string; activeColor: string;
+  }) {
+    const field = value === "CDC" || value === "BULK_ONLY" ? "migration_mode" : "migration_strategy";
+    const current = field === "migration_mode" ? params.migration_mode : params.migration_strategy;
+    const active = current === value;
+    return (
+      <button
+        onClick={() => set({ [field]: value } as Partial<MigrateParams>)}
+        style={{
+          flex: 1, padding: "7px 10px", borderRadius: 5, cursor: "pointer",
+          border: `1px solid ${active ? activeColor : "#334155"}`,
+          background: active ? activeColor + "20" : "#1e293b",
+          color: active ? activeColor : "#64748b",
+          fontWeight: 700, fontSize: 11,
+        }}
+      >{label}</button>
+    );
+  }
+
+  return ReactDOM.createPortal(
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,.72)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 1000,
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10,
+        width: "100%", maxWidth: 480,
+        display: "flex", flexDirection: "column",
+        boxShadow: "0 24px 48px rgba(0,0,0,.55)",
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: "12px 20px", borderBottom: "1px solid #1e293b",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
+            Создать миграцию
+          </span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose} style={{
+            background: "none", border: "none", color: "#475569",
+            cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 2px",
+          }}>{"\u2715"}</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Table info */}
+          <div style={{
+            background: "#1e293b", borderRadius: 6, padding: "10px 14px",
+            display: "flex", flexDirection: "column", gap: 4,
+          }}>
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>
+              <span style={{ color: "#475569" }}>Source: </span>
+              <strong style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                {table.source_schema}.{table.source_table}
+              </strong>
+            </div>
+            <div style={{ fontSize: 12, color: "#94a3b8" }}>
+              <span style={{ color: "#475569" }}>Target: </span>
+              <strong style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                {table.target_schema}.{table.target_table}
+              </strong>
+            </div>
+            <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
+              Key: {table.effective_key_type}
+            </div>
+          </div>
+
+          {/* Mode */}
+          <div>
+            <div style={lbl}>Режим</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <ModeBtn value="CDC" label="CDC (Debezium)" activeColor="#7c3aed" />
+              <ModeBtn value="BULK_ONLY" label="Разовая переливка" activeColor="#059669" />
+            </div>
+            <div style={hint}>
+              {params.migration_mode === "CDC"
+                ? "Bulk-загрузка + CDC через Debezium до полного catchup"
+                : "Однократная переливка без отслеживания изменений"}
+            </div>
+          </div>
+
+          {/* Strategy */}
+          <div>
+            <div style={lbl}>Стратегия</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <ModeBtn value="STAGE" label="STAGE" activeColor="#3b82f6" />
+              <ModeBtn value="DIRECT" label="DIRECT" activeColor="#059669" />
+            </div>
+            <div style={hint}>
+              {params.migration_strategy === "STAGE"
+                ? "Через промежуточную stage-таблицу с валидацией"
+                : "Прямая загрузка в целевую таблицу"}
+            </div>
+          </div>
+
+          {/* Stage tablespace */}
+          {params.migration_strategy === "STAGE" && (
+            <div>
+              <div style={lbl}>Stage tablespace</div>
+              <input style={inp} value={params.stage_tablespace}
+                placeholder="например MIGRATION_DATA"
+                onChange={e => set({ stage_tablespace: e.target.value })} />
+              <div style={hint}>Если пусто — default tablespace схемы</div>
+            </div>
+          )}
+
+          {/* Numeric params */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div>
+              <div style={lbl}>Chunk size</div>
+              <input style={inp} type="number" value={params.chunk_size} min={1}
+                onChange={e => set({ chunk_size: parseInt(e.target.value) || 0 })} />
+              <div style={hint}>Строк на чанк</div>
+            </div>
+            <div>
+              <div style={lbl}>Воркеры (bulk)</div>
+              <input style={inp} type="number" value={params.max_parallel_workers} min={1}
+                onChange={e => set({ max_parallel_workers: Math.max(1, parseInt(e.target.value) || 1) })} />
+            </div>
+            <div>
+              <div style={lbl}>Воркеры (baseline)</div>
+              <input style={inp} type="number" value={params.baseline_parallel_degree} min={1}
+                onChange={e => set({ baseline_parallel_degree: Math.max(1, parseInt(e.target.value) || 4) })} />
+            </div>
+          </div>
+
+          {/* Hash validation */}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input type="checkbox"
+              checked={params.validate_hash_sample}
+              onChange={e => set({ validate_hash_sample: e.target.checked })} />
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>
+              Hash/sample валидация stage
+            </span>
+          </label>
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 6,
+              padding: "8px 12px", fontSize: 12, color: "#fca5a5",
+            }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: "12px 20px", borderTop: "1px solid #1e293b",
+          display: "flex", justifyContent: "flex-end", gap: 8,
+        }}>
+          <button onClick={onClose} style={{
+            background: "none", border: "1px solid #334155", borderRadius: 6,
+            color: "#64748b", padding: "6px 16px", fontSize: 12, cursor: "pointer",
+          }}>
+            Отмена
+          </button>
+          <button onClick={handleSubmit} disabled={submitting} style={{
+            background: submitting ? "#1e3a5f" : "#16a34a",
+            border: "none", borderRadius: 6,
+            color: submitting ? "#64748b" : "#fff",
+            padding: "6px 18px", fontSize: 12, fontWeight: 700,
+            cursor: submitting ? "not-allowed" : "pointer",
+          }}>
+            {submitting ? "Создание..." : "Создать и запустить"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
