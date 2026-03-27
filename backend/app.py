@@ -169,6 +169,18 @@ cg_mod.init(
 )
 app.register_blueprint(cg_bp)
 
+# ── Planner blueprint ────────────────────────────────────────────────────────
+import routes.planner as planner_mod
+from routes.planner import bp as planner_bp
+
+planner_mod.init(
+    get_conn_fn=get_conn,
+    row_to_dict_fn=row_to_dict,
+    load_configs_fn=_load_cfg,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(planner_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp
