@@ -508,6 +508,40 @@ def init_db() -> None:
                     WHERE status = 'PENDING'
             """)
 
+            # ── migration_plans ───────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS migration_plans (
+                    plan_id         SERIAL PRIMARY KEY,
+                    name            TEXT NOT NULL,
+                    src_schema      TEXT NOT NULL,
+                    tgt_schema      TEXT NOT NULL,
+                    connector_group_id UUID REFERENCES connector_groups(group_id),
+                    defaults_json   JSONB NOT NULL DEFAULT '{}',
+                    status          TEXT NOT NULL DEFAULT 'DRAFT',
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    started_at      TIMESTAMPTZ,
+                    completed_at    TIMESTAMPTZ
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS migration_plan_items (
+                    item_id         SERIAL PRIMARY KEY,
+                    plan_id         INTEGER NOT NULL REFERENCES migration_plans(plan_id) ON DELETE CASCADE,
+                    table_name      TEXT NOT NULL,
+                    mode            TEXT NOT NULL DEFAULT 'CDC',
+                    batch_order     INTEGER NOT NULL DEFAULT 1,
+                    sort_order      INTEGER NOT NULL DEFAULT 0,
+                    overrides_json  JSONB NOT NULL DEFAULT '{}',
+                    migration_id    UUID REFERENCES migrations(migration_id),
+                    status          TEXT NOT NULL DEFAULT 'PENDING'
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_mpi_plan_id
+                    ON migration_plan_items(plan_id)
+            """)
+
             # ── group_id FK on migrations ────────────────────────────────
             cur.execute(
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "
