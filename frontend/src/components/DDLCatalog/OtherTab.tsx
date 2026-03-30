@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
 import { CatalogObject } from "./TablesTab";
+import { Pagination, usePagination } from "./Pagination";
 
 interface Props {
   objects: CatalogObject[];
@@ -111,12 +112,18 @@ function OtherDetail({ obj }: { obj: CatalogObject }) {
 export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
   const [search, setSearch] = useState("");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+
+  useEffect(() => { setPage(0); }, [search]);
 
   const filtered = useMemo(() => {
     return objects.filter(o =>
       o.object_name.toLowerCase().includes(search.toLowerCase())
     );
   }, [objects, search]);
+
+  const paged = usePagination(filtered, pageSize, page);
 
   const typeBadge = (meta: Record<string, unknown>) => {
     const kind = detectOtherType(meta);
@@ -155,7 +162,7 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
           </tr>
         </thead>
         <tbody>
-          {filtered.map(obj => {
+          {paged.map(obj => {
             const expanded = expandedObj === obj.object_name;
             return (
               <React.Fragment key={obj.object_name}>
@@ -200,6 +207,7 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
           })}
         </tbody>
       </table>
+      <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
+import { Pagination, usePagination } from "./Pagination";
 import { CatalogObject } from "./TablesTab";
 
 interface Props {
@@ -180,6 +181,10 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<CodeTypeFilter>("ALL");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+
+  useEffect(() => { setPage(0); }, [search, typeFilter]);
 
   const filtered = useMemo(() => {
     return objects.filter(o => {
@@ -190,6 +195,8 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
       return ct === typeFilter;
     });
   }, [objects, search, typeFilter]);
+
+  const paged = usePagination(filtered, pageSize, page);
 
   const typeFilterBtns: CodeTypeFilter[] = ["ALL", "FUNCTION", "PROCEDURE", "PACKAGE"];
   const typeFilterLabels: Record<CodeTypeFilter, string> = {
@@ -231,7 +238,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
           </tr>
         </thead>
         <tbody>
-          {filtered.map(obj => {
+          {paged.map(obj => {
             const expanded = expandedObj === obj.object_name;
             const codeType = detectCodeType(obj);
             return (
@@ -280,6 +287,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
           })}
         </tbody>
       </table>
+      <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
+import { Pagination, usePagination } from "./Pagination";
 import { CatalogObject } from "./TablesTab";
 
 interface Props {
@@ -149,12 +150,18 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
 export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Props) {
   const [search, setSearch] = useState("");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+
+  useEffect(() => { setPage(0); }, [search]);
 
   const filtered = useMemo(() => {
     return objects.filter(o =>
       o.object_name.toLowerCase().includes(search.toLowerCase())
     );
   }, [objects, search]);
+
+  const paged = usePagination(filtered, pageSize, page);
 
   return (
     <div style={S.card}>
@@ -180,7 +187,7 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
           </tr>
         </thead>
         <tbody>
-          {filtered.map(obj => {
+          {paged.map(obj => {
             const expanded = expandedObj === obj.object_name;
             const mview = isMView(obj.metadata);
             const objType = mview ? "MVIEW" : "VIEW";
@@ -233,6 +240,7 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
           })}
         </tbody>
       </table>
+      <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
     </div>
   );
 }

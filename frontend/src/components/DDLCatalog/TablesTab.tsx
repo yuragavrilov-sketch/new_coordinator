@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge, MigrationBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
+import { Pagination, usePagination } from "./Pagination";
 
 export interface CatalogObject {
   object_name: string;
@@ -352,6 +353,11 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(0); }, [search, statusFilter]);
 
   const filtered = useMemo(() => {
     return objects.filter(o => {
@@ -365,6 +371,7 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
     });
   }, [objects, search, statusFilter]);
 
+  const paged = usePagination(filtered, pageSize, page);
   const filteredNames = filtered.map(o => o.object_name);
   const allSelected = filteredNames.length > 0 && filteredNames.every(n => selected.has(n));
 
@@ -414,7 +421,7 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
           </tr>
         </thead>
         <tbody>
-          {filtered.map(obj => {
+          {paged.map(obj => {
             const expanded = expandedObj === obj.object_name;
             return (
               <React.Fragment key={obj.object_name}>
@@ -466,6 +473,7 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
           })}
         </tbody>
       </table>
+      <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
     </div>
   );
 }
