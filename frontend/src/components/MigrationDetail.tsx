@@ -81,7 +81,7 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 
 // ── Phase sets ────────────────────────────────────────────────────────────────
 
-const BULK_PHASES      = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED", "BASELINE_LOADING"]);
+const BULK_PHASES      = new Set(["CHUNKING", "BULK_LOADING", "BULK_LOADED", "BASELINE_LOADING", "DATA_VERIFYING"]);
 const CONNECTOR_PHASES = new Set([
   "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
@@ -465,6 +465,10 @@ function OverviewTab({
             </div>
           )}
         </div>
+      )}
+
+      {(phase === "DATA_VERIFYING" || phase === "DATA_MISMATCH") && detail.data_compare_task_id && (
+        <DataVerifyCard taskId={detail.data_compare_task_id} phase={phase} />
       )}
 
       {/* Phase-specific panels */}
@@ -1271,6 +1275,138 @@ function RestartBaselineButton({ migrationId, onDone }: { migrationId: string; o
   );
 }
 
+// ── DataMismatchButtons ────────────────────────────────────────────────────
+
+function DataMismatchButtons({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  async function doAction(action: string, confirmMsg?: string) {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => doAction("retry_verify")}
+        disabled={busy}
+        style={{
+          background: "#1e3a5f", border: "1px solid #1d4ed8", borderRadius: 5,
+          color: "#93c5fd", padding: "4px 12px", fontSize: 11, fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
+        }}
+      >
+        Повторить сверку
+      </button>
+      <button
+        onClick={() => doAction("force_complete", "Завершить миграцию без успешной сверки данных?")}
+        disabled={busy}
+        style={{
+          background: "#431407", border: "1px solid #ea580c", borderRadius: 5,
+          color: "#fdba74", padding: "4px 12px", fontSize: 11, fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
+        }}
+      >
+        Завершить принудительно
+      </button>
+      {errMsg && (
+        <span style={{ fontSize: 10, color: "#fca5a5" }}>{errMsg}</span>
+      )}
+    </>
+  );
+}
+
+// ── DataVerifyCard ─────────────────────────────────────────────────────────
+
+function DataVerifyCard({ taskId, phase }: { taskId: string; phase: string }) {
+  const [info, setInfo] = useState<any>(null);
+
+  useEffect(() => {
+    let alive = true;
+    function load() {
+      fetch(`/api/data-compare/${taskId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (alive && d) setInfo(d); });
+    }
+    load();
+    const iv = setInterval(load, 3000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [taskId]);
+
+  if (!info) return null;
+
+  const progress = info.chunks_total > 0
+    ? Math.round((info.chunks_done / info.chunks_total) * 100)
+    : 0;
+
+  return (
+    <div style={{
+      background: "#0a111f", border: "1px solid #1e293b", borderRadius: 6,
+      padding: 12, marginBottom: 14,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginBottom: 8 }}>
+        Сверка данных
+        {phase === "DATA_VERIFYING" && (
+          <span style={{ color: "#67e8f9", fontWeight: 400, marginLeft: 8 }}>
+            {info.status === "RUNNING" ? `${progress}% (${info.chunks_done}/${info.chunks_total})` : info.status}
+          </span>
+        )}
+      </div>
+      {(info.source_count != null || info.target_count != null) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, fontSize: 11 }}>
+          <div>
+            <div style={{ color: "#64748b" }}>Source count</div>
+            <div style={{ color: "#e2e8f0", fontWeight: 600 }}>
+              {info.source_count?.toLocaleString("ru-RU") ?? "—"}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: "#64748b" }}>Target count</div>
+            <div style={{ color: "#e2e8f0", fontWeight: 600 }}>
+              {info.target_count?.toLocaleString("ru-RU") ?? "—"}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: "#64748b" }}>Результат</div>
+            <div style={{ fontWeight: 600 }}>
+              {info.counts_match === null
+                ? <span style={{ color: "#475569" }}>Ожидание</span>
+                : info.counts_match && info.hash_match
+                  ? <span style={{ color: "#86efac" }}>OK</span>
+                  : <span style={{ color: "#fca5a5" }}>
+                      {!info.counts_match ? "COUNT mismatch" : "HASH mismatch"}
+                    </span>
+              }
+            </div>
+          </div>
+        </div>
+      )}
+      {info.error_text && (
+        <div style={{ fontSize: 10, color: "#fca5a5", marginTop: 6 }}>{info.error_text}</div>
+      )}
+    </div>
+  );
+}
+
 // ── StopDeleteButtons ─────────────────────────────────────────────────────────
 
 const _ACTIVE = new Set([
@@ -1442,6 +1578,9 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {(phase === "BASELINE_LOADING" ||
             (phase === "FAILED" && (detail?.error_code === "BASELINE_PUBLISH_ERROR" || detail?.error_code === "BASELINE_LOAD_FAILED"))) && (
             <RestartBaselineButton migrationId={migrationId} onDone={loadDetail} />
+          )}
+          {phase === "DATA_MISMATCH" && (
+            <DataMismatchButtons migrationId={migrationId} onDone={loadDetail} />
           )}
           {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") &&
             detail && isCdcMode(detail) && (

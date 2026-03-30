@@ -71,6 +71,7 @@ export interface Migration {
   baseline_chunks_done: number;
   queue_position: number | null;
   group_id: string | null;
+  data_compare_task_id?: string;
 }
 
 // ── Connector Groups ──────────────────────────────────────────────────────────
