@@ -19,6 +19,32 @@ function detectCodeType(meta: Record<string, unknown>): string {
   return (meta.object_type as string) ?? "FUNCTION";
 }
 
+function CodeDiffSummary({ diff, codeType }: { diff: Record<string, unknown>; codeType: string }) {
+  if (!diff || diff.ok === true) return null;
+  const items: string[] = [];
+  if (codeType === "PACKAGE") {
+    if (diff.spec_match === false) items.push("Спецификация отличается");
+    if (diff.body_match === false) items.push("Тело пакета отличается");
+  } else if (codeType === "TYPE") {
+    if (diff.source_match === false) items.push("Спецификация типа отличается");
+    if (diff.body_match === false) items.push("Тело типа отличается");
+  } else {
+    if (diff.code_match === false) items.push("Исходный код отличается");
+  }
+  if (items.length === 0) return null;
+  return (
+    <div style={{
+      background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
+      padding: "10px 14px", marginBottom: 6,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
+      {items.map((item, i) => (
+        <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
+      ))}
+    </div>
+  );
+}
+
 function CodeDetail({ obj }: { obj: CatalogObject }) {
   const [bodyOpen, setBodyOpen] = useState(false);
   const meta = obj.metadata;
@@ -47,13 +73,14 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
     overflowX: "auto", maxHeight: 400,
   };
 
-  const args = (meta.arguments as unknown[]) ?? [];
+  const argCount = meta.argument_count as number | undefined;
 
   return (
     <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
-      {(codeType === "FUNCTION" || codeType === "PROCEDURE") && args.length > 0 && (
+      {obj.match_status === "DIFF" && <CodeDiffSummary diff={obj.diff} codeType={codeType} />}
+      {(codeType === "FUNCTION" || codeType === "PROCEDURE") && argCount != null && (
         <div style={{ marginBottom: 6, fontSize: 12, color: "#64748b" }}>
-          Аргументов: <span style={{ color: "#94a3b8", fontWeight: 600 }}>{args.length}</span>
+          Аргументов: <span style={{ color: "#94a3b8", fontWeight: 600 }}>{argCount}</span>
         </div>
       )}
 
@@ -61,7 +88,7 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
         <>
           <div style={sectionStyle}>
             <div style={sectionHeader}>СПЕЦИФИКАЦИЯ</div>
-            <pre style={preStyle}>{meta.spec_source as string}</pre>
+            <pre style={preStyle}>{(meta.spec_source as string) ?? ""}</pre>
           </div>
           <div style={{ ...sectionStyle, marginTop: 8 }}>
             <div
@@ -72,7 +99,7 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
               <span>ТЕЛО ПАКЕТА</span>
             </div>
             {bodyOpen && (
-              <pre style={preStyle}>{meta.body_source as string}</pre>
+              <pre style={preStyle}>{(meta.body_source as string) ?? ""}</pre>
             )}
           </div>
         </>
@@ -102,7 +129,7 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
       ) : (
         <div style={sectionStyle}>
           <div style={sectionHeader}>ИСХОДНЫЙ КОД</div>
-          <pre style={preStyle}>{(meta.source as string) ?? ""}</pre>
+          <pre style={preStyle}>{(meta.source_code as string) ?? (meta.source as string) ?? ""}</pre>
         </div>
       )}
     </td>

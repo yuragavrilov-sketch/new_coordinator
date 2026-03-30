@@ -15,10 +15,31 @@ function isMView(meta: Record<string, unknown>): boolean {
   return "refresh_type" in meta;
 }
 
+function ViewDiffSummary({ diff }: { diff: Record<string, unknown> }) {
+  if (!diff || diff.ok === true) return null;
+  const items: string[] = [];
+  if (diff.sql_match === false) items.push("SQL-текст отличается");
+  if (diff.status_match === false) items.push("Статус отличается (VALID/INVALID)");
+  if (diff.refresh_match === false) items.push("Тип refresh отличается");
+  if (items.length === 0) return null;
+  return (
+    <div style={{
+      background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
+      padding: "10px 14px", marginBottom: 6,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
+      {items.map((item, i) => (
+        <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
+      ))}
+    </div>
+  );
+}
+
 function ViewDetail({ obj }: { obj: CatalogObject }) {
   const meta = obj.metadata;
   const cols = (meta.columns as Record<string, unknown>[]) ?? [];
-  const sql = (meta.text as string) ?? (meta.query as string) ?? "";
+  const sql = (meta.sql_text as string) ?? "";
+  const mview = isMView(meta);
 
   const sectionStyle: React.CSSProperties = {
     background: "#07101e",
@@ -39,13 +60,20 @@ function ViewDetail({ obj }: { obj: CatalogObject }) {
 
   return (
     <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
+      {obj.match_status === "DIFF" && <ViewDiffSummary diff={obj.diff} />}
+      {mview && (
+        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+          Refresh: <span style={{ color: "#94a3b8" }}>{(meta.refresh_type as string) ?? "—"}</span>
+          {meta.last_refresh ? <span style={{ marginLeft: 12 }}>Last: <span style={{ color: "#94a3b8" }}>{String(meta.last_refresh)}</span></span> : null}
+        </div>
+      )}
       {cols.length > 0 && (
         <div style={sectionStyle}>
-          <div style={sectionHeader}>КОЛОНКИ</div>
+          <div style={sectionHeader}>КОЛОНКИ ({cols.length})</div>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                {["#", "Имя", "Тип"].map(h => (
+                {["#", "Имя", "Тип", "Nullable"].map(h => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
               </tr>
@@ -53,9 +81,16 @@ function ViewDetail({ obj }: { obj: CatalogObject }) {
             <tbody>
               {cols.map((c, i) => (
                 <tr key={i} style={S.trBorder}>
-                  <td style={{ ...S.td, color: "#475569" }}>{(c.column_id as number) ?? i + 1}</td>
-                  <td style={{ ...S.td, color: "#e2e8f0" }}>{c.column_name as string}</td>
-                  <td style={{ ...S.td, color: "#94a3b8" }}>{c.data_type as string}</td>
+                  <td style={{ ...S.td, color: "#475569" }}>{i + 1}</td>
+                  <td style={{ ...S.td, color: "#e2e8f0" }}>{(c.name ?? c.column_name) as string}</td>
+                  <td style={{ ...S.td, color: "#94a3b8" }}>
+                    {c.data_type as string}{c.data_length ? `(${c.data_length})` : ""}
+                  </td>
+                  <td style={S.td}>
+                    {(c.nullable === true || c.nullable === "Y")
+                      ? <span style={{ color: "#22c55e", fontSize: 11 }}>Y</span>
+                      : <span style={{ color: "#ef4444", fontSize: 11 }}>N</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
