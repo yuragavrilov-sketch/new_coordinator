@@ -271,7 +271,14 @@ export function DDLCatalog() {
 
       {snapshotId && (
         <>
-          <ObjectTabs active={activeTab} onChange={setActiveTab} counts={counts} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <ObjectTabs active={activeTab} onChange={setActiveTab} counts={counts} />
+            {selected.size > 0 && !showWizard && (
+              <button onClick={() => setShowWizard(true)} style={{ ...S.btnPrimary, whiteSpace: "nowrap" }}>
+                Визард миграции ({selected.size})
+              </button>
+            )}
+          </div>
 
           {currentTypeLoading ? (
             <div style={{ padding: 20, textAlign: "center", color: "#475569", fontSize: 12 }}>Загрузка объектов...</div>
@@ -294,14 +301,6 @@ export function DDLCatalog() {
                 <OtherTab objects={grouped.other} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />
               )}
             </>
-          )}
-
-          {selected.size > 0 && !showWizard && (
-            <div style={{ marginTop: 16, textAlign: "center" }}>
-              <button onClick={() => setShowWizard(true)} style={S.btnPrimary}>
-                Запустить визард для выбранных ({selected.size})
-              </button>
-            </div>
           )}
 
           {showWizard && selectedTables.length > 0 && (
