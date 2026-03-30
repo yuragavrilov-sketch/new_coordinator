@@ -542,6 +542,46 @@ def init_db() -> None:
                     ON migration_plan_items(plan_id)
             """)
 
+            # ── DDL Catalog cache ──────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ddl_snapshots (
+                    snapshot_id   SERIAL PRIMARY KEY,
+                    src_schema    TEXT NOT NULL,
+                    tgt_schema    TEXT NOT NULL,
+                    loaded_at     TIMESTAMPTZ DEFAULT now()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ddl_objects (
+                    id            SERIAL PRIMARY KEY,
+                    snapshot_id   INT NOT NULL REFERENCES ddl_snapshots(snapshot_id) ON DELETE CASCADE,
+                    db_side       TEXT NOT NULL,
+                    object_type   TEXT NOT NULL,
+                    object_name   TEXT NOT NULL,
+                    oracle_status TEXT,
+                    last_ddl_time TIMESTAMPTZ,
+                    metadata      JSONB DEFAULT '{}'
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS ix_ddl_objects_snapshot
+                ON ddl_objects(snapshot_id, db_side, object_type)
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ddl_compare_results (
+                    id            SERIAL PRIMARY KEY,
+                    snapshot_id   INT NOT NULL REFERENCES ddl_snapshots(snapshot_id) ON DELETE CASCADE,
+                    object_type   TEXT NOT NULL,
+                    object_name   TEXT NOT NULL,
+                    match_status  TEXT NOT NULL DEFAULT 'UNKNOWN',
+                    diff          JSONB DEFAULT '{}'
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS ix_ddl_compare_snapshot
+                ON ddl_compare_results(snapshot_id, object_type)
+            """)
+
             # ── group_id FK on migrations ────────────────────────────────
             cur.execute(
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS "
