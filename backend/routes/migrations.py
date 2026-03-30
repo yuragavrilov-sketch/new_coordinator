@@ -372,11 +372,13 @@ def delete_migration(migration_id: str):
 # ---------------------------------------------------------------------------
 
 _ACTION_TRANSITIONS = {
-    "run":      ("DRAFT",      "NEW"),
-    "pause":    (None,         "PAUSED"),
-    "resume":   ("PAUSED",     "BULK_LOADING"),   # sensible default; orchestrator re-routes
-    "cancel":   (None,         "CANCELLING"),
-    "lag_zero": ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),   # called by cdc_apply_worker
+    "run":            ("DRAFT",           "NEW"),
+    "pause":          (None,              "PAUSED"),
+    "resume":         ("PAUSED",          "BULK_LOADING"),   # sensible default; orchestrator re-routes
+    "cancel":         (None,              "CANCELLING"),
+    "lag_zero":       ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),   # called by cdc_apply_worker
+    "retry_verify":   ("DATA_MISMATCH",   "DATA_VERIFYING"),
+    "force_complete": ("DATA_MISMATCH",   "COMPLETED"),
 }
 
 _ACTIVE_PHASES = {
@@ -439,6 +441,14 @@ def migration_action(migration_id: str):
                         debezium.delete_connector(crow[0])
                 except Exception as exc:
                     print(f"[action/cancel] connector delete failed: {exc}")
+
+            if action == "retry_verify":
+                # Clear old data_compare task reference so orchestrator creates a new one
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE migrations SET data_compare_task_id = NULL "
+                        "WHERE migration_id = %s",
+                        (migration_id,))
 
             with conn.cursor() as cur:
                 cur.execute(
