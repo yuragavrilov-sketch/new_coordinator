@@ -6,6 +6,7 @@ export type MigrationPhase =
   | "STAGE_VALIDATING" | "STAGE_VALIDATED"
   | "BASELINE_PUBLISHING" | "BASELINE_LOADING" | "BASELINE_PUBLISHED"
   | "STAGE_DROPPING" | "INDEXES_ENABLING"
+  | "DATA_VERIFYING" | "DATA_MISMATCH"
   | "CDC_APPLY_STARTING" | "CDC_APPLYING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
   | "STEADY_STATE" | "PAUSED"
   | "CANCELLING" | "CANCELLED"
@@ -156,6 +157,8 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   BASELINE_PUBLISHED:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   STAGE_DROPPING:      { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
   INDEXES_ENABLING:    { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
+  DATA_VERIFYING:      { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
+  DATA_MISMATCH:       { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CDC_APPLY_STARTING:  { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CDC_APPLYING:        { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CDC_CATCHING_UP:     { bg: "#431407", text: "#fdba74", border: "#ea580c" },
@@ -182,6 +185,7 @@ export const ORDERED_PHASES: MigrationPhase[] = [
   "STAGE_VALIDATING", "STAGE_VALIDATED",
   "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
   "STAGE_DROPPING", "INDEXES_ENABLING",
+  "DATA_VERIFYING", "DATA_MISMATCH",
   "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ];
