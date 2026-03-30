@@ -279,7 +279,7 @@ export function DDLCatalog() {
             <>
               {activeTab === "tables" && (
                 <TablesTab
-                  objects={grouped.tables} selected={selected}
+                  objects={grouped.tables} snapshotId={snapshotId} selected={selected}
                   onToggle={toggleTable} onToggleAll={toggleAllTables}
                   syncBusy={syncBusy} onCompare={doCompare} onSync={doSync}
                 />

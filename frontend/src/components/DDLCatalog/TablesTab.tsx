@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge, MigrationBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
@@ -15,6 +15,7 @@ export interface CatalogObject {
 
 interface Props {
   objects: CatalogObject[];
+  snapshotId: number | null;
   selected: Set<string>;
   onToggle: (name: string) => void;
   onToggleAll: (names: string[]) => void;
@@ -225,7 +226,67 @@ function DiffSummary({ diff }: { diff: Record<string, unknown> }) {
   );
 }
 
-function TableDetail({ obj }: { obj: CatalogObject }) {
+function TargetCompare({ srcCols, tgtCols }: { srcCols: Record<string, unknown>[]; tgtCols: Record<string, unknown>[] }) {
+  const tgtMap = new Map<string, Record<string, unknown>>();
+  for (const c of tgtCols) tgtMap.set((c.name ?? c.column_name) as string, c);
+  const srcMap = new Map<string, Record<string, unknown>>();
+  for (const c of srcCols) srcMap.set((c.name ?? c.column_name) as string, c);
+
+  const allNames = new Set([...srcMap.keys(), ...tgtMap.keys()]);
+  const rows: { name: string; srcType: string; tgtType: string; status: string }[] = [];
+  for (const name of allNames) {
+    const s = srcMap.get(name);
+    const t = tgtMap.get(name);
+    if (s && !t) rows.push({ name, srcType: fmtType(s), tgtType: "—", status: "missing" });
+    else if (!s && t) rows.push({ name, srcType: "—", tgtType: fmtType(t), status: "extra" });
+    else if (s && t) {
+      const st = fmtType(s), tt = fmtType(t);
+      rows.push({ name, srcType: st, tgtType: tt, status: st === tt ? "ok" : "type" });
+    }
+  }
+  const diffs = rows.filter(r => r.status !== "ok");
+  if (diffs.length === 0) return null;
+
+  const colors: Record<string, string> = { missing: "#ef4444", extra: "#8b5cf6", type: "#eab308", ok: "#22c55e" };
+  const labels: Record<string, string> = { missing: "Нет на тгт", extra: "Лишняя", type: "Тип отлич.", ok: "OK" };
+
+  return (
+    <div style={{ border: "1px solid #854d0e44", borderRadius: 6, overflow: "hidden", marginBottom: 6 }}>
+      <div style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, color: "#eab308", background: "#1c1007", borderBottom: "1px solid #854d0e44" }}>
+        СРАВНЕНИЕ КОЛОНОК (только различия: {diffs.length})
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {["Колонка", "Source тип", "Target тип", "Статус"].map(h => <th key={h} style={S.th}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {diffs.map(r => (
+            <tr key={r.name} style={S.trBorder}>
+              <td style={{ ...S.td, color: "#e2e8f0", fontFamily: "monospace" }}>{r.name}</td>
+              <td style={{ ...S.td, color: "#94a3b8", fontFamily: "monospace" }}>{r.srcType}</td>
+              <td style={{ ...S.td, color: colors[r.status], fontFamily: "monospace" }}>{r.tgtType}</td>
+              <td style={S.td}><span style={S.badge(colors[r.status] + "22", colors[r.status])}>{labels[r.status]}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TableDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: number | null }) {
+  const [tgtMeta, setTgtMeta] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    if (!snapshotId || obj.match_status !== "DIFF") return;
+    fetch(`/api/catalog/objects/${obj.object_name}/detail?snapshot_id=${snapshotId}&type=TABLE`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setTgtMeta(d.target ?? null))
+      .catch(() => {});
+  }, [obj.object_name, obj.match_status, snapshotId]);
+
   const meta = obj.metadata;
   const cols = (meta.columns as Record<string, unknown>[]) ?? [];
   const idxs = (meta.indexes as Record<string, unknown>[]) ?? [];
@@ -252,6 +313,12 @@ function TableDetail({ obj }: { obj: CatalogObject }) {
   return (
     <td colSpan={6} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
       {obj.match_status === "DIFF" && <DiffSummary diff={obj.diff} />}
+      {obj.match_status === "DIFF" && tgtMeta && (
+        <TargetCompare
+          srcCols={cols}
+          tgtCols={(tgtMeta.columns as Record<string, unknown>[]) ?? []}
+        />
+      )}
       {cols.length > 0 && (
         <div style={sectionStyle}>
           <div style={sectionHeader}>КОЛОНКИ ({cols.length})</div>
@@ -280,7 +347,7 @@ function TableDetail({ obj }: { obj: CatalogObject }) {
   );
 }
 
-export function TablesTab({ objects, selected, onToggle, onToggleAll, syncBusy, onCompare, onSync }: Props) {
+export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll, syncBusy, onCompare, onSync }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
@@ -390,7 +457,7 @@ export function TablesTab({ objects, selected, onToggle, onToggleAll, syncBusy, 
                 </tr>
                 {expanded && (
                   <tr style={{ background: "#07101e" }}>
-                    <TableDetail obj={obj} />
+                    <TableDetail obj={obj} snapshotId={snapshotId} />
                   </tr>
                 )}
               </React.Fragment>

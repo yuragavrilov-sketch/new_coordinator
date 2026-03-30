@@ -26,31 +26,16 @@ def _normalize_sql(text: str | None) -> str:
 def _normalize_code(text: str | None) -> str:
     """Normalize PL/SQL code for comparison.
 
-    - Strip trailing whitespace per line
-    - Strip leading/trailing blank lines
-    - Collapse runs of blank lines into one
-    - Lowercase (keywords and identifiers are case-insensitive in Oracle)
+    Same approach as _normalize_sql: collapse to single line, normalize
+    punctuation spacing, lowercase. This handles formatting-only differences
+    like indentation, line breaks, spaces around operators/commas.
     """
     if not text:
         return ""
-    lines = [line.rstrip() for line in text.splitlines()]
-    # Strip leading/trailing blank lines
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    # Collapse multiple blank lines into one
-    result: list[str] = []
-    prev_blank = False
-    for line in lines:
-        if not line:
-            if not prev_blank:
-                result.append("")
-            prev_blank = True
-        else:
-            result.append(line.lower())
-            prev_blank = False
-    return "\n".join(result)
+    # Collapse everything into one line, lowercase, normalize punctuation
+    s = " ".join(text.lower().split())
+    s = _SQL_PUNCT.sub(r' \1 ', s)
+    return " ".join(s.split())
 
 
 def _diff_table(src_meta: dict, tgt_meta: dict) -> dict:
