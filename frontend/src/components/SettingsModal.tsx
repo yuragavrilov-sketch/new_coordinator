@@ -9,6 +9,8 @@ interface OracleConfig {
   schema: string;
   user: string;
   password: string;
+  owner_user: string;
+  owner_password: string;
 }
 
 interface KafkaConfig {
@@ -28,6 +30,7 @@ interface AllConfigs {
 
 const ORACLE_DEFAULT: OracleConfig = {
   host: "", port: "1521", service_name: "", schema: "", user: "", password: "",
+  owner_user: "", owner_password: "",
 };
 const KAFKA_DEFAULT: KafkaConfig   = { bootstrap_servers: "" };
 const CONNECT_DEFAULT: ConnectConfig = { url: "" };
@@ -238,10 +241,29 @@ export function SettingsModal({ onClose }: Props) {
               <Field label="Schema" value={configs[activeTab].schema}
                 onChange={(v) => setOracle(activeTab, "schema", v)} placeholder="SCOTT" />
             </div>
+            <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 4, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              {activeTab === "oracle_source" ? "Debezium User (CDC)" : "User"}
+            </div>
             <Field label="User" value={configs[activeTab].user}
-              onChange={(v) => setOracle(activeTab, "user", v)} placeholder="scott" />
+              onChange={(v) => setOracle(activeTab, "user", v)} placeholder={activeTab === "oracle_source" ? "debezium" : "scott"} />
             <Field label="Password" type="password" value={configs[activeTab].password}
               onChange={(v) => setOracle(activeTab, "password", v)} />
+
+            {activeTab === "oracle_source" && (
+              <>
+                <div style={{
+                  fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 4, marginTop: 8,
+                  textTransform: "uppercase", letterSpacing: 0.4,
+                  borderTop: "1px solid #334155", paddingTop: 12,
+                }}>
+                  Schema Owner (DDL / Catalog)
+                </div>
+                <Field label="Owner User" value={configs.oracle_source.owner_user}
+                  onChange={(v) => setOracle("oracle_source", "owner_user", v)} placeholder="schema_owner" />
+                <Field label="Owner Password" type="password" value={configs.oracle_source.owner_password}
+                  onChange={(v) => setOracle("oracle_source", "owner_password", v)} />
+              </>
+            )}
           </div>
         )}
 

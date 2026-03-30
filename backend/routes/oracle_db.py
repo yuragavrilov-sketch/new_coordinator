@@ -17,7 +17,7 @@ def list_oracle_schemas(db: str):
     if db not in ("source", "target"):
         return jsonify({"error": "Invalid db"}), 400
     try:
-        conn = get_oracle_conn(db, _state["load_configs"]())
+        conn = get_oracle_conn(db, _state["load_configs"](), prefer_owner=True)
         try:
             return jsonify(list_schemas(conn))
         finally:
@@ -34,7 +34,7 @@ def list_oracle_tables(db: str):
     if not schema:
         return jsonify({"error": "schema required"}), 400
     try:
-        conn = get_oracle_conn(db, _state["load_configs"]())
+        conn = get_oracle_conn(db, _state["load_configs"](), prefer_owner=True)
         try:
             return jsonify(list_tables(conn, schema))
         finally:

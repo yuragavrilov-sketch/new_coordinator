@@ -73,7 +73,7 @@ def load_catalog():
 
     configs = _state["load_configs"]()
     try:
-        src_conn = get_oracle_conn("source", configs)
+        src_conn = get_oracle_conn("source", configs, prefer_owner=True)
         tgt_conn = get_oracle_conn("target", configs)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
@@ -304,7 +304,7 @@ def compare_objects():
 
     configs = _state["load_configs"]()
     try:
-        src_conn = get_oracle_conn("source", configs)
+        src_conn = get_oracle_conn("source", configs, prefer_owner=True)
         tgt_conn = get_oracle_conn("target", configs)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
@@ -370,7 +370,7 @@ def refresh_objects():
 
     configs = _state["load_configs"]()
     try:
-        src_conn = get_oracle_conn("source", configs)
+        src_conn = get_oracle_conn("source", configs, prefer_owner=True)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
 
@@ -419,7 +419,7 @@ def sync_object_to_target():
 
     configs = _state["load_configs"]()
     try:
-        src_conn = get_oracle_conn("source", configs)
+        src_conn = get_oracle_conn("source", configs, prefer_owner=True)
         tgt_conn = get_oracle_conn("target", configs)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503

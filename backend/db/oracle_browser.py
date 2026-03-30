@@ -16,14 +16,25 @@ _CATALOG_TYPES = frozenset([
 ])
 
 
-def get_oracle_conn(db: str, configs: dict):
-    """Open an Oracle connection. db = 'source' or 'target'."""
+def get_oracle_conn(db: str, configs: dict, *, prefer_owner: bool = False):
+    """Open an Oracle connection. db = 'source' or 'target'.
+
+    If prefer_owner=True and owner_user is configured, use schema owner
+    credentials instead of the default (Debezium) user. This gives full
+    visibility of DDL objects via all_objects / all_source.
+    """
     cfg = configs.get(f"oracle_{db}", {})
     host         = cfg.get("host", "").strip()
     port         = cfg.get("port", 1521)
     service_name = cfg.get("service_name", "").strip()
-    user         = cfg.get("user", "").strip()
-    password     = cfg.get("password", "")
+
+    # Use owner credentials when requested and available
+    if prefer_owner and cfg.get("owner_user", "").strip():
+        user     = cfg["owner_user"].strip()
+        password = cfg.get("owner_password", "")
+    else:
+        user     = cfg.get("user", "").strip()
+        password = cfg.get("password", "")
     if not host or not service_name or not user:
         raise ValueError(f"Oracle {db} не настроен — проверьте Настройки")
     try:
