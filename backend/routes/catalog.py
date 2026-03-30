@@ -71,7 +71,7 @@ def load_catalog():
     if not src_schema or not tgt_schema:
         return jsonify({"error": "src_schema and tgt_schema required"}), 400
 
-    configs = _state["load_configs"](True)
+    configs = _state["load_configs"]()
     try:
         src_conn = get_oracle_conn("source", configs)
         tgt_conn = get_oracle_conn("target", configs)
@@ -296,7 +296,7 @@ def compare_objects():
     if not snapshot_id or not src_schema or not tgt_schema or not objects:
         return jsonify({"error": "snapshot_id, src_schema, tgt_schema, objects required"}), 400
 
-    configs = _state["load_configs"](True)
+    configs = _state["load_configs"]()
     try:
         src_conn = get_oracle_conn("source", configs)
         tgt_conn = get_oracle_conn("target", configs)
@@ -362,7 +362,7 @@ def refresh_objects():
     if not snapshot_id or not src_schema or not objects:
         return jsonify({"error": "snapshot_id, src_schema, objects required"}), 400
 
-    configs = _state["load_configs"](True)
+    configs = _state["load_configs"]()
     try:
         src_conn = get_oracle_conn("source", configs)
     except Exception as exc:
@@ -411,7 +411,7 @@ def sync_object_to_target():
     if obj_type == "TABLE":
         return jsonify({"error": "Use /api/target-prep/* endpoints for table sync"}), 400
 
-    configs = _state["load_configs"](True)
+    configs = _state["load_configs"]()
     try:
         src_conn = get_oracle_conn("source", configs)
         tgt_conn = get_oracle_conn("target", configs)
