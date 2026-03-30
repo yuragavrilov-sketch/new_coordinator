@@ -1,0 +1,357 @@
+import React, { useState, useMemo } from "react";
+import { S } from "./styles";
+import { MatchBadge, MigrationBadge } from "./StatusBadges";
+import { ObjectActions } from "./ObjectActions";
+
+export interface CatalogObject {
+  object_name: string;
+  oracle_status: string;
+  last_ddl_time: string | null;
+  metadata: Record<string, unknown>;
+  match_status: string;
+  diff: Record<string, unknown>;
+  migration_status: string;
+}
+
+interface Props {
+  objects: CatalogObject[];
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+  onToggleAll: (names: string[]) => void;
+  syncBusy: Set<string>;
+  onCompare: (type: string, name: string) => void;
+  onSync: (type: string, name: string, action: string) => void;
+}
+
+type StatusFilter = "ALL" | "OK" | "DIFF" | "MISSING";
+
+function fmtType(c: Record<string, unknown>): string {
+  const dt = (c.data_type as string) ?? "";
+  const prec = c.data_precision as number | null;
+  const scale = c.data_scale as number | null;
+  const len = c.data_length as number | null;
+  if (["NUMBER"].includes(dt)) {
+    if (prec != null && scale != null) return `NUMBER(${prec},${scale})`;
+    if (prec != null) return `NUMBER(${prec})`;
+    return "NUMBER";
+  }
+  if (["VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR"].includes(dt)) {
+    return len != null ? `${dt}(${len})` : dt;
+  }
+  return dt;
+}
+
+function ColsTable({ cols }: { cols: Record<string, unknown>[] }) {
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          {["#", "Имя", "Тип", "Nullable", "Default"].map(h => (
+            <th key={h} style={S.th}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {cols.map((c, i) => (
+          <tr key={i} style={S.trBorder}>
+            <td style={{ ...S.td, color: "#475569" }}>{(c.column_id as number) ?? i + 1}</td>
+            <td style={{ ...S.td, color: "#e2e8f0" }}>{c.column_name as string}</td>
+            <td style={{ ...S.td, color: "#94a3b8" }}>{fmtType(c)}</td>
+            <td style={S.td}>
+              {c.nullable === "Y"
+                ? <span style={S.badge("#22c55e22", "#22c55e")}>YES</span>
+                : <span style={S.badge("#ef444422", "#ef4444")}>NO</span>}
+            </td>
+            <td style={{ ...S.td, color: "#64748b", fontFamily: "monospace" }}>
+              {(c.data_default as string) ?? "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function IdxTable({ idxs }: { idxs: Record<string, unknown>[] }) {
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          {["Имя", "Тип / Unique", "Колонки", "Статус"].map(h => (
+            <th key={h} style={S.th}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {idxs.map((idx, i) => {
+          const cols = (idx.columns as Record<string, unknown>[]) ?? [];
+          const colStr = cols.map((c: Record<string, unknown>) => c.column_name as string).join(", ");
+          return (
+            <tr key={i} style={S.trBorder}>
+              <td style={{ ...S.td, color: "#e2e8f0" }}>{idx.index_name as string}</td>
+              <td style={S.td}>
+                <span style={S.badge("#3b82f622", "#3b82f6")}>{idx.index_type as string}</span>
+                {idx.uniqueness === "UNIQUE" && (
+                  <span style={{ ...S.badge("#8b5cf622", "#8b5cf6"), marginLeft: 4 }}>UNIQUE</span>
+                )}
+              </td>
+              <td style={{ ...S.td, color: "#94a3b8" }}>{colStr}</td>
+              <td style={S.td}>
+                <span style={S.badge(
+                  idx.status === "VALID" ? "#22c55e22" : "#ef444422",
+                  idx.status === "VALID" ? "#22c55e" : "#ef4444"
+                )}>{idx.status as string}</span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function ConstrTable({ constrs }: { constrs: Record<string, unknown>[] }) {
+  const typeColor: Record<string, [string, string]> = {
+    P: ["#3b82f622", "#3b82f6"],
+    U: ["#8b5cf622", "#8b5cf6"],
+    R: ["#eab30822", "#eab308"],
+    C: ["#0ea5e922", "#0ea5e9"],
+  };
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          {["Имя", "Тип", "Колонки", "Статус"].map(h => (
+            <th key={h} style={S.th}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {constrs.map((c, i) => {
+          const cols = (c.columns as Record<string, unknown>[]) ?? [];
+          const colStr = cols.map((x: Record<string, unknown>) => x.column_name as string).join(", ");
+          const ct = (c.constraint_type as string) ?? "";
+          const [bg, fg] = typeColor[ct] ?? ["#33415522", "#475569"];
+          return (
+            <tr key={i} style={S.trBorder}>
+              <td style={{ ...S.td, color: "#e2e8f0" }}>{c.constraint_name as string}</td>
+              <td style={S.td}><span style={S.badge(bg, fg)}>{ct}</span></td>
+              <td style={{ ...S.td, color: "#94a3b8" }}>{colStr}</td>
+              <td style={S.td}>
+                <span style={S.badge(
+                  c.status === "ENABLED" ? "#22c55e22" : "#ef444422",
+                  c.status === "ENABLED" ? "#22c55e" : "#ef4444"
+                )}>{c.status as string}</span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function TrigTable({ trigs }: { trigs: Record<string, unknown>[] }) {
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          {["Имя", "Тип", "Событие", "Статус"].map(h => (
+            <th key={h} style={S.th}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {trigs.map((t, i) => (
+          <tr key={i} style={S.trBorder}>
+            <td style={{ ...S.td, color: "#e2e8f0" }}>{t.trigger_name as string}</td>
+            <td style={{ ...S.td, color: "#94a3b8" }}>{t.trigger_type as string}</td>
+            <td style={{ ...S.td, color: "#94a3b8" }}>{t.triggering_event as string}</td>
+            <td style={S.td}>
+              <span style={S.badge(
+                t.status === "ENABLED" ? "#22c55e22" : "#ef444422",
+                t.status === "ENABLED" ? "#22c55e" : "#ef4444"
+              )}>{t.status as string}</span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function TableDetail({ obj }: { obj: CatalogObject }) {
+  const meta = obj.metadata;
+  const cols = (meta.columns as Record<string, unknown>[]) ?? [];
+  const idxs = (meta.indexes as Record<string, unknown>[]) ?? [];
+  const constrs = (meta.constraints as Record<string, unknown>[]) ?? [];
+  const trigs = (meta.triggers as Record<string, unknown>[]) ?? [];
+
+  const sectionStyle: React.CSSProperties = {
+    background: "#07101e",
+    border: "1px solid #1e293b",
+    borderRadius: 6,
+    marginTop: 4,
+    overflow: "hidden",
+  };
+  const sectionHeader: React.CSSProperties = {
+    padding: "5px 12px",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#64748b",
+    letterSpacing: 0.5,
+    background: "#0a111f",
+    borderBottom: "1px solid #1e293b",
+  };
+
+  return (
+    <td colSpan={6} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
+      {cols.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>КОЛОНКИ</div>
+          <ColsTable cols={cols} />
+        </div>
+      )}
+      {idxs.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>ИНДЕКСЫ</div>
+          <IdxTable idxs={idxs} />
+        </div>
+      )}
+      {constrs.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>ОГРАНИЧЕНИЯ</div>
+          <ConstrTable constrs={constrs} />
+        </div>
+      )}
+      {trigs.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>ТРИГГЕРЫ</div>
+          <TrigTable trigs={trigs} />
+        </div>
+      )}
+    </td>
+  );
+}
+
+export function TablesTab({ objects, selected, onToggle, onToggleAll, syncBusy, onCompare, onSync }: Props) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [expandedObj, setExpandedObj] = useState<string | null>(null);
+
+  const filtered = useMemo(() => {
+    return objects.filter(o => {
+      const matchSearch = o.object_name.toLowerCase().includes(search.toLowerCase());
+      const matchStatus =
+        statusFilter === "ALL" ? true :
+        statusFilter === "OK" ? o.match_status === "MATCH" :
+        statusFilter === "DIFF" ? o.match_status === "DIFF" :
+        statusFilter === "MISSING" ? o.match_status === "MISSING" : true;
+      return matchSearch && matchStatus;
+    });
+  }, [objects, search, statusFilter]);
+
+  const filteredNames = filtered.map(o => o.object_name);
+  const allSelected = filteredNames.length > 0 && filteredNames.every(n => selected.has(n));
+
+  const filterBtns: StatusFilter[] = ["ALL", "OK", "DIFF", "MISSING"];
+  const filterLabels: Record<StatusFilter, string> = {
+    ALL: "Все", OK: "OK", DIFF: "Diff", MISSING: "Missing",
+  };
+
+  return (
+    <div style={S.card}>
+      <div style={S.cardHeader}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Поиск таблиц..."
+          style={{ ...S.input, width: 220 }}
+        />
+        <div style={{ display: "flex", gap: 4 }}>
+          {filterBtns.map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              style={statusFilter === f ? S.btnPrimary : S.btnSecondary}
+            >
+              {filterLabels[f]}
+            </button>
+          ))}
+        </div>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#475569" }}>
+          {filtered.length} / {objects.length}
+        </span>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "#0a111f" }}>
+            <th style={{ ...S.th, width: 32 }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() => onToggleAll(filteredNames)}
+              />
+            </th>
+            <th style={S.th}>Таблица</th>
+            <th style={S.th}>Совпадение</th>
+            <th style={S.th}>Миграция</th>
+            <th style={S.th}>Действия</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(obj => {
+            const expanded = expandedObj === obj.object_name;
+            return (
+              <React.Fragment key={obj.object_name}>
+                <tr style={S.trBorder}>
+                  <td style={{ ...S.td, width: 32 }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(obj.object_name)}
+                      onChange={() => onToggle(obj.object_name)}
+                    />
+                  </td>
+                  <td style={S.td}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        onClick={() => setExpandedObj(expanded ? null : obj.object_name)}
+                        style={{
+                          background: "none", border: "none", color: "#475569",
+                          cursor: "pointer", fontSize: 12, padding: "0 2px",
+                        }}
+                      >
+                        {expanded ? "▼" : "▶"}
+                      </button>
+                      <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                        {obj.object_name}
+                      </span>
+                    </div>
+                  </td>
+                  <td style={S.td}><MatchBadge status={obj.match_status} /></td>
+                  <td style={S.td}><MigrationBadge status={obj.migration_status} /></td>
+                  <td style={S.td}>
+                    <ObjectActions
+                      objectType="TABLE"
+                      objectName={obj.object_name}
+                      matchStatus={obj.match_status}
+                      syncBusy={syncBusy.has(obj.object_name)}
+                      onCompare={onCompare}
+                      onSync={onSync}
+                      onShowDetail={() => setExpandedObj(expanded ? null : obj.object_name)}
+                    />
+                  </td>
+                </tr>
+                {expanded && (
+                  <tr style={{ background: "#07101e" }}>
+                    <TableDetail obj={obj} />
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
