@@ -258,6 +258,7 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS stage_tablespace          VARCHAR(128) NOT NULL DEFAULT ''",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS queue_position            INTEGER",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_mode            VARCHAR(32) NOT NULL DEFAULT 'CDC'",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS data_compare_task_id      UUID",
             ]:
                 cur.execute(col_sql)
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]
@@ -613,6 +614,7 @@ def get_active_migrations(conn) -> list[dict]:
         "STAGE_VALIDATING", "STAGE_VALIDATED",
         "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
         "STAGE_DROPPING", "INDEXES_ENABLING",
+        "DATA_VERIFYING", "DATA_MISMATCH",
         "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",
         "CANCELLING",
