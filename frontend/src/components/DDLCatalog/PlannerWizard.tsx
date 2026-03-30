@@ -3,6 +3,23 @@ import { S } from "./styles";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface Column { name: string; type: string; nullable: boolean }
+interface UkConstraint { name: string; columns: string[] }
+interface TableInfo {
+  columns: Column[];
+  pk_columns: string[];
+  uk_constraints: UkConstraint[];
+}
+
+interface TableKeyEntry {
+  tableInfo: TableInfo | null;
+  loadingInfo: boolean;
+  infoError: string;
+  effective_key_type: string;
+  effective_key_columns: string[];
+  selected_uk_index: number;
+}
+
 interface BatchItem {
   table: string;
   mode: "CDC" | "BULK_ONLY";
@@ -171,6 +188,158 @@ function SearchSelect({
   );
 }
 
+// ── Key config components ────────────────────────────────────────────────────
+
+function Chip({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return (
+    <span style={{
+      background: bg, color, border: `1px solid ${color}44`,
+      borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "2px 8px",
+      display: "inline-block",
+    }}>{label}</span>
+  );
+}
+
+function KeyTypeBtn({ label, active, disabled, onClick }: {
+  label: string; active: boolean; disabled?: boolean; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{
+      padding: "4px 10px", fontSize: 10, fontWeight: 700, borderRadius: 5,
+      border: `1px solid ${active ? "#3b82f6" : "#334155"}`,
+      background: active ? "#1e3a5f" : "#1e293b",
+      color: disabled ? "#334155" : active ? "#93c5fd" : "#64748b",
+      cursor: disabled ? "not-allowed" : "pointer",
+    }}>{label}</button>
+  );
+}
+
+function TableKeyConfig({ entry, onChange }: {
+  entry: TableKeyEntry;
+  onChange: (upd: Partial<TableKeyEntry>) => void;
+}) {
+  const info = entry.tableInfo;
+
+  function setKeyType(kt: string) {
+    let cols: string[] = [];
+    if (kt === "PRIMARY_KEY") cols = info?.pk_columns ?? [];
+    if (kt === "UNIQUE_KEY") cols = info?.uk_constraints[entry.selected_uk_index]?.columns ?? [];
+    onChange({ effective_key_type: kt, effective_key_columns: cols });
+  }
+
+  function toggleKeyCol(col: string, checked: boolean) {
+    const cols = checked
+      ? [...entry.effective_key_columns, col]
+      : entry.effective_key_columns.filter(c => c !== col);
+    onChange({ effective_key_columns: cols });
+  }
+
+  if (entry.loadingInfo) {
+    return <div style={{ fontSize: 11, color: "#475569", padding: "4px 0" }}>Загрузка информации...</div>;
+  }
+  if (entry.infoError) {
+    return <div style={{ fontSize: 10, color: "#fca5a5" }}>{entry.infoError}</div>;
+  }
+  if (!info) return null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* chips */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Chip label={`${info.columns.length} кол.`} color="#94a3b8" bg="#1e293b" />
+        {info.pk_columns.length > 0
+          ? <Chip label={`PK: ${info.pk_columns.join(", ")}`} color="#86efac" bg="#052e16" />
+          : <Chip label="Нет PK" color="#fca5a5" bg="#450a0a" />}
+        {info.uk_constraints.length > 0 && (
+          <Chip label={`UK: ${info.uk_constraints.length}`} color="#c4b5fd" bg="#2e1065" />
+        )}
+      </div>
+
+      {/* key type selector */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <KeyTypeBtn label="PRIMARY KEY"
+          active={entry.effective_key_type === "PRIMARY_KEY"}
+          disabled={info.pk_columns.length === 0}
+          onClick={() => setKeyType("PRIMARY_KEY")} />
+        <KeyTypeBtn label="UNIQUE KEY"
+          active={entry.effective_key_type === "UNIQUE_KEY"}
+          disabled={info.uk_constraints.length === 0}
+          onClick={() => setKeyType("UNIQUE_KEY")} />
+        <KeyTypeBtn label="USER DEFINED"
+          active={entry.effective_key_type === "USER_DEFINED"}
+          onClick={() => setKeyType("USER_DEFINED")} />
+        <KeyTypeBtn label="NONE"
+          active={entry.effective_key_type === "NONE"}
+          onClick={() => setKeyType("NONE")} />
+      </div>
+
+      {/* PK display */}
+      {entry.effective_key_type === "PRIMARY_KEY" && (
+        <div style={{ fontSize: 11, color: "#86efac" }}>
+          Ключ: <strong>{info.pk_columns.join(", ")}</strong>
+        </div>
+      )}
+
+      {/* UK selector */}
+      {entry.effective_key_type === "UNIQUE_KEY" && (
+        <>
+          {info.uk_constraints.length > 1 && (
+            <select style={{ ...S.select, fontSize: 11 }} value={entry.selected_uk_index}
+              onChange={e => {
+                const idx = parseInt(e.target.value);
+                onChange({
+                  selected_uk_index: idx,
+                  effective_key_columns: info.uk_constraints[idx]?.columns ?? [],
+                });
+              }}>
+              {info.uk_constraints.map((uk, i) => (
+                <option key={uk.name} value={i}>{uk.name} ({uk.columns.join(", ")})</option>
+              ))}
+            </select>
+          )}
+          <div style={{ fontSize: 11, color: "#c4b5fd" }}>
+            Ключ: <strong>{info.uk_constraints[entry.selected_uk_index]?.columns.join(", ")}</strong>
+          </div>
+        </>
+      )}
+
+      {/* User-defined column picker */}
+      {entry.effective_key_type === "USER_DEFINED" && (
+        <div>
+          <div style={{
+            maxHeight: 140, overflowY: "auto",
+            border: "1px solid #334155", borderRadius: 5, background: "#1e293b",
+          }}>
+            {info.columns.map(col => (
+              <label key={col.name} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "4px 10px", cursor: "pointer",
+                borderBottom: "1px solid #0f172a",
+              }}>
+                <input type="checkbox"
+                  checked={entry.effective_key_columns.includes(col.name)}
+                  onChange={e => toggleKeyCol(col.name, e.target.checked)}
+                />
+                <span style={{ fontSize: 11, color: "#e2e8f0", fontFamily: "monospace" }}>{col.name}</span>
+                <span style={{ fontSize: 9, color: "#475569" }}>{col.type}</span>
+                {!col.nullable && (
+                  <span style={{ fontSize: 9, color: "#ef4444", marginLeft: "auto" }}>NOT NULL</span>
+                )}
+              </label>
+            ))}
+          </div>
+          {entry.effective_key_columns.length > 0 && (
+            <div style={{ fontSize: 10, color: "#475569" }}>Выбрано: {entry.effective_key_columns.join(", ")}</div>
+          )}
+          {entry.effective_key_columns.length === 0 && (
+            <div style={{ fontSize: 10, color: "#fca5a5" }}>Выберите хотя бы один столбец</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── StepIndicator ─────────────────────────────────────────────────────────────
 
 const STEP_LABELS = ["Настройки таблиц", "Порядок загрузки", "Обзор и запуск"];
@@ -218,6 +387,7 @@ function TableSelectionStep({
   selected, defaults, onDefaults,
   tableSettings, onTableSetting,
   groups, selectedGroup, onSelectGroup,
+  tableKeyEntries, onTableKeyEntry,
 }: {
   selected: string[];
   defaults: PlanDefaults;
@@ -227,8 +397,11 @@ function TableSelectionStep({
   groups: ConnectorGroup[];
   selectedGroup: string;
   onSelectGroup: (v: string) => void;
+  tableKeyEntries: Map<string, TableKeyEntry>;
+  onTableKeyEntry: (table: string, upd: Partial<TableKeyEntry>) => void;
 }) {
   const [customTables, setCustomTables] = useState<Set<string>>(new Set());
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const toggleCustom = (table: string) => {
     setCustomTables(prev => {
@@ -339,7 +512,7 @@ function TableSelectionStep({
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid #1e293b" }}>
-                {["Таблица", "Режим", "Стратегия", "Chunk", "Workers", "Индивидуально"].map(h => (
+                {["Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers", "Индивидуально"].map(h => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
               </tr>
@@ -348,70 +521,109 @@ function TableSelectionStep({
               {selected.map(table => {
                 const ts = tableSettings.get(table)!;
                 const isCustom = customTables.has(table);
+                const keyEntry = tableKeyEntries.get(table);
+                const isExpanded = expandedKey === table;
+                const keyLabel = keyEntry?.effective_key_type
+                  ? keyEntry.effective_key_type.replace("_", " ")
+                  : keyEntry?.loadingInfo ? "..." : "—";
+                const keyColor = keyEntry?.effective_key_type === "PRIMARY_KEY" ? "#86efac"
+                  : keyEntry?.effective_key_type === "UNIQUE_KEY" ? "#c4b5fd"
+                  : keyEntry?.effective_key_type === "USER_DEFINED" ? "#fbbf24"
+                  : keyEntry?.effective_key_type === "NONE" ? "#fca5a5"
+                  : "#475569";
                 return (
-                  <tr key={table} style={{ ...S.trBorder, background: isCustom ? "rgba(59,130,246,0.04)" : "transparent" }}>
-                    <td style={S.td}>
-                      <code style={{ color: "#e2e8f0", fontSize: 12 }}>{table}</code>
-                    </td>
-                    <td style={S.td}>
-                      {isCustom ? (
-                        <select
-                          value={ts.mode}
-                          onChange={e => onTableSetting(table, { mode: e.target.value as "CDC" | "BULK_ONLY" })}
-                          style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
+                  <React.Fragment key={table}>
+                    <tr style={{ ...S.trBorder, background: isCustom ? "rgba(59,130,246,0.04)" : "transparent" }}>
+                      <td style={S.td}>
+                        <code style={{ color: "#e2e8f0", fontSize: 12 }}>{table}</code>
+                      </td>
+                      <td style={S.td}>
+                        <button
+                          onClick={() => setExpandedKey(isExpanded ? null : table)}
+                          style={{
+                            background: "none", border: `1px solid ${keyColor}55`,
+                            borderRadius: 4, padding: "2px 8px", fontSize: 10,
+                            fontWeight: 700, color: keyColor, cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          }}
+                          title="Настроить ключ"
                         >
-                          <option value="CDC">CDC</option>
-                          <option value="BULK_ONLY">BULK_ONLY</option>
-                        </select>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.mode}</span>
-                      )}
-                    </td>
-                    <td style={S.td}>
-                      {isCustom ? (
-                        <select
-                          value={ts.strategy}
-                          onChange={e => onTableSetting(table, { strategy: e.target.value as "STAGE" | "DIRECT" })}
-                          style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
-                        >
-                          <option value="STAGE">STAGE</option>
-                          <option value="DIRECT">DIRECT</option>
-                        </select>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.strategy}</span>
-                      )}
-                    </td>
-                    <td style={S.td}>
-                      {isCustom ? (
+                          {keyLabel} {isExpanded ? "\u25B2" : "\u25BC"}
+                        </button>
+                      </td>
+                      <td style={S.td}>
+                        {isCustom ? (
+                          <select
+                            value={ts.mode}
+                            onChange={e => onTableSetting(table, { mode: e.target.value as "CDC" | "BULK_ONLY" })}
+                            style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
+                          >
+                            <option value="CDC">CDC</option>
+                            <option value="BULK_ONLY">BULK_ONLY</option>
+                          </select>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.mode}</span>
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        {isCustom ? (
+                          <select
+                            value={ts.strategy}
+                            onChange={e => onTableSetting(table, { strategy: e.target.value as "STAGE" | "DIRECT" })}
+                            style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
+                          >
+                            <option value="STAGE">STAGE</option>
+                            <option value="DIRECT">DIRECT</option>
+                          </select>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.strategy}</span>
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        {isCustom ? (
+                          <input
+                            type="number" value={ts.chunk_size}
+                            onChange={e => onTableSetting(table, { chunk_size: parseInt(e.target.value) || 50000 })}
+                            style={{ ...S.input, width: 80, padding: "3px 6px", fontSize: 11 }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.chunk_size.toLocaleString("ru-RU")}</span>
+                        )}
+                      </td>
+                      <td style={S.td}>
+                        {isCustom ? (
+                          <input
+                            type="number" value={ts.workers}
+                            onChange={e => onTableSetting(table, { workers: parseInt(e.target.value) || 4 })}
+                            style={{ ...S.input, width: 60, padding: "3px 6px", fontSize: 11 }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.workers}</span>
+                        )}
+                      </td>
+                      <td style={{ ...S.td, textAlign: "center" }}>
                         <input
-                          type="number" value={ts.chunk_size}
-                          onChange={e => onTableSetting(table, { chunk_size: parseInt(e.target.value) || 50000 })}
-                          style={{ ...S.input, width: 80, padding: "3px 6px", fontSize: 11 }}
+                          type="checkbox"
+                          checked={isCustom}
+                          onChange={() => toggleCustom(table)}
+                          style={{ accentColor: "#3b82f6" }}
                         />
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.chunk_size.toLocaleString("ru-RU")}</span>
-                      )}
-                    </td>
-                    <td style={S.td}>
-                      {isCustom ? (
-                        <input
-                          type="number" value={ts.workers}
-                          onChange={e => onTableSetting(table, { workers: parseInt(e.target.value) || 4 })}
-                          style={{ ...S.input, width: 60, padding: "3px 6px", fontSize: 11 }}
-                        />
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.workers}</span>
-                      )}
-                    </td>
-                    <td style={{ ...S.td, textAlign: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={isCustom}
-                        onChange={() => toggleCustom(table)}
-                        style={{ accentColor: "#3b82f6" }}
-                      />
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {isExpanded && keyEntry && (
+                      <tr>
+                        <td colSpan={7} style={{
+                          padding: "10px 16px", background: "#0a111f",
+                          borderBottom: "1px solid #1e293b",
+                        }}>
+                          <TableKeyConfig
+                            entry={keyEntry}
+                            onChange={upd => onTableKeyEntry(table, upd)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -614,6 +826,7 @@ function ReviewStep({
   srcSchema, tgtSchema, selectedGroup,
   defaults, batches, executing, onExecute,
   planId, starting, onStart,
+  tableKeyEntries,
 }: {
   srcSchema: string; tgtSchema: string; selectedGroup: string;
   defaults: PlanDefaults;
@@ -621,6 +834,7 @@ function ReviewStep({
   executing: boolean; onExecute: () => void;
   planId: string | null;
   starting: boolean; onStart: () => void;
+  tableKeyEntries: Map<string, TableKeyEntry>;
 }) {
   const totalTables = batches.reduce((acc, b) => acc + b.items.length, 0);
 
@@ -681,24 +895,41 @@ function ReviewStep({
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #1e293b" }}>
-                  {["#", "Таблица", "Режим", "Стратегия", "Chunk", "Workers"].map(h => (
+                  {["#", "Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers"].map(h => (
                     <th key={h} style={S.th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {batch.items.map((item, idx) => (
-                  <tr key={item.table} style={S.trBorder}>
-                    <td style={{ ...S.td, color: "#475569" }}>{idx + 1}</td>
-                    <td style={S.td}>
-                      <code style={{ color: "#e2e8f0", fontSize: 12 }}>{item.table}</code>
-                    </td>
-                    <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.mode}</span></td>
-                    <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.strategy}</span></td>
-                    <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.chunk_size.toLocaleString("ru-RU")}</span></td>
-                    <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.workers}</span></td>
-                  </tr>
-                ))}
+                {batch.items.map((item, idx) => {
+                  const ke = tableKeyEntries.get(item.table);
+                  const keyLabel = ke?.effective_key_type
+                    ? ke.effective_key_type.replace("_", " ")
+                    : "—";
+                  const keyCols = ke?.effective_key_columns?.length
+                    ? ke.effective_key_columns.join(", ")
+                    : "";
+                  return (
+                    <tr key={item.table} style={S.trBorder}>
+                      <td style={{ ...S.td, color: "#475569" }}>{idx + 1}</td>
+                      <td style={S.td}>
+                        <code style={{ color: "#e2e8f0", fontSize: 12 }}>{item.table}</code>
+                      </td>
+                      <td style={S.td}>
+                        <div style={{ fontSize: 10 }}>
+                          <span style={{ color: "#93c5fd", fontWeight: 600 }}>{keyLabel}</span>
+                          {keyCols && (
+                            <div style={{ color: "#475569", fontSize: 9, marginTop: 1 }}>{keyCols}</div>
+                          )}
+                        </div>
+                      </td>
+                      <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.mode}</span></td>
+                      <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.strategy}</span></td>
+                      <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.chunk_size.toLocaleString("ru-RU")}</span></td>
+                      <td style={S.td}><span style={{ fontSize: 11, color: "#94a3b8" }}>{item.workers}</span></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -779,6 +1010,22 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
   const [groups, setGroups] = useState<ConnectorGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
 
+  // Key config state
+  const [tableKeyEntries, setTableKeyEntries] = useState<Map<string, TableKeyEntry>>(() => {
+    const map = new Map<string, TableKeyEntry>();
+    for (const table of selectedTables) {
+      map.set(table, {
+        tableInfo: null,
+        loadingInfo: true,
+        infoError: "",
+        effective_key_type: "",
+        effective_key_columns: [],
+        selected_uk_index: 0,
+      });
+    }
+    return map;
+  });
+
   // Step 1 state
   const [batches, setBatches] = useState<Batch[]>([]);
   const [deps, setDeps] = useState<FKDep[]>([]);
@@ -798,6 +1045,58 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       .then((data: ConnectorGroup[]) => setGroups(data))
       .catch(() => {});
   }, []);
+
+  // Load table info (columns, PK, UK) for all selected tables on mount
+  useEffect(() => {
+    for (const table of selectedTables) {
+      const p = `schema=${encodeURIComponent(srcSchema)}&table=${encodeURIComponent(table)}`;
+      fetch(`/api/db/source/table-info?${p}`)
+        .then(r => r.json())
+        .then((d: TableInfo & { error?: string }) => {
+          setTableKeyEntries(prev => {
+            const next = new Map(prev);
+            const cur = next.get(table);
+            if (!cur) return next;
+            if (d.error) {
+              next.set(table, { ...cur, loadingInfo: false, infoError: d.error });
+            } else {
+              let keyType = "USER_DEFINED";
+              let keyCols: string[] = [];
+              if (d.pk_columns.length > 0) {
+                keyType = "PRIMARY_KEY"; keyCols = d.pk_columns;
+              } else if (d.uk_constraints.length > 0) {
+                keyType = "UNIQUE_KEY"; keyCols = d.uk_constraints[0].columns;
+              }
+              next.set(table, {
+                ...cur,
+                tableInfo: d,
+                loadingInfo: false,
+                effective_key_type: keyType,
+                effective_key_columns: keyCols,
+              });
+            }
+            return next;
+          });
+        })
+        .catch(e => {
+          setTableKeyEntries(prev => {
+            const next = new Map(prev);
+            const cur = next.get(table);
+            if (cur) next.set(table, { ...cur, loadingInfo: false, infoError: String(e) });
+            return next;
+          });
+        });
+    }
+  }, [selectedTables, srcSchema]);
+
+  const updateTableKeyEntry = (table: string, upd: Partial<TableKeyEntry>) => {
+    setTableKeyEntries(prev => {
+      const next = new Map(prev);
+      const cur = next.get(table);
+      if (cur) next.set(table, { ...cur, ...upd });
+      return next;
+    });
+  };
 
   const updateTableSetting = (table: string, upd: Partial<BatchItem>) => {
     setTableSettings(prev => {
@@ -852,14 +1151,19 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       },
       batches: batches.map(b => ({
         batch_order: b.id,
-        tables: b.items.map(it => ({
-          source_table: it.table,
-          target_table: it.table,
-          migration_mode: it.mode,
-          migration_strategy: it.strategy,
-          chunk_size: it.chunk_size,
-          max_parallel_workers: it.workers,
-        })),
+        tables: b.items.map(it => {
+          const keyEntry = tableKeyEntries.get(it.table);
+          return {
+            source_table: it.table,
+            target_table: it.table,
+            migration_mode: it.mode,
+            migration_strategy: it.strategy,
+            chunk_size: it.chunk_size,
+            max_parallel_workers: it.workers,
+            effective_key_type: keyEntry?.effective_key_type ?? "",
+            effective_key_columns: keyEntry?.effective_key_columns ?? [],
+          };
+        }),
       })),
     };
     fetch("/api/planner/execute", {
@@ -871,7 +1175,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       .then((data: { plan_id: string }) => setPlanId(data.plan_id))
       .catch(e => setExecuteError(typeof e === "string" ? e : String(e)))
       .finally(() => setExecuting(false));
-  }, [srcSchema, tgtSchema, selectedGroup, groups, defaults, batches]);
+  }, [srcSchema, tgtSchema, selectedGroup, groups, defaults, batches, tableKeyEntries]);
 
   // Start first batch
   const doStart = useCallback(() => {
@@ -964,6 +1268,8 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
             tableSettings={tableSettings} onTableSetting={updateTableSetting}
             groups={groups} selectedGroup={selectedGroup}
             onSelectGroup={setSelectedGroup}
+            tableKeyEntries={tableKeyEntries}
+            onTableKeyEntry={updateTableKeyEntry}
           />
         )}
 
@@ -981,6 +1287,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
             defaults={defaults} batches={batches}
             executing={executing} onExecute={doExecute}
             planId={planId} starting={starting} onStart={doStart}
+            tableKeyEntries={tableKeyEntries}
           />
         )}
 
