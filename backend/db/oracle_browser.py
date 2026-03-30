@@ -137,6 +137,52 @@ def get_mview_info(conn, schema: str, name: str) -> dict:
     }
 
 
+def get_source_code(conn, schema: str, name: str, obj_type: str) -> str | None:
+    """Get source code for FUNCTION, PROCEDURE, PACKAGE, PACKAGE BODY, TYPE, TYPE BODY."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT text
+            FROM   all_source
+            WHERE  owner = :s AND name = :n AND type = :t
+            ORDER  BY line
+        """, {"s": schema, "n": name, "t": obj_type})
+        lines = [r[0] for r in cur.fetchall()]
+    return "".join(lines) if lines else None
+
+
+def get_code_info(conn, schema: str, name: str, obj_type: str) -> dict:
+    """Get full info for a code object (function, procedure, package, type)."""
+    result: dict = {"status": "UNKNOWN"}
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM all_objects WHERE owner = :s AND object_name = :n AND object_type = :t",
+            {"s": schema, "n": name, "t": obj_type},
+        )
+        row = cur.fetchone()
+        if row:
+            result["status"] = row[0]
+
+    if obj_type == "PACKAGE":
+        result["spec_source"] = get_source_code(conn, schema, name, "PACKAGE")
+        result["body_source"] = get_source_code(conn, schema, name, "PACKAGE BODY")
+    elif obj_type == "TYPE":
+        result["source"] = get_source_code(conn, schema, name, "TYPE")
+        result["body_source"] = get_source_code(conn, schema, name, "TYPE BODY")
+    else:
+        result["source_code"] = get_source_code(conn, schema, name, obj_type)
+
+    if obj_type in ("FUNCTION", "PROCEDURE"):
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM all_arguments
+                WHERE owner = :s AND object_name = :n AND argument_name IS NOT NULL
+            """, {"s": schema, "n": name})
+            result["argument_count"] = cur.fetchone()[0]
+
+    return result
+
+
 def get_table_info(conn, schema: str, table: str) -> dict:
     with conn.cursor() as cur:
         # Columns
