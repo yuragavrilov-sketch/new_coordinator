@@ -285,10 +285,10 @@ export function DDLCatalog() {
                 />
               )}
               {activeTab === "views" && (
-                <ViewsTab objects={grouped.views} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />
+                <ViewsTab objects={grouped.views} snapshotId={snapshotId} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />
               )}
               {activeTab === "code" && (
-                <CodeTab objects={grouped.code} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />
+                <CodeTab objects={grouped.code} snapshotId={snapshotId} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />
               )}
               {activeTab === "other" && (
                 <OtherTab objects={grouped.other} syncBusy={syncBusy} onCompare={doCompare} onSync={doSync} />

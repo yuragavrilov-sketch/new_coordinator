@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
@@ -6,6 +6,7 @@ import { CatalogObject } from "./TablesTab";
 
 interface Props {
   objects: CatalogObject[];
+  snapshotId: number | null;
   syncBusy: Set<string>;
   onCompare: (type: string, name: string) => void;
   onSync: (type: string, name: string, action: string) => void;
@@ -15,13 +16,20 @@ function isMView(meta: Record<string, unknown>): boolean {
   return "refresh_type" in meta;
 }
 
-function ViewDiffSummary({ diff }: { diff: Record<string, unknown> }) {
+function ViewDiffSummary({ diff, srcSql, tgtSql }: { diff: Record<string, unknown>; srcSql?: string; tgtSql?: string }) {
   if (!diff || diff.ok === true) return null;
   const items: string[] = [];
   if (diff.sql_match === false) items.push("SQL-текст отличается");
   if (diff.status_match === false) items.push("Статус отличается (VALID/INVALID)");
   if (diff.refresh_match === false) items.push("Тип refresh отличается");
   if (items.length === 0) return null;
+
+  const diffStyle: React.CSSProperties = {
+    margin: 0, padding: "8px 10px", fontSize: 10, color: "#94a3b8",
+    fontFamily: "monospace", whiteSpace: "pre-wrap", overflowX: "auto",
+    maxHeight: 250, background: "#0a0f1a", borderTop: "1px solid #1e293b",
+  };
+
   return (
     <div style={{
       background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
@@ -31,15 +39,39 @@ function ViewDiffSummary({ diff }: { diff: Record<string, unknown> }) {
       {items.map((item, i) => (
         <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
       ))}
+      {diff.sql_match === false && srcSql && tgtSql && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#3b82f6", background: "#0a111f" }}>SOURCE</div>
+            <pre style={diffStyle}>{srcSql}</pre>
+          </div>
+          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#0a111f" }}>TARGET</div>
+            <pre style={diffStyle}>{tgtSql}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ViewDetail({ obj }: { obj: CatalogObject }) {
+function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: number | null }) {
+  const [tgtMeta, setTgtMeta] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    if (!snapshotId || obj.match_status !== "DIFF") return;
+    const objType = isMView(obj.metadata) ? "MVIEW" : "VIEW";
+    fetch(`/api/catalog/objects/${obj.object_name}/detail?snapshot_id=${snapshotId}&type=${objType}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setTgtMeta(d.target ?? null))
+      .catch(() => {});
+  }, [obj.object_name, obj.match_status, snapshotId]);
+
   const meta = obj.metadata;
   const cols = (meta.columns as Record<string, unknown>[]) ?? [];
   const sql = (meta.sql_text as string) ?? "";
   const mview = isMView(meta);
+  const tgtSql = tgtMeta ? (tgtMeta.sql_text as string) ?? "" : "";
 
   const sectionStyle: React.CSSProperties = {
     background: "#07101e",
@@ -60,7 +92,7 @@ function ViewDetail({ obj }: { obj: CatalogObject }) {
 
   return (
     <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
-      {obj.match_status === "DIFF" && <ViewDiffSummary diff={obj.diff} />}
+      {obj.match_status === "DIFF" && <ViewDiffSummary diff={obj.diff} srcSql={sql} tgtSql={tgtSql} />}
       {mview && (
         <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
           Refresh: <span style={{ color: "#94a3b8" }}>{(meta.refresh_type as string) ?? "—"}</span>
@@ -114,7 +146,7 @@ function ViewDetail({ obj }: { obj: CatalogObject }) {
   );
 }
 
-export function ViewsTab({ objects, syncBusy, onCompare, onSync }: Props) {
+export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Props) {
   const [search, setSearch] = useState("");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
 
@@ -193,7 +225,7 @@ export function ViewsTab({ objects, syncBusy, onCompare, onSync }: Props) {
                 </tr>
                 {expanded && (
                   <tr style={{ background: "#07101e" }}>
-                    <ViewDetail obj={obj} />
+                    <ViewDetail obj={obj} snapshotId={snapshotId} />
                   </tr>
                 )}
               </React.Fragment>

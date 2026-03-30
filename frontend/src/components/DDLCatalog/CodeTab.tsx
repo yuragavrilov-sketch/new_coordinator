@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { S } from "./styles";
 import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
@@ -6,6 +6,7 @@ import { CatalogObject } from "./TablesTab";
 
 interface Props {
   objects: CatalogObject[];
+  snapshotId: number | null;
   syncBusy: Set<string>;
   onCompare: (type: string, name: string) => void;
   onSync: (type: string, name: string, action: string) => void;
@@ -19,7 +20,10 @@ function detectCodeType(meta: Record<string, unknown>): string {
   return (meta.object_type as string) ?? "FUNCTION";
 }
 
-function CodeDiffSummary({ diff, codeType }: { diff: Record<string, unknown>; codeType: string }) {
+function CodeDiffSummary({ diff, codeType, srcMeta, tgtMeta }: {
+  diff: Record<string, unknown>; codeType: string;
+  srcMeta: Record<string, unknown>; tgtMeta: Record<string, unknown> | null;
+}) {
   if (!diff || diff.ok === true) return null;
   const items: string[] = [];
   if (codeType === "PACKAGE") {
@@ -32,6 +36,19 @@ function CodeDiffSummary({ diff, codeType }: { diff: Record<string, unknown>; co
     if (diff.code_match === false) items.push("Исходный код отличается");
   }
   if (items.length === 0) return null;
+
+  // Get source and target code for side-by-side
+  const srcCode = (srcMeta.source_code ?? srcMeta.spec_source ?? srcMeta.source ?? "") as string;
+  const tgtCode = tgtMeta
+    ? (tgtMeta.source_code ?? tgtMeta.spec_source ?? tgtMeta.source ?? "") as string
+    : "";
+
+  const preStyle: React.CSSProperties = {
+    margin: 0, padding: "8px 10px", fontSize: 10, color: "#94a3b8",
+    fontFamily: "monospace", whiteSpace: "pre-wrap", overflowX: "auto",
+    maxHeight: 250, background: "#0a0f1a", borderTop: "1px solid #1e293b",
+  };
+
   return (
     <div style={{
       background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
@@ -41,14 +58,35 @@ function CodeDiffSummary({ diff, codeType }: { diff: Record<string, unknown>; co
       {items.map((item, i) => (
         <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
       ))}
+      {tgtMeta && srcCode && tgtCode && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#3b82f6", background: "#0a111f" }}>SOURCE</div>
+            <pre style={preStyle}>{srcCode}</pre>
+          </div>
+          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#0a111f" }}>TARGET</div>
+            <pre style={preStyle}>{tgtCode}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function CodeDetail({ obj }: { obj: CatalogObject }) {
+function CodeDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: number | null }) {
   const [bodyOpen, setBodyOpen] = useState(false);
+  const [tgtMeta, setTgtMeta] = useState<Record<string, unknown> | null>(null);
   const meta = obj.metadata;
   const codeType = detectCodeType(meta);
+
+  useEffect(() => {
+    if (!snapshotId || obj.match_status !== "DIFF") return;
+    fetch(`/api/catalog/objects/${obj.object_name}/detail?snapshot_id=${snapshotId}&type=${codeType}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setTgtMeta(d.target ?? null))
+      .catch(() => {});
+  }, [obj.object_name, obj.match_status, snapshotId, codeType]);
 
   const sectionStyle: React.CSSProperties = {
     background: "#07101e",
@@ -77,7 +115,7 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
 
   return (
     <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
-      {obj.match_status === "DIFF" && <CodeDiffSummary diff={obj.diff} codeType={codeType} />}
+      {obj.match_status === "DIFF" && <CodeDiffSummary diff={obj.diff} codeType={codeType} srcMeta={meta} tgtMeta={tgtMeta} />}
       {(codeType === "FUNCTION" || codeType === "PROCEDURE") && argCount != null && (
         <div style={{ marginBottom: 6, fontSize: 12, color: "#64748b" }}>
           Аргументов: <span style={{ color: "#94a3b8", fontWeight: 600 }}>{argCount}</span>
@@ -136,7 +174,7 @@ function CodeDetail({ obj }: { obj: CatalogObject }) {
   );
 }
 
-export function CodeTab({ objects, syncBusy, onCompare, onSync }: Props) {
+export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Props) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<CodeTypeFilter>("ALL");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
@@ -232,7 +270,7 @@ export function CodeTab({ objects, syncBusy, onCompare, onSync }: Props) {
                 </tr>
                 {expanded && (
                   <tr style={{ background: "#07101e" }}>
-                    <CodeDetail obj={obj} />
+                    <CodeDetail obj={obj} snapshotId={snapshotId} />
                   </tr>
                 )}
               </React.Fragment>
