@@ -9,6 +9,12 @@ _SYSTEM_SCHEMAS = frozenset([
     "REMOTE_SCHEDULER_AGENT", "SYS$UMF", "SYSBACKUP", "SYSDG", "SYSKM", "SYSRAC",
 ])
 
+_CATALOG_TYPES = frozenset([
+    "TABLE", "VIEW", "MATERIALIZED VIEW",
+    "FUNCTION", "PROCEDURE", "PACKAGE",
+    "SEQUENCE", "SYNONYM", "TYPE",
+])
+
 
 def get_oracle_conn(db: str, configs: dict):
     """Open an Oracle connection. db = 'source' or 'target'."""
@@ -40,6 +46,30 @@ def list_tables(conn, schema: str) -> list[str]:
             {"s": schema},
         )
         return [r[0] for r in cur.fetchall()]
+
+
+def list_all_objects(conn, schema: str) -> list[dict]:
+    """List all DDL objects in schema (excluding PACKAGE BODY / TYPE BODY)."""
+    placeholders = ",".join(f":t{i}" for i in range(len(_CATALOG_TYPES)))
+    binds = {"s": schema}
+    binds.update({f"t{i}": t for i, t in enumerate(sorted(_CATALOG_TYPES))})
+    with conn.cursor() as cur:
+        cur.execute(f"""
+            SELECT object_name, object_type, status, last_ddl_time
+            FROM   all_objects
+            WHERE  owner = :s
+              AND  object_type IN ({placeholders})
+            ORDER  BY object_type, object_name
+        """, binds)
+        return [
+            {
+                "object_name": r[0],
+                "object_type": r[1],
+                "status": r[2],
+                "last_ddl_time": r[3].isoformat() if r[3] else None,
+            }
+            for r in cur.fetchall()
+        ]
 
 
 def get_table_info(conn, schema: str, table: str) -> dict:
