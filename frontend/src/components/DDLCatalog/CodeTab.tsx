@@ -14,10 +14,12 @@ interface Props {
 
 type CodeTypeFilter = "ALL" | "FUNCTION" | "PROCEDURE" | "PACKAGE";
 
-function detectCodeType(meta: Record<string, unknown>): string {
+function detectCodeType(obj: { _type?: string; metadata: Record<string, unknown> }): string {
+  if (obj._type) return obj._type;
+  const meta = obj.metadata;
   if ("spec_source" in meta) return "PACKAGE";
   if ("source" in meta && "body_source" in meta) return "TYPE";
-  return (meta.object_type as string) ?? "FUNCTION";
+  return "FUNCTION";
 }
 
 function CodeDiffSummary({ diff, codeType, srcMeta, tgtMeta }: {
@@ -78,7 +80,7 @@ function CodeDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
   const [bodyOpen, setBodyOpen] = useState(false);
   const [tgtMeta, setTgtMeta] = useState<Record<string, unknown> | null>(null);
   const meta = obj.metadata;
-  const codeType = detectCodeType(meta);
+  const codeType = detectCodeType(obj);
 
   useEffect(() => {
     if (!snapshotId || obj.match_status !== "DIFF") return;
@@ -184,7 +186,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
       const matchSearch = o.object_name.toLowerCase().includes(search.toLowerCase());
       if (!matchSearch) return false;
       if (typeFilter === "ALL") return true;
-      const ct = detectCodeType(o.metadata);
+      const ct = detectCodeType(o);
       return ct === typeFilter;
     });
   }, [objects, search, typeFilter]);
@@ -231,7 +233,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
         <tbody>
           {filtered.map(obj => {
             const expanded = expandedObj === obj.object_name;
-            const codeType = detectCodeType(obj.metadata);
+            const codeType = detectCodeType(obj);
             return (
               <React.Fragment key={obj.object_name}>
                 <tr style={S.trBorder}>

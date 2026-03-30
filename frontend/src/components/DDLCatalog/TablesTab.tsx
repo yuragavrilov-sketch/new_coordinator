@@ -11,6 +11,7 @@ export interface CatalogObject {
   match_status: string;
   diff: Record<string, unknown>;
   migration_status: string;
+  _type?: string;  // real Oracle object_type, set during load
 }
 
 interface Props {
