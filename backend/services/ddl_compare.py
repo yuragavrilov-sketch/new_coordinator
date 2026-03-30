@@ -1,14 +1,26 @@
 """
 Compare DDL objects between source and target snapshots.
 """
-import json
+import re
+
+_SQL_PUNCT = re.compile(r'\s*([,<>=!()]+)\s*')
 
 
 def _normalize_sql(text: str | None) -> str:
-    """Normalize SQL for comparison: collapse whitespace, lowercase."""
+    """Normalize SQL for comparison.
+
+    - Lowercase
+    - Collapse all whitespace to single space
+    - Normalize spacing around commas, operators, parens:
+      'a","b"' → 'a", "b"'   and   'x<y' → 'x < y'
+    """
     if not text:
         return ""
-    return " ".join(text.lower().split())
+    s = " ".join(text.lower().split())
+    # Ensure single space around punctuation: commas, <>=!(), etc.
+    s = _SQL_PUNCT.sub(r' \1 ', s)
+    # Re-collapse any double spaces introduced
+    return " ".join(s.split())
 
 
 def _normalize_code(text: str | None) -> str:
