@@ -181,6 +181,18 @@ planner_mod.init(
 )
 app.register_blueprint(planner_bp)
 
+# ── Catalog blueprint ────────────────────────────────────────────────────────
+import routes.catalog as catalog_mod
+from routes.catalog import bp as catalog_bp
+
+catalog_mod.init(
+    get_conn_fn=get_conn,
+    row_to_dict_fn=row_to_dict,
+    load_configs_fn=_load_cfg,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(catalog_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp
