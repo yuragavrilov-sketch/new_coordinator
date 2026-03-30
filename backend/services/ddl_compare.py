@@ -5,17 +5,40 @@ import json
 
 
 def _normalize_sql(text: str | None) -> str:
-    """Normalize SQL for comparison: strip whitespace, lowercase."""
+    """Normalize SQL for comparison: collapse whitespace, lowercase."""
     if not text:
         return ""
     return " ".join(text.lower().split())
 
 
 def _normalize_code(text: str | None) -> str:
-    """Normalize PL/SQL code: strip trailing whitespace per line."""
+    """Normalize PL/SQL code for comparison.
+
+    - Strip trailing whitespace per line
+    - Strip leading/trailing blank lines
+    - Collapse runs of blank lines into one
+    - Lowercase (keywords and identifiers are case-insensitive in Oracle)
+    """
     if not text:
         return ""
-    return "\n".join(line.rstrip() for line in text.splitlines())
+    lines = [line.rstrip() for line in text.splitlines()]
+    # Strip leading/trailing blank lines
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    # Collapse multiple blank lines into one
+    result: list[str] = []
+    prev_blank = False
+    for line in lines:
+        if not line:
+            if not prev_blank:
+                result.append("")
+            prev_blank = True
+        else:
+            result.append(line.lower())
+            prev_blank = False
+    return "\n".join(result)
 
 
 def _diff_table(src_meta: dict, tgt_meta: dict) -> dict:
