@@ -7,13 +7,13 @@ import { TargetPrep } from "./components/TargetPrep";
 import { Checklist } from "./components/Checklist";
 import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
 import { DataCompare } from "./components/DataCompare";
-import { MigrationPlanner } from "./components/MigrationPlanner";
+import { DDLCatalog } from "./components/DDLCatalog/DDLCatalog";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "planner" | "migrations" | "connector-groups" | "target-prep" | "data-compare" | "checklist";
+type Tab = "catalog" | "migrations" | "connector-groups" | "target-prep" | "data-compare" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -91,7 +91,7 @@ function SystemStats() {
 export default function App() {
   const { events, status, serviceStatuses, reconnect } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth();
-  const [activeTab, setActiveTab] = useState<Tab>("planner");
+  const [activeTab, setActiveTab] = useState<Tab>("catalog");
   const [showSettings, setShowSettings] = useState(false);
 
   return (
@@ -150,9 +150,9 @@ export default function App() {
         borderBottom: "1px solid #1e293b",
       }}>
         <TabButton
-          label="Планирование"
-          active={activeTab === "planner"}
-          onClick={() => setActiveTab("planner")}
+          label="DDL Каталог"
+          active={activeTab === "catalog"}
+          onClick={() => setActiveTab("catalog")}
         />
         <TabButton
           label="Миграции"
@@ -183,7 +183,7 @@ export default function App() {
 
       {/* Tab content */}
       <div style={{ marginTop: 16 }}>
-        {activeTab === "planner"           && <MigrationPlanner />}
+        {activeTab === "catalog"           && <DDLCatalog />}
         {activeTab === "migrations"       && <MigrationList sseEvents={events} />}
         {activeTab === "connector-groups" && <ConnectorGroupsPanel />}
         {activeTab === "target-prep"      && <TargetPrep />}
