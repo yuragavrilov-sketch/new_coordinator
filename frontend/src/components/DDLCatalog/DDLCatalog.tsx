@@ -304,11 +304,24 @@ export function DDLCatalog() {
           )}
 
           {showWizard && selectedTables.length > 0 && (
-            <PlannerWizard
-              selectedTables={selectedTables}
-              srcSchema={srcSchema} tgtSchema={tgtSchema}
-              onClose={() => setShowWizard(false)}
-            />
+            <>
+              <div
+                onClick={() => setShowWizard(false)}
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 300 }}
+              />
+              <div style={{
+                position: "fixed", top: "50%", left: "50%",
+                transform: "translate(-50%, -50%)",
+                width: "90vw", maxWidth: 900, maxHeight: "85vh",
+                overflowY: "auto", zIndex: 301,
+              }}>
+                <PlannerWizard
+                  selectedTables={selectedTables}
+                  srcSchema={srcSchema} tgtSchema={tgtSchema}
+                  onClose={() => setShowWizard(false)}
+                />
+              </div>
+            </>
           )}
         </>
       )}
