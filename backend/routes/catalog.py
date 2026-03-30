@@ -88,6 +88,12 @@ def load_catalog():
             snapshot_id = cur.fetchone()[0]
 
         src_objects = list_all_objects(src_conn, src_schema)
+        # Debug: log types found
+        src_types = {}
+        for o in src_objects:
+            src_types[o["object_type"]] = src_types.get(o["object_type"], 0) + 1
+        print(f"[catalog] source {src_schema}: {src_types}")
+
         tgt_objects = list_all_objects(tgt_conn, tgt_schema)
         tgt_index = {(o["object_type"], o["object_name"]): o for o in tgt_objects}
 
