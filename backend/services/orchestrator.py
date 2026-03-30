@@ -327,11 +327,12 @@ def _handle_new(mid: str, m: dict) -> None:
     loading slot is free.  The gate is here (before SCN fixation) so that
     queued migrations don't accumulate a growing Kafka CDC backlog.
     """
+    mode = (m.get("migration_mode") or "CDC").upper()
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
     key_cols = json.loads(m.get("effective_key_columns_json") or "[]")
 
-    if not pk and not uk and not key_cols:
+    if mode != "BULK_ONLY" and not pk and not uk and not key_cols:
         _fail(mid,
               "Таблица не имеет PK/UK и ключевые колонки не заданы. "
               "Укажите ключевые колонки при создании миграции.",
@@ -1218,11 +1219,12 @@ def _handle_new_group(mid: str, m: dict) -> None:
     - No SCN fixation
     - Connector already managed at group level
     """
+    mode = (m.get("migration_mode") or "CDC").upper()
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
     key_cols = json.loads(m.get("effective_key_columns_json") or "[]")
 
-    if not pk and not uk and not key_cols:
+    if mode != "BULK_ONLY" and not pk and not uk and not key_cols:
         _fail(mid,
               "Таблица не имеет PK/UK и ключевые колонки не заданы.",
               "NO_KEY_COLUMNS")
