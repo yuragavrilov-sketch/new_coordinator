@@ -153,6 +153,8 @@ _LEGACY_HANDLERS = {
     "BASELINE_PUBLISHED":   lambda mid, m: _handle_baseline_published(mid, m),
     "STAGE_DROPPING":       lambda mid, m: _handle_stage_dropping(mid, m),
     "INDEXES_ENABLING":     lambda mid, m: _handle_indexes_enabling(mid, m),
+    "DATA_VERIFYING":       lambda mid, m: _handle_data_verifying(mid, m),
+    "DATA_MISMATCH":        lambda mid, m: _handle_data_mismatch(mid, m),
     "CDC_APPLY_STARTING":   lambda mid, m: _handle_cdc_apply_starting(mid, m),
     "CDC_CATCHING_UP":      lambda mid, m: _handle_cdc_catching_up(mid, m),
     "CDC_CAUGHT_UP":        lambda mid, m: _handle_cdc_caught_up(mid, m),
@@ -174,6 +176,8 @@ _GROUP_HANDLERS = {
     "BASELINE_PUBLISHED":   lambda mid, m: _handle_baseline_published(mid, m),
     "STAGE_DROPPING":       lambda mid, m: _handle_stage_dropping(mid, m),
     "INDEXES_ENABLING":     lambda mid, m: _handle_indexes_enabling_group(mid, m),
+    "DATA_VERIFYING":       lambda mid, m: _handle_data_verifying(mid, m),
+    "DATA_MISMATCH":        lambda mid, m: _handle_data_mismatch(mid, m),
     "CDC_APPLYING":         lambda mid, m: _handle_cdc_applying(mid, m),
     "CDC_CATCHING_UP":      lambda mid, m: _handle_cdc_catching_up(mid, m),
     "CDC_CAUGHT_UP":        lambda mid, m: _handle_cdc_caught_up(mid, m),
@@ -926,10 +930,10 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
                 msg = (
                     f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
-                    "Режим BULK_ONLY — миграция завершена"
+                    "Режим BULK_ONLY — запуск сверки данных"
                 )
                 _safe_transition(
-                    mid, "INDEXES_ENABLING", "COMPLETED",
+                    mid, "INDEXES_ENABLING", "DATA_VERIFYING",
                     message=msg,
                     extra_fields={"error_code": None, "error_text": None},
                 )
@@ -1441,10 +1445,10 @@ def _handle_indexes_enabling_group(mid: str, m: dict) -> None:
                     print(f"[orchestrator] {mid}: enable triggers warning: {exc}")
 
                 _safe_transition(
-                    mid, "INDEXES_ENABLING", "COMPLETED",
+                    mid, "INDEXES_ENABLING", "DATA_VERIFYING",
                     message=(
                         f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
-                        "Режим BULK_ONLY — миграция завершена"
+                        "Режим BULK_ONLY — запуск сверки данных"
                     ),
                     extra_fields={"error_code": None, "error_text": None},
                 )
@@ -1465,6 +1469,122 @@ def _handle_indexes_enabling_group(mid: str, m: dict) -> None:
             _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _handle_data_verifying(mid: str, m: dict) -> None:
+    """Create data_compare task on first tick, then monitor its completion."""
+    task_id = m.get("data_compare_task_id")
+
+    if not task_id:
+        # First tick — create the data_compare task in a daemon thread
+        if _in_prog(mid):
+            return
+        _mark_in_prog(mid)
+
+        def _run():
+            try:
+                conn = _state["get_conn"]()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            INSERT INTO data_compare_tasks
+                                (source_schema, source_table, target_schema, target_table,
+                                 compare_mode, chunk_size, status)
+                            VALUES (%s, %s, %s, %s, 'full', %s, 'PENDING')
+                            RETURNING task_id
+                        """, (m["source_schema"], m["source_table"],
+                              m["target_schema"], m["target_table"],
+                              m.get("chunk_size") or 100_000))
+                        new_task_id = str(cur.fetchone()[0])
+
+                        cur.execute(
+                            "UPDATE migrations SET data_compare_task_id = %s, updated_at = NOW() "
+                            "WHERE migration_id = %s",
+                            (new_task_id, mid))
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                # Launch chunking in background (reuse data_compare logic)
+                from routes.data_compare import _create_chunks_and_start
+                configs = _state["load_configs"]()
+                threading.Thread(
+                    target=_create_chunks_and_start,
+                    args=(new_task_id, configs,
+                          m["source_schema"], m["source_table"],
+                          m["target_schema"], m["target_table"],
+                          m.get("chunk_size") or 100_000),
+                    daemon=True,
+                    name=f"dv-chunk-{mid[:8]}",
+                ).start()
+
+                print(f"[orchestrator] {mid}: data_compare task created: {new_task_id}")
+
+            except Exception as exc:
+                if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                    _fail(mid, f"Ошибка создания сверки: {exc}", "DATA_VERIFY_ERROR")
+            finally:
+                _unmark_in_prog(mid)
+
+        threading.Thread(target=_run, daemon=True, name=f"dv-init-{mid[:8]}").start()
+        return
+
+    # Subsequent ticks — check data_compare task status
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, counts_match, hash_match, "
+                "       source_count, target_count, chunks_done, chunks_total, error_text "
+                "FROM data_compare_tasks WHERE task_id = %s",
+                (task_id,))
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        _fail(mid, f"data_compare task {task_id} not found", "DATA_VERIFY_ERROR")
+        return
+
+    status, counts_match, hash_match, src_count, tgt_count, done, total, err_text = row
+
+    if status == "FAILED":
+        _fail(mid, f"Сверка данных завершилась ошибкой: {err_text or 'unknown'}", "DATA_VERIFY_ERROR")
+        return
+
+    if status not in ("DONE", "COMPLETED"):
+        return  # Still running
+
+    # Verification complete — check results
+    if counts_match and hash_match:
+        _safe_transition(
+            mid, "DATA_VERIFYING", "COMPLETED",
+            message=(
+                f"Сверка данных пройдена. Source: {src_count}, Target: {tgt_count}. "
+                "COUNT и HASH совпадают."
+            ),
+            extra_fields={"error_code": None, "error_text": None},
+        )
+    else:
+        details = []
+        if not counts_match:
+            details.append(f"COUNT mismatch: source={src_count}, target={tgt_count}")
+        if not hash_match:
+            details.append("HASH mismatch")
+        _safe_transition(
+            mid, "DATA_VERIFYING", "DATA_MISMATCH",
+            message=f"Сверка выявила расхождения: {'; '.join(details)}",
+            extra_fields={
+                "error_code": "DATA_MISMATCH",
+                "error_text": f"source_count={src_count}, target_count={tgt_count}, "
+                              f"counts_match={counts_match}, hash_match={hash_match}",
+            },
+        )
+
+
+def _handle_data_mismatch(mid: str, m: dict) -> None:
+    """Idle phase — wait for user action (retry_verify, force_complete, cancel)."""
+    pass
 
 
 def _handle_cdc_applying(mid: str, m: dict) -> None:
