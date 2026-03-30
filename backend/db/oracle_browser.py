@@ -183,6 +183,44 @@ def get_code_info(conn, schema: str, name: str, obj_type: str) -> dict:
     return result
 
 
+def get_sequence_info(conn, schema: str, name: str) -> dict:
+    """Get sequence parameters."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT min_value, max_value, increment_by, cache_size, last_number
+            FROM   all_sequences
+            WHERE  sequence_owner = :s AND sequence_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+    if not row:
+        return {}
+    return {
+        "min_value": str(row[0]) if row[0] is not None else None,
+        "max_value": str(row[1]) if row[1] is not None else None,
+        "increment_by": str(row[2]) if row[2] is not None else None,
+        "cache_size": row[3],
+        "last_number": str(row[4]) if row[4] is not None else None,
+    }
+
+
+def get_synonym_info(conn, schema: str, name: str) -> dict:
+    """Get synonym target info."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT table_owner, table_name, db_link
+            FROM   all_synonyms
+            WHERE  owner = :s AND synonym_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+    if not row:
+        return {}
+    return {
+        "table_owner": row[0],
+        "table_name": row[1],
+        "db_link": row[2],
+    }
+
+
 def get_table_info(conn, schema: str, table: str) -> dict:
     with conn.cursor() as cur:
         # Columns
