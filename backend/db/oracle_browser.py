@@ -72,6 +72,71 @@ def list_all_objects(conn, schema: str) -> list[dict]:
         ]
 
 
+def get_view_info(conn, schema: str, name: str) -> dict:
+    """Get view definition and columns."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT text FROM all_views WHERE owner = :s AND view_name = :n",
+            {"s": schema, "n": name},
+        )
+        row = cur.fetchone()
+        sql_text = row[0] if row else None
+
+        cur.execute("""
+            SELECT column_name, data_type, data_length, nullable
+            FROM   all_tab_columns
+            WHERE  owner = :s AND table_name = :n
+            ORDER  BY column_id
+        """, {"s": schema, "n": name})
+        columns = [
+            {"name": r[0], "data_type": r[1], "data_length": r[2], "nullable": r[3] == "Y"}
+            for r in cur.fetchall()
+        ]
+
+        cur.execute(
+            "SELECT status FROM all_objects WHERE owner = :s AND object_name = :n AND object_type = 'VIEW'",
+            {"s": schema, "n": name},
+        )
+        status_row = cur.fetchone()
+
+    return {
+        "sql_text": sql_text,
+        "columns": columns,
+        "status": status_row[0] if status_row else "UNKNOWN",
+    }
+
+
+def get_mview_info(conn, schema: str, name: str) -> dict:
+    """Get materialized view definition, columns, and refresh info."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT query, refresh_mode, refresh_method, last_refresh_date
+            FROM   all_mviews
+            WHERE  owner = :s AND mview_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+        if not row:
+            return {"sql_text": None, "columns": [], "refresh_type": None, "last_refresh": None}
+
+        cur.execute("""
+            SELECT column_name, data_type, data_length, nullable
+            FROM   all_tab_columns
+            WHERE  owner = :s AND table_name = :n
+            ORDER  BY column_id
+        """, {"s": schema, "n": name})
+        columns = [
+            {"name": r[0], "data_type": r[1], "data_length": r[2], "nullable": r[3] == "Y"}
+            for r in cur.fetchall()
+        ]
+
+    return {
+        "sql_text": row[0],
+        "columns": columns,
+        "refresh_type": f"{row[1]}/{row[2]}",
+        "last_refresh": row[3].isoformat() if row[3] else None,
+    }
+
+
 def get_table_info(conn, schema: str, table: str) -> dict:
     with conn.cursor() as cur:
         # Columns
