@@ -145,7 +145,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
-                rows = cur.fetchmany(effective_batch)
+                rows = cur.fetchmany(BULK_BATCH_SIZE)
                 if not rows:
                     break
                 batch = [dict(zip(bind_names, row)) for row in rows]
