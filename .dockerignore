@@ -21,8 +21,12 @@ frontend/dist/
 frontend/.vite/
 
 # Test / coverage artefacts
+backend/tests/
 coverage/
 .nyc_output/
+
+# Docs (not needed in production image)
+docs/
 
 # Local env files (secrets must come from docker-compose env: / --env-file)
 .env

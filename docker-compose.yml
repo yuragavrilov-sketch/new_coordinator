@@ -19,6 +19,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    command: postgres -c max_connections=300
     environment:
       POSTGRES_DB:       migration_state
       POSTGRES_USER:     postgres
