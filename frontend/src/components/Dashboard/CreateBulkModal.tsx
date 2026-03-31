@@ -2,23 +2,24 @@ import { useState } from "react";
 
 interface Props {
   schema: string;
-  tables: string[];  // one or more table names
+  tables: string[];
   onClose: () => void;
   onCreated: () => void;
 }
 
 export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
-  // Target defaults
-  const [targetSchema, setTargetSchema] = useState(schema.toLowerCase());
+  const isMulti = tables.length > 1;
 
-  // Load parameters
+  const [targetSchema, setTargetSchema] = useState(schema.toLowerCase());
   const [strategy, setStrategy] = useState<"STAGE" | "DIRECT">("STAGE");
   const [chunkSize, setChunkSize] = useState(500_000);
   const [maxWorkers, setMaxWorkers] = useState(10);
   const [baselineParallel, setBaselineParallel] = useState(10);
   const [stageTablespace, setStageTablespace] = useState("PAYSTAGE");
+  const [migrationName, setMigrationName] = useState(
+    isMulti ? `bulk-${schema.toLowerCase()}` : `${schema}.${tables[0]}`,
+  );
 
-  // State
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
@@ -27,16 +28,16 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
     setCreating(true);
     setError("");
     setProgress(0);
-
     try {
       for (let i = 0; i < tables.length; i++) {
         const table = tables[i];
+        const name = isMulti ? `${schema}.${table}` : migrationName;
         const resp = await fetch("/api/migrations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             initial_phase: "NEW",
-            migration_name: `${schema}.${table}`,
+            migration_name: name,
             source_connection_id: "oracle_source",
             target_connection_id: "oracle_target",
             source_schema: schema.toUpperCase(),
@@ -59,118 +60,147 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
         setProgress(i + 1);
       }
       onCreated();
-    } catch (e: any) {
-      setError(e.message || String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setCreating(false);
     }
   };
 
-  const isMulti = tables.length > 1;
-
   return (
     <div
       onClick={(e) => { if (e.target === e.currentTarget && !creating) onClose(); }}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-      }}
+      style={S.overlay}
     >
-      <div style={{
-        background: "#1e293b", border: "1px solid #334155", borderRadius: 10,
-        padding: 24, width: 520, maxHeight: "85vh", overflowY: "auto", color: "#e2e8f0",
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>
-            {isMulti ? `Создание миграций (${tables.length})` : `Миграция: ${tables[0]}`}
-          </h3>
-          <span onClick={() => !creating && onClose()} style={{ cursor: "pointer", color: "#64748b", fontSize: 18 }}>✕</span>
+      <div style={S.modal}>
+        {/* Header */}
+        <div style={S.header}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>
+            {isMulti ? `Разовая переливка (${tables.length} таблиц)` : "Разовая переливка"}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button onClick={() => !creating && onClose()} style={S.closeBtn}>✕</button>
         </div>
 
-        {/* Source */}
-        <Section title="Source">
-          <Row label="Schema">{schema}</Row>
-          {isMulti ? (
-            <Row label={`Таблицы (${tables.length})`}>
-              <div style={{ maxHeight: 80, overflowY: "auto", fontSize: 12, fontFamily: "monospace" }}>
-                {tables.join(", ")}
+        {/* Body */}
+        <div style={S.body}>
+          {/* Source */}
+          <Section title="Источник (Oracle Source)" accent="#1d4ed8">
+            <Field label="Schema">
+              <div style={S.readOnly}>{schema}</div>
+            </Field>
+            {isMulti ? (
+              <Field label={`Таблицы (${tables.length})`}>
+                <div style={{ ...S.readOnly, maxHeight: 80, overflowY: "auto", fontFamily: "monospace", fontSize: 12 }}>
+                  {tables.join(", ")}
+                </div>
+              </Field>
+            ) : (
+              <Field label="Table">
+                <div style={S.readOnly}>{tables[0]}</div>
+              </Field>
+            )}
+          </Section>
+
+          {/* Target */}
+          <Section title="Цель (Oracle Target)" accent="#047857">
+            <Field label="Target schema">
+              <input value={targetSchema} onChange={e => setTargetSchema(e.target.value)}
+                style={S.input} />
+            </Field>
+            {!isMulti && (
+              <Field label="Target table">
+                <div style={S.readOnly}>{tables[0].toLowerCase()}</div>
+              </Field>
+            )}
+          </Section>
+
+          {/* Migration params */}
+          <Section title="Параметры миграции">
+            {!isMulti && (
+              <Field label="Имя миграции">
+                <input value={migrationName} onChange={e => setMigrationName(e.target.value)}
+                  style={S.input} />
+              </Field>
+            )}
+
+            <Field label="Стратегия миграции">
+              <div style={{ display: "flex", gap: 8 }}>
+                <ToggleBtn
+                  label="STAGE"
+                  hint="Через промежуточную таблицу"
+                  active={strategy === "STAGE"}
+                  activeColor="#3b82f6"
+                  activeBg="#1e3a5f"
+                  onClick={() => setStrategy("STAGE")}
+                />
+                <ToggleBtn
+                  label="DIRECT"
+                  hint="Прямая загрузка"
+                  active={strategy === "DIRECT"}
+                  activeColor="#6ee7b7"
+                  activeBg="#064e3b"
+                  onClick={() => setStrategy("DIRECT")}
+                />
               </div>
-            </Row>
-          ) : (
-            <Row label="Table">{tables[0]}</Row>
-          )}
-        </Section>
+              <div style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>
+                {strategy === "STAGE"
+                  ? "Загрузка через stage-таблицу → валидация → публикация в целевую"
+                  : "Прямая загрузка в целевую таблицу, без stage"}
+              </div>
+            </Field>
 
-        {/* Target */}
-        <Section title="Target">
-          <Row label="Schema">
-            <input value={targetSchema} onChange={e => setTargetSchema(e.target.value)}
-              style={inputStyle} />
-          </Row>
-          {!isMulti && (
-            <Row label="Table">
-              <span style={{ fontSize: 13, color: "#94a3b8" }}>{tables[0].toLowerCase()}</span>
-            </Row>
-          )}
-        </Section>
+            {strategy === "STAGE" && (
+              <div style={S.row2}>
+                <Field label="Stage table name" hint={`По умолчанию: STG_${isMulti ? "{TABLE}" : tables[0].toUpperCase()}`}>
+                  <div style={S.readOnly}>STG_{isMulti ? "{TABLE}" : tables[0].toUpperCase()}</div>
+                </Field>
+                <Field label="Stage tablespace">
+                  <input value={stageTablespace} onChange={e => setStageTablespace(e.target.value)}
+                    style={S.input} placeholder="PAYSTAGE" />
+                </Field>
+              </div>
+            )}
 
-        {/* Load Parameters */}
-        <Section title="Параметры загрузки">
-          <Row label="Стратегия">
-            <div style={{ display: "flex", gap: 8 }}>
-              {(["STAGE", "DIRECT"] as const).map(s => (
-                <label key={s} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 13 }}>
-                  <input type="radio" checked={strategy === s} onChange={() => setStrategy(s)} />
-                  {s}
-                </label>
-              ))}
+            <div style={S.row2}>
+              <Field label="Chunk size" hint="Строк на чанк (500k–2M)">
+                <input type="number" value={chunkSize} min={1}
+                  onChange={e => setChunkSize(parseInt(e.target.value) || 500_000)}
+                  style={S.input} />
+              </Field>
+              <Field label="Воркеры (bulk)" hint="Параллельных воркеров">
+                <input type="number" value={maxWorkers} min={1}
+                  onChange={e => setMaxWorkers(Math.max(1, parseInt(e.target.value) || 10))}
+                  style={S.input} />
+              </Field>
+              {strategy === "STAGE" && (
+                <Field label="Воркеры (baseline)" hint="Параллельных baseline-воркеров">
+                  <input type="number" value={baselineParallel} min={1}
+                    onChange={e => setBaselineParallel(Math.max(1, parseInt(e.target.value) || 10))}
+                    style={S.input} />
+                </Field>
+              )}
             </div>
-          </Row>
-          <Row label="Chunk size">
-            <input type="number" value={chunkSize} onChange={e => setChunkSize(Number(e.target.value) || 500_000)}
-              style={{ ...inputStyle, width: 120 }} />
-          </Row>
-          <Row label="Max workers">
-            <input type="number" value={maxWorkers} onChange={e => setMaxWorkers(Number(e.target.value) || 10)}
-              min={1} style={{ ...inputStyle, width: 80 }} />
-          </Row>
-          {strategy === "STAGE" && (
-            <>
-              <Row label="Baseline parallel">
-                <input type="number" value={baselineParallel} onChange={e => setBaselineParallel(Number(e.target.value) || 10)}
-                  min={1} style={{ ...inputStyle, width: 80 }} />
-              </Row>
-              <Row label="Stage tablespace">
-                <input value={stageTablespace} onChange={e => setStageTablespace(e.target.value)}
-                  style={{ ...inputStyle, width: 160 }} />
-              </Row>
-            </>
+          </Section>
+
+          {/* Error */}
+          {error && <div style={S.err}>{error}</div>}
+
+          {/* Progress */}
+          {creating && isMulti && (
+            <div style={{ fontSize: 13, color: "#94a3b8", marginBottom: 8 }}>
+              Создано {progress} / {tables.length}…
+            </div>
           )}
-        </Section>
+        </div>
 
-        {/* Error */}
-        {error && (
-          <div style={{ background: "#450a0a", color: "#fca5a5", padding: "8px 12px", borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
-            {error}
-          </div>
-        )}
-
-        {/* Progress */}
-        {creating && isMulti && (
-          <div style={{ marginBottom: 12, fontSize: 13, color: "#94a3b8" }}>
-            Создано {progress} / {tables.length}...
-          </div>
-        )}
-
-        {/* Buttons */}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} disabled={creating}
-            style={{ ...btnStyle, background: "#334155" }}>
+        {/* Footer */}
+        <div style={S.footer}>
+          <button onClick={onClose} disabled={creating} style={S.btnSecondary}>
             Отмена
           </button>
-          <button onClick={handleCreate} disabled={creating}
-            style={{ ...btnStyle, background: "#3b82f6", color: "#fff" }}>
-            {creating ? "Создание..." : "Создать"}
+          <button onClick={handleCreate} disabled={creating} style={S.btnPrimary}>
+            {creating ? "Создание…" : isMulti ? `Создать ${tables.length} миграций` : "Создать и запустить"}
           </button>
         </div>
       </div>
@@ -178,12 +208,16 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
   );
 }
 
-// --- Helper components ---
+// ── UI primitives (matching CreateMigrationModal style) ──────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, accent, children }: { title: string; accent?: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "#64748b", marginBottom: 8, letterSpacing: 0.5 }}>
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
+        color: accent || "#64748b", marginBottom: 8,
+        borderBottom: `1px solid ${accent || "#334155"}22`, paddingBottom: 4,
+      }}>
         {title}
       </div>
       {children}
@@ -191,31 +225,86 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, fontSize: 13 }}>
-      <span style={{ width: 140, color: "#94a3b8", flexShrink: 0 }}>{label}</span>
-      <div style={{ flex: 1 }}>{children}</div>
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginBottom: 3 }}>
+        {label}
+      </div>
+      {children}
+      {hint && <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>{hint}</div>}
     </div>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  background: "#0f172a",
-  border: "1px solid #334155",
-  borderRadius: 4,
-  color: "#e2e8f0",
-  padding: "5px 10px",
-  fontSize: 13,
-  width: "100%",
-};
+function ToggleBtn({ label, hint, active, activeColor, activeBg, onClick }: {
+  label: string; hint: string; active: boolean;
+  activeColor: string; activeBg: string; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      flex: 1, padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+      border: `1px solid ${active ? activeColor : "#334155"}`,
+      background: active ? activeBg : "#1e293b",
+      color: active ? activeColor : "#64748b",
+      fontWeight: 700, fontSize: 12, textAlign: "left",
+    }}>
+      <div>{label}</div>
+      <div style={{ fontSize: 10, fontWeight: 400, marginTop: 2, opacity: 0.7 }}>{hint}</div>
+    </button>
+  );
+}
 
-const btnStyle: React.CSSProperties = {
-  padding: "8px 20px",
-  borderRadius: 6,
-  border: "1px solid #334155",
-  color: "#e2e8f0",
-  cursor: "pointer",
-  fontSize: 13,
-  fontWeight: 600,
+// ── Style tokens ─────────────────────────────────────────────────────────────
+
+const S = {
+  overlay: {
+    position: "fixed" as const, inset: 0, background: "rgba(0,0,0,.72)",
+    display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+  },
+  modal: {
+    background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
+    width: 560, maxHeight: "90vh", display: "flex", flexDirection: "column" as const,
+    boxShadow: "0 20px 60px rgba(0,0,0,.6)",
+  },
+  header: {
+    display: "flex", alignItems: "center", padding: "14px 20px",
+    borderBottom: "1px solid #1e293b",
+  },
+  closeBtn: {
+    background: "none", border: "none", color: "#475569",
+    cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "0 2px",
+  } as React.CSSProperties,
+  body: {
+    padding: "16px 20px", overflowY: "auto" as const, flex: 1,
+  },
+  footer: {
+    display: "flex", gap: 8, justifyContent: "flex-end",
+    padding: "12px 20px", borderTop: "1px solid #1e293b",
+  },
+  input: {
+    width: "100%", background: "#1e293b", border: "1px solid #334155",
+    borderRadius: 6, color: "#e2e8f0", padding: "7px 10px", fontSize: 13,
+  } as React.CSSProperties,
+  readOnly: {
+    padding: "7px 10px", background: "#1e293b", borderRadius: 6,
+    border: "1px solid #334155", color: "#94a3b8", fontSize: 13,
+  } as React.CSSProperties,
+  row2: {
+    display: "flex", gap: 12,
+  } as React.CSSProperties,
+  err: {
+    background: "#450a0a", color: "#fca5a5", padding: "8px 12px",
+    borderRadius: 6, fontSize: 13, marginBottom: 12,
+  } as React.CSSProperties,
+  btnSecondary: {
+    padding: "8px 20px", borderRadius: 6, border: "1px solid #334155",
+    background: "#1e293b", color: "#94a3b8", cursor: "pointer",
+    fontSize: 13, fontWeight: 600,
+  } as React.CSSProperties,
+  btnPrimary: {
+    padding: "8px 20px", borderRadius: 6, border: "1px solid #3b82f6",
+    background: "#3b82f6", color: "#fff", cursor: "pointer",
+    fontSize: 13, fontWeight: 600,
+  } as React.CSSProperties,
 };
