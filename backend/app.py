@@ -23,7 +23,7 @@ import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -246,6 +246,14 @@ def spa(path: str = ""):
     target = os.path.join(STATIC_DIR, path)
     if path and os.path.isfile(target):
         return send_from_directory(STATIC_DIR, path)
+    return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.errorhandler(404)
+def not_found_handler(e):
+    """SPA fallback: return index.html for any unknown path (client-side routing)."""
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "not found"}), 404
     return send_from_directory(STATIC_DIR, "index.html")
 
 
