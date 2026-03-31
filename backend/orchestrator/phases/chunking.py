@@ -6,9 +6,23 @@ from orchestrator.helpers import get_conn, transition, fail, update, broadcast
 
 
 def handle_chunking(mid: str, m: dict) -> None:
-    """Chunks are written — transition to BULK_LOADING."""
-    transition(mid, "BULK_LOADING",
-               message="Чанки записаны, запуск bulk-загрузки")
+    """Create chunks if not yet created, then transition to BULK_LOADING."""
+    # Check if chunks already exist
+    conn = get_conn()
+    try:
+        stats = job_queue.get_chunk_stats(conn, mid)
+    finally:
+        conn.close()
+
+    if stats["total"] > 0:
+        # Chunks already created — go to loading
+        transition(mid, "BULK_LOADING",
+                   message=f"Чанки записаны ({stats['total']}), запуск bulk-загрузки")
+        return
+
+    # No chunks yet — create them (used by BULK_ONLY pipeline after TARGET_CLEARING)
+    from orchestrator.phases.preparing import create_chunks_and_transition
+    create_chunks_and_transition(mid, m)
 
 
 def handle_bulk_loading(mid: str, m: dict) -> None:
