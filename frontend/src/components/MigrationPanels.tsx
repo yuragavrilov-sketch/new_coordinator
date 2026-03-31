@@ -9,6 +9,7 @@
 
 import React, { useEffect, useState } from "react";
 import type { SSEEvent } from "../hooks/useSSE";
+import { fmtTs } from "../utils/format";
 
 // ── Shared style helpers ──────────────────────────────────────────────────────
 
@@ -231,15 +232,6 @@ interface LagData {
   rows_applied: number | null;
 }
 
-function fmtTs(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("ru-RU", {
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-  } catch { return iso ?? "—"; }
-}
-
 export function KafkaLagPanel({
   migrationId, sseEvents,
 }: { migrationId: string; sseEvents: SSEEvent[] }) {
@@ -320,8 +312,8 @@ export function KafkaLagPanel({
         } />
       )}
       <Row label="Worker"    value={data.worker_id ?? "—"} />
-      <Row label="Heartbeat" value={fmtTs(data.worker_heartbeat)} />
-      <Row label="Обновлено" value={fmtTs(data.updated_at)} />
+      <Row label="Heartbeat" value={fmtTs(data.worker_heartbeat, "time")} />
+      <Row label="Обновлено" value={fmtTs(data.updated_at, "time")} />
     </PanelWrap>
   );
 }

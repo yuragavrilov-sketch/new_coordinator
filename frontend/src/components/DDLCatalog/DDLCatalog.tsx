@@ -6,73 +6,7 @@ import { ViewsTab } from "./ViewsTab";
 import { CodeTab } from "./CodeTab";
 import { OtherTab } from "./OtherTab";
 import { PlannerWizard } from "./PlannerWizard";
-
-// ── SearchSelect ────────────────────────────────────────────────────────────
-
-function SearchSelect({
-  value, onChange, options, placeholder, disabled,
-}: {
-  value: string; onChange: (v: string) => void; options: string[];
-  placeholder: string; disabled?: boolean;
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const wrapRef = React.useRef<HTMLDivElement>(null);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) { setOpen(false); setQuery(""); }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-  useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.toLowerCase().includes(q)) : options;
-  }, [options, query]);
-
-  return (
-    <div ref={wrapRef} style={{ position: "relative", minWidth: 165 }}>
-      <div onClick={() => !disabled && (setOpen(o => !o), setQuery(""))}
-        style={{
-          display: "flex", alignItems: "center", gap: 6,
-          background: "#1e293b", border: `1px solid ${open ? "#3b82f6" : "#334155"}`,
-          borderRadius: 4, padding: "0 8px", height: 30,
-          cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1,
-        }}>
-        <span style={{ fontSize: 12, flex: 1, color: value ? "#e2e8f0" : "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {value || placeholder}
-        </span>
-        <span style={{ color: "#475569", fontSize: 9 }}>{open ? "\u25B2" : "\u25BC"}</span>
-      </div>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, background: "#1e293b", border: "1px solid #334155", borderRadius: 4, zIndex: 200, boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
-          <div style={{ padding: "6px 8px", borderBottom: "1px solid #0f1e35", display: "flex", alignItems: "center", gap: 6 }}>
-            <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => { if (e.key === "Escape") { setOpen(false); setQuery(""); } if (e.key === "Enter" && filtered.length === 1) { onChange(filtered[0]); setOpen(false); setQuery(""); } }}
-              placeholder="Поиск..." style={{ background: "none", border: "none", color: "#e2e8f0", fontSize: 12, width: "100%", outline: "none" }} />
-          </div>
-          <div style={{ maxHeight: 200, overflowY: "auto" }}>
-            {filtered.length === 0
-              ? <div style={{ padding: "8px 10px", color: "#475569", fontSize: 12 }}>Нет совпадений</div>
-              : filtered.map(o => (
-                <div key={o} onMouseDown={() => { onChange(o); setOpen(false); setQuery(""); }}
-                  style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", background: o === value ? "#1d3a5f" : "transparent", color: o === value ? "#93c5fd" : "#e2e8f0" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "#0f1624")}
-                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "transparent")}>
-                  {o}
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+import { SearchSelect } from "../ui/SearchSelect";
 
 // ── Type grouping ───────────────────────────────────────────────────────────
 
@@ -245,11 +179,11 @@ export function DDLCatalog() {
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16 }}>
         <div style={S.field}>
           <label style={S.label}>Схема источника</label>
-          <SearchSelect value={srcSchema} onChange={setSrcSchema} options={srcSchemas} placeholder="Выберите схему" />
+          <SearchSelect value={srcSchema} onChange={setSrcSchema} options={srcSchemas} placeholder="Выберите схему" showClear={false} />
         </div>
         <div style={S.field}>
           <label style={S.label}>Схема таргета</label>
-          <SearchSelect value={tgtSchema} onChange={setTgtSchema} options={tgtSchemas} placeholder="Выберите схему" />
+          <SearchSelect value={tgtSchema} onChange={setTgtSchema} options={tgtSchemas} placeholder="Выберите схему" showClear={false} />
         </div>
         <button
           onClick={doLoad}

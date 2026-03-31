@@ -8,41 +8,12 @@ import {
   KafkaLagPanel,
   ValidationPanel,
 } from "./MigrationPanels";
+import { fmtTs, fmtNum, fmtDuration } from "../utils/format";
 
 interface Props {
   migrationId: string;
   onClose: () => void;
   sseEvents?: SSEEvent[];
-}
-
-// ── Formatters ────────────────────────────────────────────────────────────────
-
-function fmtTs(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("ru-RU", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-  } catch { return iso ?? "—"; }
-}
-
-function fmtDuration(ms: number): string {
-  if (ms < 0) ms = 0;
-  if (ms < 1000) return `${ms} мс`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s} сек`;
-  const m = Math.floor(s / 60);
-  const rs = s % 60;
-  if (m < 60) return `${m} мин ${rs > 0 ? ` ${rs} сек` : ""}`.trim();
-  const h = Math.floor(m / 60);
-  const rm = m % 60;
-  return `${h} ч ${rm > 0 ? `${rm} мин` : ""}`.trim();
-}
-
-function fmtNum(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return n.toLocaleString("ru-RU");
 }
 
 // ── Shared small widgets ──────────────────────────────────────────────────────

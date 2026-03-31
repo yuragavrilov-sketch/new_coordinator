@@ -4,21 +4,13 @@ import type { SSEEvent } from "../hooks/useSSE";
 import { PhaseBadge } from "./PhaseBadge";
 import { MigrationDetailPanel } from "./MigrationDetail";
 import { CreateMigrationModal } from "./CreateMigrationModal";
+import { fmtTs } from "../utils/format";
 
 interface SpeedSnapshot { chunks_done: number; rows_loaded: number; ts: number }
 
 function fmtSpeed(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k/s`;
   return `${v.toFixed(v < 10 ? 1 : 0)}/s`;
-}
-
-function fmtTs(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("ru-RU", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
-    });
-  } catch { return iso; }
 }
 
 function EmptyState() {
@@ -463,7 +455,7 @@ function MigrationRow({
           <span style={{ fontSize: 10, color: "#f59e0b" }}>↺ {m.retry_count}</span>
         )}
         <span style={{ marginLeft: "auto", fontSize: 10, color: "#334155" }}>
-          {fmtTs(m.state_changed_at)}
+          {fmtTs(m.state_changed_at, "short")}
         </span>
       </div>
     </div>
