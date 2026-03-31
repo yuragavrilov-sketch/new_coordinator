@@ -652,12 +652,27 @@ def _get_comparable_columns(conn, schema: str, table: str) -> list:
         ]
 
 
+def _run_hash_query(ora_conn, schema: str, table: str, rowid_start: str, rowid_end: str):
+    """Execute COUNT(*) + SUM(ORA_HASH(...)) on an Oracle table for a ROWID range."""
+    columns = _get_comparable_columns(ora_conn, schema, table)
+    hash_parts = [f"ORA_HASH({_cmp_col_expr(c['name'], c['data_type'])})"
+                  for c in columns]
+    row_hash = " + ".join(hash_parts) if hash_parts else "0"
+
+    sql = (
+        f'SELECT COUNT(*) AS cnt, SUM({row_hash}) AS hash_sum '
+        f'FROM "{schema}"."{table}" '
+        f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)'
+    )
+    with ora_conn.cursor() as cur:
+        cur.execute(sql, {"rs": rowid_start, "re": rowid_end})
+        return cur.fetchone()
+
+
 def process_compare_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     """Process one data-compare chunk: COUNT(*) + SUM(hash) for a ROWID range."""
     chunk_id    = chunk["chunk_id"]
     side        = chunk["side"]
-    schema      = chunk["schema"]
-    table       = chunk["table"]
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
@@ -665,29 +680,49 @@ def process_compare_chunk(chunk: dict, pg_conn, configs: dict) -> None:
           f" ({rowid_start}..{rowid_end})")
 
     try:
-        ora_conn = db.open_oracle(chunk["connection_id"], configs)
-        try:
-            columns = _get_comparable_columns(ora_conn, schema, table)
-            hash_parts = [f"ORA_HASH({_cmp_col_expr(c['name'], c['data_type'])})"
-                          for c in columns]
-            row_hash = " + ".join(hash_parts) if hash_parts else "0"
+        if side == "both":
+            # Compare both source and target in one chunk
+            src_schema = chunk["source_schema"]
+            src_table  = chunk["source_table"]
+            tgt_schema = chunk["target_schema"]
+            tgt_table  = chunk["target_table"]
 
-            sql = (
-                f'SELECT COUNT(*) AS cnt, SUM({row_hash}) AS hash_sum '
-                f'FROM "{schema}"."{table}" '
-                f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)'
-            )
-            with ora_conn.cursor() as cur:
-                cur.execute(sql, {"rs": rowid_start, "re": rowid_end})
-                row_count, hash_sum = cur.fetchone()
-        finally:
+            src_conn = db.open_oracle("oracle_source", configs)
             try:
-                ora_conn.close()
-            except Exception:
-                pass
+                src_count, src_hash = _run_hash_query(src_conn, src_schema, src_table, rowid_start, rowid_end)
+            finally:
+                try: src_conn.close()
+                except Exception: pass
 
-        task_id = db.complete_compare_chunk(pg_conn, chunk_id, row_count or 0, hash_sum)
-        print(f"[compare] chunk {chunk_id[:8]} DONE — {row_count} rows")
+            tgt_conn = db.open_oracle("oracle_target", configs)
+            try:
+                tgt_count, tgt_hash = _run_hash_query(tgt_conn, tgt_schema, tgt_table, rowid_start, rowid_end)
+            finally:
+                try: tgt_conn.close()
+                except Exception: pass
+
+            task_id = db.complete_compare_chunk_both(
+                pg_conn, chunk_id,
+                src_count or 0, src_hash,
+                tgt_count or 0, tgt_hash,
+            )
+            match_str = "MATCH" if (src_count == tgt_count and str(src_hash) == str(tgt_hash)) else "DIFF"
+            print(f"[compare] chunk {chunk_id[:8]} DONE — src={src_count} tgt={tgt_count} {match_str}")
+
+        else:
+            # Single-side compare (legacy mode)
+            schema = chunk["schema"]
+            table  = chunk["table"]
+
+            ora_conn = db.open_oracle(chunk["connection_id"], configs)
+            try:
+                row_count, hash_sum = _run_hash_query(ora_conn, schema, table, rowid_start, rowid_end)
+            finally:
+                try: ora_conn.close()
+                except Exception: pass
+
+            task_id = db.complete_compare_chunk(pg_conn, chunk_id, row_count or 0, hash_sum)
+            print(f"[compare] chunk {chunk_id[:8]} DONE — {row_count} rows")
 
         # Try to aggregate (check if all chunks are done)
         if task_id:

@@ -482,6 +482,20 @@ def claim_compare_chunk(conn) -> Optional[dict]:
 
     conn.commit()
 
+    if side == "both":
+        return {
+            "chunk_id":      str(chunk_id),
+            "task_id":       str(task_id),
+            "side":          side,
+            "chunk_seq":     chunk_seq,
+            "rowid_start":   rowid_start,
+            "rowid_end":     rowid_end,
+            "source_schema": src_schema,
+            "source_table":  src_table,
+            "target_schema": tgt_schema,
+            "target_table":  tgt_table,
+        }
+
     schema = src_schema if side == "source" else tgt_schema
     table = src_table if side == "source" else tgt_table
     conn_id = "oracle_source" if side == "source" else "oracle_target"
@@ -513,6 +527,55 @@ def complete_compare_chunk(conn, chunk_id: str, row_count: int, hash_sum) -> str
             WHERE  chunk_id     = %s
             RETURNING task_id
         """, (row_count, str(hash_sum) if hash_sum is not None else None, chunk_id))
+        row = cur.fetchone()
+        task_id = str(row[0]) if row else None
+
+        if task_id:
+            cur.execute("""
+                UPDATE data_compare_tasks
+                SET    chunks_done = chunks_done + 1
+                WHERE  task_id = %s
+            """, (task_id,))
+    conn.commit()
+    return task_id
+
+
+def complete_compare_chunk_both(
+    conn, chunk_id: str,
+    source_count: int, source_hash,
+    target_count: int, target_hash,
+) -> str:
+    """Mark a 'both'-side compare chunk DONE with source/target results.
+    Returns the task_id.
+    """
+    counts_match = (source_count == target_count)
+    hash_match = (
+        str(source_hash) == str(target_hash)
+        if source_hash is not None and target_hash is not None
+        else source_count == target_count == 0
+    )
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE data_compare_chunks
+            SET    status       = 'DONE',
+                   row_count    = %s,
+                   hash_sum     = %s,
+                   source_count = %s,
+                   source_hash  = %s,
+                   target_count = %s,
+                   target_hash  = %s,
+                   counts_match = %s,
+                   hash_match   = %s,
+                   completed_at = NOW()
+            WHERE  chunk_id     = %s
+            RETURNING task_id
+        """, (source_count,
+              str(source_hash) if source_hash is not None else None,
+              source_count,
+              str(source_hash) if source_hash is not None else None,
+              target_count,
+              str(target_hash) if target_hash is not None else None,
+              counts_match, hash_match, chunk_id))
         row = cur.fetchone()
         task_id = str(row[0]) if row else None
 
