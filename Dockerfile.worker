@@ -25,4 +25,6 @@ ENV STATE_DB_DSN=postgresql://postgres:postgres@postgres:5432/migration_state \
     CDC_POLL_MS=1000 \
     CDC_SCAN_INTERVAL=15
 
+ENV PYTHONUNBUFFERED=1
+
 CMD ["python", "worker.py"]
