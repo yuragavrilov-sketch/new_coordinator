@@ -25,12 +25,15 @@ def handle_data_comparing(mid: str, m: dict) -> None:
     if not task_id:
         # First tick — create compare task and chunks
         if in_prog(mid):
+            print(f"[orchestrator] {mid}: DATA_COMPARING already in progress, skipping")
             return
         mark_in_prog(mid)
+        print(f"[orchestrator] {mid}: DATA_COMPARING starting chunk creation")
 
         def _run():
             try:
                 src_cfg = oracle_cfg(m["source_connection_id"])
+                print(f"[orchestrator] {mid}: src_cfg keys = {list(src_cfg.keys())}")
                 chunk_size = int(m.get("chunk_size") or 500_000)
 
                 conn = get_conn()
@@ -105,6 +108,8 @@ def handle_data_comparing(mid: str, m: dict) -> None:
                 print(f"[orchestrator] {mid}: data compare task {new_task_id}, {len(chunks)} chunks")
 
             except Exception as exc:
+                print(f"[orchestrator] {mid}: DATA_COMPARING error: {exc}")
+                import traceback; traceback.print_exc()
                 if current_phase(mid) not in ("CANCELLING", "CANCELLED"):
                     fail(mid, f"Ошибка создания сравнения: {exc}", "DATA_COMPARE_ERROR")
             finally:
