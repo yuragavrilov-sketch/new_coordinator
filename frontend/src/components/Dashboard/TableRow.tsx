@@ -37,7 +37,7 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       }}
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr 130px 130px 180px 110px",
+        gridTemplateColumns: "40px 1fr 60px 100px 130px 130px 180px 110px",
         gap: 4,
         alignItems: "center",
         padding: "8px 12px",
@@ -66,8 +66,24 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       </div>
 
       {/* Table name */}
-      <div style={{ fontFamily: "monospace", fontWeight: 600, textTransform: "uppercase" }}>
+      <div style={{ fontFamily: "monospace", fontWeight: 600, textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {table.object_name}
+      </div>
+
+      {/* Key indicator */}
+      <div style={{ fontSize: 11 }}>
+        {table.metadata?.pk_columns && table.metadata.pk_columns.length > 0
+          ? <span style={{ color: "#86efac", fontWeight: 700 }}>PK</span>
+          : table.metadata?.uk_constraints && table.metadata.uk_constraints.length > 0
+            ? <span style={{ color: "#c4b5fd", fontWeight: 700 }}>UK</span>
+            : <span style={{ color: "#475569" }}>—</span>}
+      </div>
+
+      {/* Estimated rows */}
+      <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "right" }}>
+        {table.metadata?.num_rows != null
+          ? table.metadata.num_rows.toLocaleString("ru-RU")
+          : "—"}
       </div>
 
       {/* Status badge */}

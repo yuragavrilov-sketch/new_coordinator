@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { PhaseBadge } from "../PhaseBadge";
 import { fmtTs, fmtNum } from "../../utils/format";
 
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export function TableDetail({ tableName, migration, onCreateMigration }: Props) {
+  const navigate = useNavigate();
   return (
     <div
       style={{
@@ -103,6 +105,7 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
           {/* Link */}
           <div>
             <span
+              onClick={() => navigate("/migrations")}
               style={{
                 color: "#3b82f6",
                 fontSize: 13,

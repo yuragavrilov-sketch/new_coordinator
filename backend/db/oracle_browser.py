@@ -308,10 +308,20 @@ def get_table_info(conn, schema: str, table: str) -> dict:
 
         uk_constraints = [{"name": k, "columns": v} for k, v in uk_map.items()]
 
+        # Estimated row count from statistics
+        cur.execute("""
+            SELECT num_rows
+            FROM   all_tables
+            WHERE  owner = :s AND table_name = :t
+        """, {"s": schema, "t": table})
+        stats_row = cur.fetchone()
+        num_rows = stats_row[0] if stats_row and stats_row[0] is not None else None
+
     return {
         "columns":        columns,
         "pk_columns":     pk_columns,
         "uk_constraints": uk_constraints,
+        "num_rows":       num_rows,
     }
 
 

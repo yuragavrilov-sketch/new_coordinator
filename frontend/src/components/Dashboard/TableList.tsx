@@ -6,6 +6,11 @@ export interface EnrichedTable {
   oracle_status: string | null;
   migration_status: "NONE" | "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
   match_status: string;
+  metadata?: {
+    pk_columns?: string[];
+    uk_constraints?: { name: string; columns: string[] }[];
+    num_rows?: number | null;
+  };
   migration?: {
     migration_id: string;
     migration_name: string;
@@ -134,7 +139,7 @@ export function TableList({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "40px 1fr 130px 130px 180px 110px",
+          gridTemplateColumns: "40px 1fr 60px 100px 130px 130px 180px 110px",
           gap: 4,
           alignItems: "center",
           padding: "8px 12px",
@@ -155,6 +160,8 @@ export function TableList({
           />
         </div>
         <div>Таблица</div>
+        <div>Ключ</div>
+        <div>Строк</div>
         <div>Статус</div>
         <div>Фаза</div>
         <div>Прогресс</div>
