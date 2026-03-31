@@ -218,7 +218,7 @@ start_poller(
 
 # ── Migration orchestrator ────────────────────────────────────────────────────
 import services.debezium    as _debezium_mod
-import services.orchestrator as orchestrator_mod
+import orchestrator as orchestrator_mod
 
 _debezium_mod.init(load_configs_fn=_load_cfg)
 orchestrator_mod.init(
