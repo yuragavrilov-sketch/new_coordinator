@@ -6,3 +6,7 @@ oracledb>=2.0
 kafka-python>=2.0
 requests>=2.31
 gunicorn>=21.2
+pydantic>=2.6
+structlog>=24.1
+alembic>=1.13
+pytest>=8.0
