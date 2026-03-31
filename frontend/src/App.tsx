@@ -9,6 +9,7 @@ import { Checklist } from "./components/Checklist";
 import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
 import { DataCompare } from "./components/DataCompare";
 import { DDLCatalog } from "./components/DDLCatalog/DDLCatalog";
+import { Dashboard } from "./components/Dashboard";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
@@ -89,6 +90,7 @@ function SystemStats() {
 }
 
 const TABS = [
+  { path: "/", label: "Дашборд" },
   { path: "/catalog", label: "DDL Каталог" },
   { path: "/migrations", label: "Миграции" },
   { path: "/connector-groups", label: "Группы коннекторов" },
@@ -171,6 +173,7 @@ function AppShell() {
           <NavLink
             key={tab.path}
             to={tab.path}
+            end={tab.path === "/"}
             style={({ isActive }) => tabLinkStyle(isActive)}
           >
             {tab.label}
@@ -180,7 +183,7 @@ function AppShell() {
 
       <div style={{ marginTop: 16 }}>
         <Routes>
-          <Route path="/" element={<Navigate to="/catalog" replace />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/catalog" element={<DDLCatalog />} />
           <Route path="/migrations" element={<MigrationList sseEvents={events} />} />
           <Route path="/connector-groups" element={<ConnectorGroupsPanel />} />
