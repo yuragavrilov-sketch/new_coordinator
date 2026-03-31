@@ -20,11 +20,13 @@ _CDC_HEARTBEAT_STALE_MINUTES = int(os.environ.get("CDC_HEARTBEAT_STALE_MINUTES",
 _state: dict = {}
 
 
-def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn) -> None:
-    _state["get_conn"]     = get_conn_fn
-    _state["row_to_dict"]  = row_to_dict_fn
-    _state["db_available"] = db_available_ref
-    _state["broadcast"]    = broadcast_fn
+def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn,
+         load_configs_fn=None) -> None:
+    _state["get_conn"]      = get_conn_fn
+    _state["row_to_dict"]   = row_to_dict_fn
+    _state["db_available"]  = db_available_ref
+    _state["broadcast"]     = broadcast_fn
+    _state["load_configs"]  = load_configs_fn
 
 
 def _db_ok() -> bool:
@@ -105,6 +107,202 @@ def chunk_fail(chunk_id: str):
         conn.close()
 
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Compare-worker chunk endpoints
+# ---------------------------------------------------------------------------
+
+@bp.post("/api/worker/compare/claim")
+def compare_claim():
+    """Claim the next available PENDING compare chunk. Returns 204 if nothing to do."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+
+    body = request.get_json(force=True) or {}
+    worker_id = body.get("worker_id", "unknown")
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT dc.chunk_id, dc.task_id, dc.chunk_seq, dc.rowid_start, dc.rowid_end,
+                       dc.side,
+                       dt.source_schema, dt.source_table, dt.target_schema, dt.target_table
+                FROM data_compare_chunks dc
+                JOIN data_compare_tasks dt ON dt.task_id = dc.task_id
+                WHERE dc.status = 'PENDING' AND dt.status = 'RUNNING'
+                ORDER BY dc.created_at, dc.chunk_seq
+                LIMIT 1
+                FOR UPDATE OF dc SKIP LOCKED
+            """)
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return "", 204
+
+            chunk_id = str(row[0])
+            cur.execute("""
+                UPDATE data_compare_chunks
+                SET status='CLAIMED', worker_id=%s, claimed_at=NOW()
+                WHERE chunk_id = %s
+            """, (worker_id, chunk_id))
+        conn.commit()
+
+        # Resolve schema/table/connection_id based on side
+        side = row[5]
+        src_schema, src_table = row[6], row[7]
+        tgt_schema, tgt_table = row[8], row[9]
+
+        if side == "source":
+            schema, table, connection_id = src_schema, src_table, "oracle_source"
+        else:
+            schema, table, connection_id = tgt_schema, tgt_table, "oracle_target"
+
+        # Get connection configs for source and target
+        configs = {}
+        if _state.get("load_configs"):
+            configs = _state["load_configs"]()
+        src_cfg = configs.get("oracle_source", {})
+        tgt_cfg = configs.get("oracle_target", {})
+
+        return jsonify({"chunk": {
+            "chunk_id": chunk_id,
+            "task_id": str(row[1]),
+            "chunk_seq": row[2],
+            "side": side,
+            "rowid_start": row[3],
+            "rowid_end": row[4],
+            "schema": schema,
+            "table": table,
+            "connection_id": connection_id,
+            "source_schema": src_schema,
+            "source_table": src_table,
+            "target_schema": tgt_schema,
+            "target_table": tgt_table,
+            "source_connection": src_cfg,
+            "target_connection": tgt_cfg,
+        }}), 200
+    finally:
+        conn.close()
+
+
+@bp.post("/api/worker/compare/<chunk_id>/complete")
+def compare_complete(chunk_id: str):
+    """Mark a compare chunk as DONE with count/hash results."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+
+    body = request.get_json(force=True) or {}
+    row_count = int(body.get("row_count", 0))
+    hash_sum = body.get("hash_sum")
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE data_compare_chunks
+                SET status='DONE', completed_at=NOW(),
+                    row_count=%s, hash_sum=%s
+                WHERE chunk_id = %s
+                RETURNING task_id
+            """, (row_count,
+                  str(hash_sum) if hash_sum is not None else None,
+                  chunk_id))
+            crow = cur.fetchone()
+            if not crow:
+                conn.rollback()
+                return jsonify({"error": "chunk not found"}), 404
+            task_id = str(crow[0])
+
+            # Update task chunks_done counter
+            cur.execute("""
+                UPDATE data_compare_tasks
+                SET chunks_done = (
+                    SELECT COUNT(*) FROM data_compare_chunks
+                    WHERE task_id = %s AND status = 'DONE'
+                )
+                WHERE task_id = %s
+            """, (task_id, task_id))
+
+            # Check if all chunks are done
+            cur.execute("""
+                SELECT t.chunks_total,
+                       COUNT(*) FILTER (WHERE c.status = 'DONE')   AS done,
+                       COUNT(*) FILTER (WHERE c.status = 'FAILED') AS failed,
+                       COUNT(*) FILTER (WHERE c.status IN ('PENDING', 'CLAIMED')) AS active
+                FROM data_compare_tasks t
+                JOIN data_compare_chunks c ON c.task_id = t.task_id
+                WHERE t.task_id = %s
+                GROUP BY t.chunks_total
+            """, (task_id,))
+            task_row = cur.fetchone()
+            if task_row:
+                total, done, failed, active = task_row
+                if active == 0:
+                    # All chunks processed — aggregate results
+                    if failed > 0:
+                        cur.execute("""
+                            UPDATE data_compare_tasks
+                            SET status='FAILED', error_text=%s, completed_at=NOW()
+                            WHERE task_id = %s
+                        """, (f"{failed} chunk(s) failed", task_id))
+                    else:
+                        # Aggregate per side
+                        cur.execute("""
+                            SELECT side,
+                                   SUM(COALESCE(row_count, 0)),
+                                   SUM(COALESCE(hash_sum::bigint, 0))
+                            FROM data_compare_chunks
+                            WHERE task_id = %s AND status = 'DONE'
+                            GROUP BY side
+                        """, (task_id,))
+                        side_data = {}
+                        for side, rc, hs in cur.fetchall():
+                            side_data[side] = {"count": int(rc), "hash": hs}
+
+                        src = side_data.get("source", {"count": 0, "hash": 0})
+                        tgt = side_data.get("target", {"count": 0, "hash": 0})
+                        counts_match = src["count"] == tgt["count"]
+                        hash_match = src["hash"] == tgt["hash"]
+
+                        cur.execute("""
+                            UPDATE data_compare_tasks
+                            SET status='DONE', completed_at=NOW(),
+                                source_count=%s, target_count=%s,
+                                source_hash=%s, target_hash=%s,
+                                counts_match=%s, hash_match=%s
+                            WHERE task_id = %s
+                        """, (src["count"], tgt["count"],
+                              str(src["hash"]), str(tgt["hash"]),
+                              counts_match, hash_match, task_id))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
+
+
+@bp.post("/api/worker/compare/<chunk_id>/fail")
+def compare_fail(chunk_id: str):
+    """Mark a compare chunk as FAILED."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+
+    body = request.get_json(force=True) or {}
+    error_text = body.get("error_text", "unknown error")
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE data_compare_chunks
+                SET status='FAILED', error_text=%s, completed_at=NOW()
+                WHERE chunk_id = %s
+            """, (error_text[:2000], chunk_id))
+        conn.commit()
+        return jsonify({"ok": True})
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

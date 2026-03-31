@@ -82,7 +82,13 @@ def handle_preparing(mid: str, m: dict) -> None:
                 # DIRECT strategy — no stage table
                 stage_msg = "Прямая загрузка (без stage), "
 
-            # Fix SCN
+            if mode == "BULK_ONLY":
+                # BULK_ONLY — skip SCN fixation, go to structure check
+                safe_transition(mid, "PREPARING", "STRUCTURE_READY",
+                                message=f"{stage_msg}переход к проверке структуры")
+                return
+
+            # Fix SCN (CDC mode only)
             scn = oracle_scn.get_current_scn(src_cfg)
 
             update(mid, {

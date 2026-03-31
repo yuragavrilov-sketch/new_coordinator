@@ -382,6 +382,18 @@ def init_db() -> None:
                     WHERE status = 'PENDING'
             """)
 
+            # Column migrations for data_compare_chunks (compare-both-sides columns)
+            for col_sql in [
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS source_count  BIGINT",
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS source_hash   NUMERIC",
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS target_count  BIGINT",
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS target_hash   NUMERIC",
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS counts_match  BOOLEAN",
+                "ALTER TABLE data_compare_chunks ADD COLUMN IF NOT EXISTS hash_match    BOOLEAN",
+            ]:
+                cur.execute(col_sql)
+            print("[state_db]   columns ok: data_compare_chunks.{source,target}_{count,hash}, {counts,hash}_match")
+
             # ── migration_plans ───────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS migration_plans (

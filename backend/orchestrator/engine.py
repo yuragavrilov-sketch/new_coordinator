@@ -11,6 +11,7 @@ from orchestrator.groups import tick_groups, check_group_connectors
 
 from orchestrator.phases import preparing, chunking, baseline, cleanup, cdc, data_verify
 from orchestrator.phases import group_new
+from orchestrator.phases import bulk_pipeline
 
 TICK_INTERVAL = 5
 
@@ -20,6 +21,9 @@ _LEGACY_HANDLERS = {
     "SCN_FIXED":            lambda mid, m: preparing.handle_scn_fixed(mid, m),
     "CONNECTOR_STARTING":   lambda mid, m: preparing.handle_connector_starting(mid, m),
     "CDC_BUFFERING":        lambda mid, m: preparing.handle_cdc_buffering(mid, m),
+    "STRUCTURE_READY":      lambda mid, m: bulk_pipeline.handle_structure_ready(mid, m),
+    "DATA_COMPARING":       lambda mid, m: bulk_pipeline.handle_data_comparing(mid, m),
+    "TARGET_CLEARING":      lambda mid, m: bulk_pipeline.handle_target_clearing(mid, m),
     "CHUNKING":             lambda mid, m: chunking.handle_chunking(mid, m),
     "BULK_LOADING":         lambda mid, m: chunking.handle_bulk_loading(mid, m),
     "BULK_LOADED":          lambda mid, m: chunking.handle_bulk_loaded(mid, m),
@@ -42,6 +46,9 @@ _LEGACY_HANDLERS = {
 _GROUP_HANDLERS = {
     "NEW":                  lambda mid, m: group_new.handle_new_group(mid, m),
     "TOPIC_CREATING":       lambda mid, m: group_new.handle_topic_creating(mid, m),
+    "STRUCTURE_READY":      lambda mid, m: bulk_pipeline.handle_structure_ready(mid, m),
+    "DATA_COMPARING":       lambda mid, m: bulk_pipeline.handle_data_comparing(mid, m),
+    "TARGET_CLEARING":      lambda mid, m: bulk_pipeline.handle_target_clearing(mid, m),
     "CHUNKING":             lambda mid, m: chunking.handle_chunking(mid, m),
     "BULK_LOADING":         lambda mid, m: chunking.handle_bulk_loading(mid, m),
     "BULK_LOADED":          lambda mid, m: chunking.handle_bulk_loaded(mid, m),
