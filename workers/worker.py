@@ -53,9 +53,12 @@ sys.path.insert(0, str(_HERE))
 import common as db
 from common import WORKER_ID
 
-# Import oracledb — LOB handling configured per-connection in _process_bulk_chunk
+# Fetch LOBs (CLOB/BLOB/NCLOB) as Python str/bytes directly — LOB locators
+# from AS OF SCN flashback cursors are invalid outside the fetching cursor,
+# which causes ORA-64219.  Setting this globally is safe for bulk copy.
 try:
     import oracledb
+    oracledb.defaults.fetch_lobs = False
 except ImportError:
     pass
 
@@ -120,36 +123,11 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
 
-    # Convert LOB locators to Python str/bytes on fetch — avoids both
-    # ORA-64219 (LOB locators from flashback) and ORA-03106 (inline LOB
-    # with fetch_lobs=False exceeding SDU)
-    def _lob_handler(cursor, fetch_name, default_type, size, precision, scale):
-        if default_type in (oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB):
-            return cursor.var(oracledb.DB_TYPE_LONG, arraysize=cursor.arraysize)
-        if default_type == oracledb.DB_TYPE_BLOB:
-            return cursor.var(oracledb.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
-    src_conn.outputtypehandler = _lob_handler
-
     rows_loaded = 0
     try:
-        # Detect LOB columns — reduce batch size to avoid ORA-03106
-        with src_conn.cursor() as col_cur:
-            col_cur.execute("""
-                SELECT COUNT(*) FROM all_tab_columns
-                WHERE  owner = :s AND table_name = :t
-                  AND  data_type IN ('CLOB','BLOB','NCLOB','LONG','LONG RAW')
-            """, {"s": src_schema.upper(), "t": src_table.upper()})
-            has_lobs = col_cur.fetchone()[0] > 0
-        effective_batch = min(BULK_BATCH_SIZE, 50) if has_lobs else BULK_BATCH_SIZE
-        if has_lobs:
-            print(f"[bulk] {chunk_id[:8]}: table has LOB columns, batch={effective_batch}, prefetch off")
-
         with src_conn.cursor() as cur:
-            cur.arraysize = effective_batch
-            if has_lobs:
-                cur.prefetchrows = 0
-            else:
-                cur.prefetchrows = effective_batch + 1
+            cur.arraysize = BULK_BATCH_SIZE
+            cur.prefetchrows = BULK_BATCH_SIZE + 1
             if start_scn:
                 # Legacy mode: consistent snapshot via flashback query
                 cur.execute(
