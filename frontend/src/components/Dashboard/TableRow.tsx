@@ -37,7 +37,8 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       }}
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr 130px 120px 160px 100px",
+        gridTemplateColumns: "40px 1fr 130px 130px 180px 110px",
+        gap: 4,
         alignItems: "center",
         padding: "8px 12px",
         borderBottom: "1px solid #1e293b",
@@ -122,7 +123,7 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       </div>
 
       {/* Group */}
-      <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace" }}>
+      <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {m?.group_id ? m.group_id.substring(0, 8) : "—"}
       </div>
     </div>

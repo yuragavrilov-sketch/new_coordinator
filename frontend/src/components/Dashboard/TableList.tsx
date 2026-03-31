@@ -134,7 +134,8 @@ export function TableList({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "40px 1fr 130px 120px 160px 100px",
+          gridTemplateColumns: "40px 1fr 130px 130px 180px 110px",
+          gap: 4,
           alignItems: "center",
           padding: "8px 12px",
           borderBottom: "1px solid #334155",
