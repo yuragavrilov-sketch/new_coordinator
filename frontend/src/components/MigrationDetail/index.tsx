@@ -1,0 +1,1 @@
+export { MigrationDetailPanel } from "./MigrationDetail";
