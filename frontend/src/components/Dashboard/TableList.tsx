@@ -8,11 +8,14 @@ export interface EnrichedTable {
   match_status: string;
   migration?: {
     migration_id: string;
+    migration_name: string;
     phase: string;
     chunks_done: number;
     total_chunks: number | null;
     rows_loaded: number;
     group_id: string | null;
+    state_changed_at: string;
+    error_text: string | null;
   };
 }
 
@@ -29,6 +32,8 @@ interface Props {
   onFilterChange: (f: Filter) => void;
   search: string;
   onSearchChange: (s: string) => void;
+  schema: string;
+  onCreateMigration: (tableName: string) => void;
 }
 
 const filterButtons: { key: Filter; label: string }[] = [
@@ -77,6 +82,8 @@ export function TableList({
   onFilterChange,
   search,
   onSearchChange,
+  schema,
+  onCreateMigration,
 }: Props) {
   const filtered = applyFilters(tables, filter, search);
   const allSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.object_name));
@@ -174,18 +181,9 @@ export function TableList({
           {expandedTable === table.object_name && (
             <TableDetail
               tableName={table.object_name}
-              schema=""
-              migration={
-                table.migration
-                  ? {
-                      ...table.migration,
-                      migration_name: table.object_name,
-                      state_changed_at: "",
-                      error_text: null,
-                    }
-                  : undefined
-              }
-              onCreateMigration={() => {}}
+              schema={schema}
+              migration={table.migration}
+              onCreateMigration={onCreateMigration}
             />
           )}
         </div>
