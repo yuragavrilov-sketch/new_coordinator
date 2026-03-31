@@ -124,9 +124,21 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     rows_loaded = 0
     try:
+        # Detect LOB columns — reduce batch size to avoid ORA-03106
+        with src_conn.cursor() as col_cur:
+            col_cur.execute("""
+                SELECT COUNT(*) FROM all_tab_columns
+                WHERE  owner = :s AND table_name = :t
+                  AND  data_type IN ('CLOB','BLOB','NCLOB','LONG','LONG RAW')
+            """, {"s": src_schema.upper(), "t": src_table.upper()})
+            has_lobs = col_cur.fetchone()[0] > 0
+        effective_batch = min(BULK_BATCH_SIZE, 100) if has_lobs else BULK_BATCH_SIZE
+        if has_lobs:
+            print(f"[bulk] {chunk_id[:8]}: table has LOB columns, batch size reduced to {effective_batch}")
+
         with src_conn.cursor() as cur:
-            cur.arraysize = BULK_BATCH_SIZE
-            cur.prefetchrows = BULK_BATCH_SIZE + 1
+            cur.arraysize = effective_batch
+            cur.prefetchrows = effective_batch + 1
             if start_scn:
                 # Legacy mode: consistent snapshot via flashback query
                 cur.execute(
@@ -144,7 +156,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
-                rows = cur.fetchmany(BULK_BATCH_SIZE)
+                rows = cur.fetchmany(effective_batch)
                 if not rows:
                     break
                 batch = [dict(zip(bind_names, row)) for row in rows]
