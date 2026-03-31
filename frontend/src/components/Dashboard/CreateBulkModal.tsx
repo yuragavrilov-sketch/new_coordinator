@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { SearchSelect } from "../ui/SearchSelect";
 
 interface Props {
   schema: string;
@@ -11,6 +12,8 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
   const isMulti = tables.length > 1;
 
   const [targetSchema, setTargetSchema] = useState(schema.toLowerCase());
+  const [targetSchemas, setTargetSchemas] = useState<string[]>([]);
+  const [migrationMode, setMigrationMode] = useState<"CDC" | "BULK_ONLY">("BULK_ONLY");
   const [strategy, setStrategy] = useState<"STAGE" | "DIRECT">("STAGE");
   const [chunkSize, setChunkSize] = useState(500_000);
   const [maxWorkers, setMaxWorkers] = useState(10);
@@ -19,6 +22,19 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
   const [migrationName, setMigrationName] = useState(
     isMulti ? `bulk-${schema.toLowerCase()}` : `${schema}.${tables[0]}`,
   );
+
+  // Load target schemas
+  useEffect(() => {
+    fetch("/api/db/target/schemas")
+      .then(r => r.ok ? r.json() : [])
+      .then((list: string[]) => {
+        setTargetSchemas(list);
+        if (list.length > 0 && !list.includes(targetSchema)) {
+          // Keep current default if it looks valid
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -47,7 +63,7 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
             stage_table_name: strategy === "STAGE" ? `STG_${table.toUpperCase()}` : "",
             stage_tablespace: strategy === "STAGE" ? stageTablespace : "",
             migration_strategy: strategy,
-            migration_mode: "BULK_ONLY",
+            migration_mode: migrationMode,
             chunk_size: chunkSize,
             max_parallel_workers: maxWorkers,
             baseline_parallel_degree: baselineParallel,
@@ -105,14 +121,48 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
           {/* Target */}
           <Section title="Цель (Oracle Target)" accent="#047857">
             <Field label="Target schema">
-              <input value={targetSchema} onChange={e => setTargetSchema(e.target.value)}
-                style={S.input} />
+              {targetSchemas.length > 0 ? (
+                <SearchSelect
+                  value={targetSchema}
+                  onChange={setTargetSchema}
+                  options={targetSchemas}
+                  placeholder="Выберите схему..."
+                  showClear={false}
+                />
+              ) : (
+                <input value={targetSchema} onChange={e => setTargetSchema(e.target.value)}
+                  style={S.input} placeholder="Схема на target" />
+              )}
             </Field>
             {!isMulti && (
               <Field label="Target table">
                 <div style={S.readOnly}>{tables[0].toLowerCase()}</div>
               </Field>
             )}
+          </Section>
+
+          {/* Mode */}
+          <Section title="Режим миграции" accent="#7c3aed">
+            <Field label="Тип">
+              <div style={{ display: "flex", gap: 8 }}>
+                <ToggleBtn
+                  label="Разовая переливка"
+                  hint="Однократный перенос данных без CDC"
+                  active={migrationMode === "BULK_ONLY"}
+                  activeColor="#6ee7b7"
+                  activeBg="#064e3b"
+                  onClick={() => setMigrationMode("BULK_ONLY")}
+                />
+                <ToggleBtn
+                  label="CDC (Debezium)"
+                  hint="Bulk + отслеживание изменений"
+                  active={migrationMode === "CDC"}
+                  activeColor="#c4b5fd"
+                  activeBg="#2e1065"
+                  onClick={() => setMigrationMode("CDC")}
+                />
+              </div>
+            </Field>
           </Section>
 
           {/* Migration params */}
@@ -124,7 +174,7 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
               </Field>
             )}
 
-            <Field label="Стратегия миграции">
+            <Field label="Стратегия загрузки">
               <div style={{ display: "flex", gap: 8 }}>
                 <ToggleBtn
                   label="STAGE"
