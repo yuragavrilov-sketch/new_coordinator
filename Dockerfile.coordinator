@@ -45,10 +45,14 @@ ENV FLASK_HOST=0.0.0.0 \
 EXPOSE 5000
 
 # Use gunicorn for production; single worker is fine because we use threads
+ENV PYTHONUNBUFFERED=1
+
 CMD ["gunicorn", \
      "--chdir", "backend", \
      "--bind", "0.0.0.0:5000", \
      "--workers", "1", \
      "--threads", "8", \
      "--timeout", "120", \
+     "--log-level", "info", \
+     "--capture-output", \
      "app:app"]
