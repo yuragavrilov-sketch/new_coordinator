@@ -443,13 +443,41 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
             for r in cur.fetchall()
         ]
 
+        # PK columns
+        cur.execute("""
+            SELECT acc.column_name
+            FROM   all_constraints  ac
+            JOIN   all_cons_columns acc
+                   ON  ac.constraint_name = acc.constraint_name
+                   AND ac.owner           = acc.owner
+            WHERE  ac.owner           = :s
+              AND  ac.table_name      = :t
+              AND  ac.constraint_type = 'P'
+            ORDER BY acc.position
+        """, {"s": schema, "t": table})
+        pk_columns = [r[0] for r in cur.fetchall()]
+
+        # UK constraints
+        uk_names = [c["name"] for c in constraints if c.get("constraint_type") == "U"]
+
+        # Estimated row count
+        cur.execute("""
+            SELECT num_rows FROM all_tables
+            WHERE  owner = :s AND table_name = :t
+        """, {"s": schema, "t": table})
+        nr = cur.fetchone()
+        num_rows = nr[0] if nr and nr[0] is not None else None
+
     return {
-        "schema":      schema,
-        "table":       table,
-        "columns":     columns,
-        "constraints": constraints,
-        "indexes":     indexes,
-        "triggers":    triggers,
+        "schema":         schema,
+        "table":          table,
+        "columns":        columns,
+        "constraints":    constraints,
+        "indexes":        indexes,
+        "triggers":       triggers,
+        "pk_columns":     pk_columns,
+        "uk_constraints": [{"name": n, "columns": []} for n in uk_names],
+        "num_rows":       num_rows,
     }
 
 
