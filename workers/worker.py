@@ -654,14 +654,16 @@ def _get_comparable_columns(conn, schema: str, table: str) -> list:
 
 def _run_hash_query(ora_conn, schema: str, table: str, rowid_start: str, rowid_end: str):
     """Execute COUNT(*) + SUM(ORA_HASH(...)) on an Oracle table for a ROWID range."""
-    columns = _get_comparable_columns(ora_conn, schema, table)
+    schema_upper = schema.upper()
+    table_upper = table.upper()
+    columns = _get_comparable_columns(ora_conn, schema_upper, table_upper)
     hash_parts = [f"ORA_HASH({_cmp_col_expr(c['name'], c['data_type'])})"
                   for c in columns]
     row_hash = " + ".join(hash_parts) if hash_parts else "0"
 
     sql = (
         f'SELECT COUNT(*) AS cnt, SUM({row_hash}) AS hash_sum '
-        f'FROM "{schema}"."{table}" '
+        f'FROM "{schema_upper}"."{table_upper}" '
         f'WHERE ROWID BETWEEN CHARTOROWID(:rs) AND CHARTOROWID(:re)'
     )
     with ora_conn.cursor() as cur:
@@ -687,14 +689,14 @@ def process_compare_chunk(chunk: dict, pg_conn, configs: dict) -> None:
             tgt_schema = chunk["target_schema"]
             tgt_table  = chunk["target_table"]
 
-            src_conn = db.open_oracle("oracle_source", configs)
+            src_conn = db.open_oracle("oracle_source", configs, use_owner=True)
             try:
                 src_count, src_hash = _run_hash_query(src_conn, src_schema, src_table, rowid_start, rowid_end)
             finally:
                 try: src_conn.close()
                 except Exception: pass
 
-            tgt_conn = db.open_oracle("oracle_target", configs)
+            tgt_conn = db.open_oracle("oracle_target", configs, use_owner=True)
             try:
                 tgt_count, tgt_hash = _run_hash_query(tgt_conn, tgt_schema, tgt_table, rowid_start, rowid_end)
             finally:

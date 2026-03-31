@@ -84,10 +84,11 @@ def load_configs(conn) -> dict:
 # Oracle connection
 # ---------------------------------------------------------------------------
 
-def open_oracle(connection_id: str, configs: dict):
+def open_oracle(connection_id: str, configs: dict, use_owner: bool = False):
     """
     Open an Oracle connection using the service config keyed by connection_id.
     connection_id = 'oracle_source' | 'oracle_target'
+    If use_owner=True, uses owner_user/owner_password instead of user/password.
     """
     try:
         import oracledb
@@ -98,8 +99,13 @@ def open_oracle(connection_id: str, configs: dict):
     host         = (cfg.get("host") or "").strip()
     port         = int(cfg.get("port") or 1521)
     service_name = (cfg.get("service_name") or "").strip()
-    user         = (cfg.get("user") or "").strip()
-    password     = cfg.get("password") or ""
+
+    if use_owner and cfg.get("owner_user"):
+        user     = (cfg.get("owner_user") or "").strip()
+        password = cfg.get("owner_password") or ""
+    else:
+        user     = (cfg.get("user") or "").strip()
+        password = cfg.get("password") or ""
 
     if not host or not service_name or not user:
         raise ValueError(
