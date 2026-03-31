@@ -35,6 +35,7 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            initial_phase: "NEW",
             migration_name: `${schema}.${table}`,
             source_connection_id: "oracle_source",
             target_connection_id: "oracle_target",
