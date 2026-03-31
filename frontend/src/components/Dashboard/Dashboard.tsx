@@ -137,9 +137,11 @@ export function Dashboard() {
   // Counts
   const counts = useMemo(() => {
     const total = enrichedTables.length;
-    const withMigration = enrichedTables.filter((t) => t.migration).length;
-    const errors = enrichedTables.filter((t) => t.migration?.phase === "FAILED").length;
-    return { total, withMigration, noMigration: total - withMigration, errors };
+    const withMigration = enrichedTables.filter(t => t.migration).length;
+    const completed = enrichedTables.filter(t => t.migration_status === "COMPLETED").length;
+    const errors = enrichedTables.filter(t => t.migration_status === "FAILED").length;
+    const active = enrichedTables.filter(t => t.migration_status === "IN_PROGRESS" || t.migration_status === "PLANNED").length;
+    return { total, withMigration, noMigration: total - withMigration, errors, completed, active };
   }, [enrichedTables]);
 
   // Selection
