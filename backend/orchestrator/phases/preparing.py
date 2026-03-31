@@ -33,8 +33,10 @@ def handle_new(mid: str, m: dict) -> None:
              "NO_KEY_COLUMNS")
         return
 
-    if not check_loading_slot(mid):
-        return
+    # BULK_ONLY migrations skip queue gating — no CDC backlog concern
+    if mode != "BULK_ONLY":
+        if not check_loading_slot(mid):
+            return
 
     update(mid, {"queue_position": None})
     transition(mid, "PREPARING", message="Ключевые колонки проверены")

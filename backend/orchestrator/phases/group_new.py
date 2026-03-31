@@ -32,12 +32,12 @@ def handle_new_group(mid: str, m: dict) -> None:
              "NO_KEY_COLUMNS")
         return
 
-    # Queue gate (same as legacy)
-    if not check_loading_slot(mid):
-        return
+    # Queue gate — skip for BULK_ONLY (no CDC backlog concern)
+    if mode != "BULK_ONLY":
+        if not check_loading_slot(mid):
+            return
 
     # Verify group connector is RUNNING (for CDC mode)
-    mode = (m.get("migration_mode") or "CDC").upper()
     if mode != "BULK_ONLY":
         group = connector_groups_svc.get_group(m["group_id"])
         if not group:

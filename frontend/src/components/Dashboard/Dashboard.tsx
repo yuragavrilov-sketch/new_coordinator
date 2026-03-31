@@ -67,7 +67,7 @@ export function Dashboard() {
 
   useEffect(() => {
     loadMigrations();
-    const id = setInterval(loadMigrations, 5000);
+    const id = setInterval(loadMigrations, 3000);
     return () => clearInterval(id);
   }, [loadMigrations]);
 
