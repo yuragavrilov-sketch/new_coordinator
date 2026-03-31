@@ -2,6 +2,7 @@ export type MigrationPhase =
   | "DRAFT" | "NEW" | "PREPARING" | "SCN_FIXED"
   | "CONNECTOR_STARTING" | "CDC_BUFFERING"
   | "TOPIC_CREATING"
+  | "STRUCTURE_READY" | "DATA_COMPARING" | "TARGET_CLEARING"
   | "CHUNKING" | "BULK_LOADING" | "BULK_LOADED"
   | "STAGE_VALIDATING" | "STAGE_VALIDATED"
   | "BASELINE_PUBLISHING" | "BASELINE_LOADING" | "BASELINE_PUBLISHED"
@@ -148,6 +149,9 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   CONNECTOR_STARTING:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   CDC_BUFFERING:       { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
   TOPIC_CREATING:      { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
+  STRUCTURE_READY:     { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
+  DATA_COMPARING:      { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
+  TARGET_CLEARING:     { bg: "#431407", text: "#fdba74", border: "#ea580c" },
   CHUNKING:            { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
   BULK_LOADING:        { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
   BULK_LOADED:         { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
@@ -182,6 +186,7 @@ export const ORDERED_PHASES: MigrationPhase[] = [
   "DRAFT", "NEW", "PREPARING", "SCN_FIXED",
   "CONNECTOR_STARTING", "CDC_BUFFERING",
   "TOPIC_CREATING",
+  "STRUCTURE_READY", "DATA_COMPARING", "TARGET_CLEARING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
   "STAGE_VALIDATING", "STAGE_VALIDATED",
   "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",

@@ -47,7 +47,7 @@ def test_phase_heavy():
 
 
 def test_phase_count():
-    assert len(Phase) == 29
+    assert len(Phase) == 32
 
 
 def test_chunk_status_values():
