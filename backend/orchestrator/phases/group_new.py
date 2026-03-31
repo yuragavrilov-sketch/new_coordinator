@@ -10,7 +10,7 @@ from orchestrator.helpers import (
     oracle_cfg, configs, get_conn, transition, fail, update, safe_transition,
     current_phase, in_prog, mark_in_prog, unmark_in_prog,
 )
-from orchestrator.queue import check_loading_slot
+from orchestrator.queue import check_loading_slot, check_bulk_slot
 from orchestrator.phases.preparing import create_chunks_and_transition
 
 
@@ -32,8 +32,11 @@ def handle_new_group(mid: str, m: dict) -> None:
              "NO_KEY_COLUMNS")
         return
 
-    # Queue gate — skip for BULK_ONLY (no CDC backlog concern)
-    if mode != "BULK_ONLY":
+    # CDC: one at a time. BULK_ONLY: up to MAX_BULK_CONCURRENT.
+    if mode == "BULK_ONLY":
+        if not check_bulk_slot(mid):
+            return
+    else:
         if not check_loading_slot(mid):
             return
 

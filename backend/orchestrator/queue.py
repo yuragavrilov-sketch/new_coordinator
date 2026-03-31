@@ -1,6 +1,12 @@
-"""Queue gating — ensures only one migration at a time in heavy phases."""
+"""Queue gating — controls concurrency for migrations in heavy phases."""
+
+import os
 
 from orchestrator.helpers import get_conn, update
+
+# Max concurrent BULK_ONLY migrations in heavy phases.
+# CDC is still limited to 1 (to control Kafka backlog).
+MAX_BULK_CONCURRENT = int(os.environ.get("MAX_BULK_CONCURRENT", "5"))
 
 _HEAVY_PHASES = frozenset({
     "PREPARING", "SCN_FIXED",
@@ -81,6 +87,35 @@ def check_loading_slot(mid: str) -> bool:
         conn.close()
 
     if first and first[0] != mid:
+        update_queue_positions()
+        return False
+
+    return True
+
+
+def check_bulk_slot(mid: str) -> bool:
+    """Check if there's room for another BULK_ONLY migration.
+
+    Unlike CDC (1 at a time), BULK_ONLY allows up to MAX_BULK_CONCURRENT
+    migrations in heavy phases simultaneously.
+    Returns True if the migration may proceed.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            placeholders = ",".join(["%s"] * len(_HEAVY_PHASES))
+            cur.execute(
+                f"""SELECT COUNT(*) FROM migrations
+                    WHERE  phase IN ({placeholders})
+                      AND  migration_id != %s
+                      AND  migration_mode = 'BULK_ONLY'""",
+                (*_HEAVY_PHASES, mid),
+            )
+            active_bulk = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    if active_bulk >= MAX_BULK_CONCURRENT:
         update_queue_positions()
         return False
 

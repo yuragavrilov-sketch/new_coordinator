@@ -12,7 +12,7 @@ from orchestrator.helpers import (
     oracle_cfg, transition, fail, update, safe_transition,
     current_phase, in_prog, mark_in_prog, unmark_in_prog, get_conn, broadcast,
 )
-from orchestrator.queue import check_loading_slot
+from orchestrator.queue import check_loading_slot, check_bulk_slot
 
 
 def handle_new(mid: str, m: dict) -> None:
@@ -33,8 +33,12 @@ def handle_new(mid: str, m: dict) -> None:
              "NO_KEY_COLUMNS")
         return
 
-    # BULK_ONLY migrations skip queue gating — no CDC backlog concern
-    if mode != "BULK_ONLY":
+    # CDC: one at a time (Kafka backlog concern)
+    # BULK_ONLY: up to MAX_BULK_CONCURRENT at a time
+    if mode == "BULK_ONLY":
+        if not check_bulk_slot(mid):
+            return
+    else:
         if not check_loading_slot(mid):
             return
 
