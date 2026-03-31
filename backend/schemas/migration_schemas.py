@@ -8,7 +8,7 @@ VALID_ACTIONS = frozenset({
 })
 
 ACTION_TRANSITIONS: dict[str, tuple[str | None, str]] = {
-    "run":            (None,              "NEW"),
+    "run":            ("DRAFT",           "NEW"),
     "pause":          (None,              "PAUSED"),
     "resume":         ("PAUSED",          "BULK_LOADING"),
     "cancel":         (None,              "CANCELLING"),

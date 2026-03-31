@@ -11,22 +11,17 @@ import services.job_queue   as job_queue
 import services.kafka_lag   as kafka_lag_svc
 import services.oracle_stage as oracle_stage
 
-bp = Blueprint("migrations", __name__)
+from routes.utils import db_required, validate_body
+from schemas.migration_schemas import (
+    ACTION_TRANSITIONS,
+    DELETABLE_PHASES,
+    CreateMigrationRequest,
+    MigrationActionRequest,
+    TransitionPhaseRequest,
+    UpdateWorkersRequest,
+)
 
-_VALID_PHASES = {
-    "DRAFT", "NEW", "PREPARING", "SCN_FIXED",
-    "CONNECTOR_STARTING", "CDC_BUFFERING",
-    "TOPIC_CREATING",
-    "CHUNKING", "BULK_LOADING", "BULK_LOADED",
-    "STAGE_VALIDATING", "STAGE_VALIDATED",
-    "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
-    "STAGE_DROPPING", "INDEXES_ENABLING",
-    "DATA_VERIFYING", "DATA_MISMATCH",
-    "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
-    "STEADY_STATE", "PAUSED",
-    "CANCELLING", "CANCELLED",
-    "COMPLETED", "FAILED",
-}
+bp = Blueprint("migrations", __name__)
 
 _LIST_COLS = """
     migration_id, migration_name, phase, state_changed_at,
@@ -52,14 +47,9 @@ def init(get_conn_fn, row_to_dict_fn, db_available_ref, broadcast_fn,
     _state["enable_indexes"]  = enable_indexes_fn
 
 
-def _db_ok() -> bool:
-    return _state["db_available"]["value"]
-
-
 @bp.get("/api/migrations")
+@db_required(_state)
 def list_migrations():
-    if not _db_ok():
-        return jsonify([])
     try:
         conn = _state["get_conn"]()
         try:
@@ -73,9 +63,8 @@ def list_migrations():
 
 
 @bp.get("/api/migrations/<migration_id>")
+@db_required(_state)
 def get_migration(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     try:
         conn = _state["get_conn"]()
         try:
@@ -102,16 +91,9 @@ def get_migration(migration_id: str):
 
 
 @bp.post("/api/migrations")
+@db_required(_state)
 def create_migration():
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
-    body = request.get_json(force=True) or {}
-    if not body.get("migration_name", "").strip():
-        return jsonify({"error": "migration_name is required"}), 400
-
-    initial_phase = body.get("initial_phase", "DRAFT").strip().upper()
-    if initial_phase not in _VALID_PHASES:
-        return jsonify({"error": f"Invalid initial_phase: {initial_phase}"}), 400
+    data = validate_body(CreateMigrationRequest)
 
     mid = str(uuid.uuid4())
     now = datetime.utcnow()
@@ -120,21 +102,13 @@ def create_migration():
         conn = _state["get_conn"]()
         try:
             with conn.cursor() as cur:
-                strategy = body.get("migration_strategy", "STAGE").strip().upper()
-                if strategy not in ("STAGE", "DIRECT"):
-                    strategy = "STAGE"
-
-                mode = body.get("migration_mode", "CDC").strip().upper()
-                if mode not in ("CDC", "BULK_ONLY"):
-                    mode = "CDC"
-
                 # Group-based migration: derive connector fields from group
-                group_id = body.get("group_id") or None
+                group_id = data.group_id
                 connector_name = ""
                 topic_prefix = ""
                 consumer_group = ""
 
-                if group_id and mode == "CDC":
+                if group_id and data.migration_mode == "CDC":
                     from services.connector_groups import get_group as _get_group
                     group = _get_group(group_id)
                     if not group:
@@ -142,14 +116,14 @@ def create_migration():
                     from services.connector_groups import _active_topic_prefix
                     connector_name = group["connector_name"]
                     topic_prefix = _active_topic_prefix(group)
-                    src_schema = body.get("source_schema", "").upper()
-                    src_table = body.get("source_table", "").upper()
+                    src_schema = data.source_schema.upper()
+                    src_table = data.source_table.upper()
                     prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
                     consumer_group = f"{prefix}_{src_schema}_{src_table}"
-                elif mode == "CDC":
-                    connector_name = body.get("connector_name", "")
-                    topic_prefix = body.get("topic_prefix", "")
-                    consumer_group = body.get("consumer_group", "")
+                elif data.migration_mode == "CDC":
+                    connector_name = data.connector_name
+                    topic_prefix = data.topic_prefix
+                    consumer_group = data.consumer_group
 
                 cur.execute("""
                     INSERT INTO migrations (
@@ -180,24 +154,24 @@ def create_migration():
                         %s, %s
                     )
                 """, (
-                    mid, body["migration_name"], initial_phase, now,
-                    body.get("source_connection_id", ""),
-                    body.get("target_connection_id", ""),
-                    body.get("source_schema", ""), body.get("source_table", ""),
-                    body.get("target_schema", ""), body.get("target_table", ""),
-                    body.get("stage_table_name", ""),
-                    body.get("stage_tablespace", "").strip().upper(),
+                    mid, data.migration_name, data.initial_phase, now,
+                    data.source_connection_id,
+                    data.target_connection_id,
+                    data.source_schema, data.source_table,
+                    data.target_schema, data.target_table,
+                    data.stage_table_name,
+                    data.stage_tablespace,
                     connector_name,
                     topic_prefix,
                     consumer_group,
-                    body.get("chunk_size", 1_000_000),
-                    max(1, int(body.get("max_parallel_workers",          1) or 1)),
-                    max(1, int(body.get("baseline_parallel_degree",      4) or 4)),
-                    body.get("validate_hash_sample", False),
-                    body.get("source_pk_exists", False), body.get("source_uk_exists", False),
-                    body.get("effective_key_type", ""), body.get("effective_key_source", ""),
-                    body.get("effective_key_columns_json", "[]"),
-                    strategy, mode,
+                    data.chunk_size,
+                    data.max_parallel_workers,
+                    data.baseline_parallel_degree,
+                    data.validate_hash_sample,
+                    data.source_pk_exists, data.source_uk_exists,
+                    data.effective_key_type, data.effective_key_source,
+                    data.effective_key_columns_json,
+                    data.migration_strategy, data.migration_mode,
                     group_id,
                     now, now,
                 ))
@@ -205,13 +179,13 @@ def create_migration():
                     INSERT INTO migration_state_history
                         (migration_id, from_phase, to_phase, message, actor_type)
                     VALUES (%s, NULL, %s, %s, 'USER')
-                """, (mid, initial_phase, "Migration created"))
+                """, (mid, data.initial_phase, "Migration created"))
             conn.commit()
         finally:
             conn.close()
 
         # If group-based, update Debezium connector table list
-        if group_id and mode == "CDC":
+        if group_id and data.migration_mode == "CDC":
             try:
                 from services.connector_groups import refresh_connector_tables
                 refresh_connector_tables(group_id)
@@ -221,7 +195,7 @@ def create_migration():
         _state["broadcast"]({
             "type":         "migration_phase",
             "migration_id": mid,
-            "phase":        initial_phase,
+            "phase":        data.initial_phase,
             "ts":           now.isoformat() + "Z",
         })
         return jsonify({"ok": True, "migration_id": mid}), 201
@@ -231,13 +205,9 @@ def create_migration():
 
 
 @bp.patch("/api/migrations/<migration_id>/phase")
+@db_required(_state)
 def transition_phase(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
-    body = request.get_json(force=True) or {}
-    to_phase = body.get("to_phase", "").strip().upper()
-    if to_phase not in _VALID_PHASES:
-        return jsonify({"error": f"Invalid phase: {to_phase}"}), 400
+    data = validate_body(TransitionPhaseRequest)
 
     try:
         conn = _state["get_conn"]()
@@ -254,16 +224,16 @@ def transition_phase(migration_id: str):
                 now = datetime.utcnow()
 
                 update_fields: dict = {
-                    "phase":            to_phase,
+                    "phase":            data.to_phase,
                     "state_changed_at": now,
                     "updated_at":       now,
                 }
-                if to_phase == "FAILED":
-                    if body.get("error_code"):  update_fields["error_code"] = body["error_code"]
-                    if body.get("error_text"):  update_fields["error_text"] = body["error_text"]
+                if data.to_phase == "FAILED":
+                    if data.error_code:  update_fields["error_code"] = data.error_code
+                    if data.error_text:  update_fields["error_text"] = data.error_text
                     update_fields["failed_phase"] = from_phase
-                if body.get("retry_count") is not None:
-                    update_fields["retry_count"] = body["retry_count"]
+                if data.retry_count is not None:
+                    update_fields["retry_count"] = data.retry_count
 
                 set_clause = ", ".join(f"{k} = %s" for k in update_fields)
                 cur.execute(
@@ -277,13 +247,13 @@ def transition_phase(migration_id: str):
                          actor_type, actor_id, correlation_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
-                    migration_id, from_phase, to_phase,
-                    body.get("transition_status", "SUCCESS"),
-                    body.get("transition_reason"),
-                    body.get("message"),
-                    body.get("actor_type", "SYSTEM"),
-                    body.get("actor_id"),
-                    body.get("correlation_id"),
+                    migration_id, from_phase, data.to_phase,
+                    data.transition_status,
+                    data.transition_reason,
+                    data.message,
+                    data.actor_type,
+                    data.actor_id,
+                    data.correlation_id,
                 ))
             conn.commit()
         finally:
@@ -293,22 +263,18 @@ def transition_phase(migration_id: str):
             "type":         "migration_phase",
             "migration_id": migration_id,
             "from_phase":   from_phase,
-            "phase":        to_phase,
+            "phase":        data.to_phase,
             "ts":           now.isoformat() + "Z",
         })
-        return jsonify({"ok": True, "from_phase": from_phase, "to_phase": to_phase})
+        return jsonify({"ok": True, "from_phase": from_phase, "to_phase": data.to_phase})
 
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
 
-_DELETABLE_PHASES = {"DRAFT", "CANCELLING", "CANCELLED", "FAILED"}
-
-
 @bp.delete("/api/migrations/<migration_id>")
+@db_required(_state)
 def delete_migration(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     try:
         conn = _state["get_conn"]()
         try:
@@ -321,10 +287,10 @@ def delete_migration(migration_id: str):
                 if not row:
                     return jsonify({"error": "Not found"}), 404
                 phase = row[0]
-                if phase not in _DELETABLE_PHASES:
+                if phase not in DELETABLE_PHASES:
                     return jsonify({
                         "error": f"Нельзя удалить миграцию в фазе {phase}. "
-                                 f"Допустимо: {', '.join(sorted(_DELETABLE_PHASES))}"
+                                 f"Допустимо: {', '.join(sorted(DELETABLE_PHASES))}"
                     }), 409
                 cur.execute(
                     "SELECT connector_name, target_connection_id, "
@@ -371,41 +337,13 @@ def delete_migration(migration_id: str):
 # Action endpoint (user-triggered transitions)
 # ---------------------------------------------------------------------------
 
-_ACTION_TRANSITIONS = {
-    "run":            ("DRAFT",           "NEW"),
-    "pause":          (None,              "PAUSED"),
-    "resume":         ("PAUSED",          "BULK_LOADING"),   # sensible default; orchestrator re-routes
-    "cancel":         (None,              "CANCELLING"),
-    "lag_zero":       ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),   # called by cdc_apply_worker
-    "retry_verify":   ("DATA_MISMATCH",   "DATA_VERIFYING"),
-    "force_complete": ("DATA_MISMATCH",   "COMPLETED"),
-}
-
-_ACTIVE_PHASES = {
-    "NEW", "PREPARING", "SCN_FIXED",
-    "CONNECTOR_STARTING", "CDC_BUFFERING",
-    "CHUNKING", "BULK_LOADING", "BULK_LOADED",
-    "STAGE_VALIDATING", "STAGE_VALIDATED",
-    "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
-    "DATA_VERIFYING", "DATA_MISMATCH",
-    "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
-    "STEADY_STATE",
-}
-
-
 @bp.post("/api/migrations/<migration_id>/action")
+@db_required(_state)
 def migration_action(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
+    data = validate_body(MigrationActionRequest)
+    action = data.action
 
-    body   = request.get_json(force=True) or {}
-    action = body.get("action", "").strip().lower()
-
-    if action not in _ACTION_TRANSITIONS:
-        return jsonify({"error": f"Unknown action: {action}. "
-                                 f"Valid: {list(_ACTION_TRANSITIONS)}"}), 400
-
-    required_from, to_phase = _ACTION_TRANSITIONS[action]
+    required_from, to_phase = ACTION_TRANSITIONS[action]
 
     try:
         conn = _state["get_conn"]()
@@ -427,7 +365,6 @@ def migration_action(migration_id: str):
                 }), 409
 
             now = datetime.utcnow()
-            extra: dict = {}
             if action == "cancel":
                 # stop Debezium connector async (best-effort)
                 try:
@@ -461,8 +398,8 @@ def migration_action(migration_id: str):
                         (migration_id, from_phase, to_phase, message, actor_type, actor_id)
                     VALUES (%s, %s, %s, %s, 'USER', %s)
                 """, (migration_id, current_phase, to_phase,
-                      body.get("message", f"Action: {action}"),
-                      body.get("actor_id")))
+                      data.message or f"Action: {action}",
+                      data.actor_id))
             conn.commit()
         finally:
             conn.close()
@@ -485,9 +422,8 @@ def migration_action(migration_id: str):
 # ---------------------------------------------------------------------------
 
 @bp.get("/api/migrations/<migration_id>/chunks")
+@db_required(_state)
 def get_migration_chunks(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     chunk_type = request.args.get("chunk_type", "BULK").strip().upper()
     if chunk_type not in ("BULK", "BASELINE"):
         chunk_type = "BULK"
@@ -520,9 +456,8 @@ def get_migration_chunks(migration_id: str):
 
 
 @bp.get("/api/migrations/<migration_id>/connector")
+@db_required(_state)
 def get_connector_status(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     try:
         conn = _state["get_conn"]()
         try:
@@ -549,9 +484,8 @@ def get_connector_status(migration_id: str):
 
 
 @bp.get("/api/migrations/<migration_id>/lag")
+@db_required(_state)
 def get_migration_lag(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     try:
         conn = _state["get_conn"]()
         try:
@@ -583,19 +517,16 @@ def get_migration_lag(migration_id: str):
 
 
 @bp.patch("/api/migrations/<migration_id>/workers")
+@db_required(_state)
 def update_workers(migration_id: str):
     """Update max_parallel_workers and/or baseline_parallel_degree on the fly."""
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
-    body = request.get_json(force=True) or {}
+    data = validate_body(UpdateWorkersRequest)
 
     fields: dict = {}
-    if "max_parallel_workers" in body:
-        fields["max_parallel_workers"] = max(1, int(body["max_parallel_workers"]))
-    if "baseline_parallel_degree" in body:
-        fields["baseline_parallel_degree"] = max(1, int(body["baseline_parallel_degree"]))
-    if not fields:
-        return jsonify({"error": "Nothing to update"}), 400
+    if data.max_parallel_workers is not None:
+        fields["max_parallel_workers"] = data.max_parallel_workers
+    if data.baseline_parallel_degree is not None:
+        fields["baseline_parallel_degree"] = data.baseline_parallel_degree
 
     try:
         conn = _state["get_conn"]()
@@ -624,15 +555,13 @@ def update_workers(migration_id: str):
 
 
 @bp.post("/api/migrations/<migration_id>/retry-chunks")
+@db_required(_state)
 def retry_failed_chunks(migration_id: str):
     """Reset FAILED chunks back to PENDING so workers will retry them.
 
     Optional query param: chunk_type=BULK|BASELINE (default: reset all failed chunks).
     Allowed phases: BULK_LOADING, BASELINE_LOADING, FAILED.
     """
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
-
     chunk_type = request.args.get("chunk_type", "").strip().upper()
     if chunk_type not in ("BULK", "BASELINE"):
         chunk_type = ""  # reset all types
@@ -701,11 +630,10 @@ def retry_failed_chunks(migration_id: str):
 
 
 @bp.post("/api/migrations/<migration_id>/enable-indexes")
+@db_required(_state)
 def enable_indexes(migration_id: str):
     """Manually trigger INDEXES_ENABLING work (rebuild indexes, re-enable constraints
     and triggers).  Migration must be in INDEXES_ENABLING phase."""
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     fn = _state.get("enable_indexes")
     if fn is None:
         return jsonify({"error": "enable_indexes not wired"}), 500
@@ -719,11 +647,10 @@ def enable_indexes(migration_id: str):
 
 
 @bp.post("/api/migrations/<migration_id>/enable-triggers")
+@db_required(_state)
 def enable_triggers(migration_id: str):
     """Manually re-enable DISABLED triggers on the target table.
     Only allowed once CDC apply is running (CDC_CATCHING_UP / CDC_CAUGHT_UP / STEADY_STATE)."""
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     fn = _state.get("enable_triggers")
     if fn is None:
         return jsonify({"error": "enable_triggers not wired"}), 500
@@ -737,11 +664,10 @@ def enable_triggers(migration_id: str):
 
 
 @bp.post("/api/migrations/<migration_id>/restart-baseline")
+@db_required(_state)
 def restart_baseline(migration_id: str):
     """Restart the baseline phase: delete old BASELINE chunks, TRUNCATE target,
     rebuild unique indexes, re-chunk and re-load."""
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     fn = _state.get("restart_baseline")
     if fn is None:
         return jsonify({"error": "restart_baseline not wired"}), 500
@@ -755,9 +681,8 @@ def restart_baseline(migration_id: str):
 
 
 @bp.get("/api/migrations/<migration_id>/validation")
+@db_required(_state)
 def get_validation_result(migration_id: str):
-    if not _db_ok():
-        return jsonify({"error": "DB unavailable"}), 503
     try:
         conn = _state["get_conn"]()
         try:
