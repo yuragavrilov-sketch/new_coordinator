@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { DashboardToolbar } from "./DashboardToolbar";
 import { TableList, type EnrichedTable } from "./TableList";
-import { BulkCreateModal } from "./BulkCreateModal";
+import { CreateBulkModal } from "./CreateBulkModal";
 import type { Migration } from "../../types/migration";
 
 type Filter = "all" | "none" | "active" | "completed" | "errors";
@@ -15,8 +15,8 @@ export function Dashboard() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [showBulkModal, setShowBulkModal] = useState(false);
-  const [bulkMode, setBulkMode] = useState<"individual" | "group">("individual");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createTables, setCreateTables] = useState<string[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
 
@@ -148,28 +148,10 @@ export function Dashboard() {
     else setSelected(new Set(enrichedTables.map((t) => t.object_name)));
   };
 
-  // Create single migration from detail panel
-  const handleCreateMigration = async (tableName: string) => {
-    try {
-      await fetch("/api/migrations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          migration_name: `${selectedSchema}.${tableName}`,
-          source_schema: selectedSchema.toUpperCase(),
-          source_table: tableName.toUpperCase(),
-          target_schema: selectedSchema.toLowerCase(),
-          target_table: tableName.toLowerCase(),
-          stage_table_name: `STG_${tableName.toUpperCase()}`,
-          migration_mode: "BULK_ONLY",
-          migration_strategy: "STAGE",
-        }),
-      });
-      loadMigrations();
-      loadTables(selectedSchema);
-    } catch (e) {
-      console.error(e);
-    }
+  // Open CreateBulkModal for a single table (called from TableDetail)
+  const handleOpenCreateModal = (tableName: string) => {
+    setCreateTables([tableName]);
+    setShowCreateModal(true);
   };
 
   return (
@@ -182,8 +164,8 @@ export function Dashboard() {
         refreshing={refreshing}
         counts={counts}
         selectedCount={selected.size}
-        onBulkCreate={() => { setBulkMode("individual"); setShowBulkModal(true); }}
-        onBulkGroup={() => { setBulkMode("group"); setShowBulkModal(true); }}
+        onBulkCreate={() => { setCreateTables([...selected]); setShowCreateModal(true); }}
+        onBulkGroup={() => { setCreateTables([...selected]); setShowCreateModal(true); }}
       />
 
       <TableList
@@ -198,17 +180,16 @@ export function Dashboard() {
         search={search}
         onSearchChange={setSearch}
         schema={selectedSchema}
-        onCreateMigration={handleCreateMigration}
+        onCreateMigration={handleOpenCreateModal}
       />
 
-      {showBulkModal && (
-        <BulkCreateModal
-          mode={bulkMode}
+      {showCreateModal && (
+        <CreateBulkModal
           schema={selectedSchema}
-          tables={[...selected]}
-          onClose={() => setShowBulkModal(false)}
+          tables={createTables}
+          onClose={() => setShowCreateModal(false)}
           onCreated={() => {
-            setShowBulkModal(false);
+            setShowCreateModal(false);
             setSelected(new Set());
             loadMigrations();
             loadTables(selectedSchema);
