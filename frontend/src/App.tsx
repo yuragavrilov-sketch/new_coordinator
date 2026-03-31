@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
 import { useSSE } from "./hooks/useSSE";
 import { ServiceStatusBar } from "./components/ServiceStatusBar";
 import { SettingsModal } from "./components/SettingsModal";
@@ -13,7 +14,6 @@ import { StatusBadge } from "./components/StatusBadge";
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "catalog" | "migrations" | "connector-groups" | "target-prep" | "data-compare" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -88,10 +88,32 @@ function SystemStats() {
   );
 }
 
-export default function App() {
+const TABS = [
+  { path: "/catalog", label: "DDL Каталог" },
+  { path: "/migrations", label: "Миграции" },
+  { path: "/connector-groups", label: "Группы коннекторов" },
+  { path: "/target-prep", label: "Подготовка таргета" },
+  { path: "/data-compare", label: "Сравнение данных" },
+  { path: "/checklist", label: "Чек-лист" },
+] as const;
+
+const tabLinkStyle = (isActive: boolean): React.CSSProperties => ({
+  background: "none",
+  border: "none",
+  borderBottom: `2px solid ${isActive ? "#3b82f6" : "transparent"}`,
+  color: isActive ? "#93c5fd" : "#475569",
+  padding: "8px 16px",
+  fontSize: 13,
+  fontWeight: isActive ? 700 : 500,
+  cursor: "pointer",
+  marginBottom: -1,
+  transition: "color 0.15s, border-color 0.15s",
+  textDecoration: "none",
+});
+
+function AppShell() {
   const { events, status, serviceStatuses, reconnect } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth();
-  const [activeTab, setActiveTab] = useState<Tab>("catalog");
   const [showSettings, setShowSettings] = useState(false);
 
   return (
@@ -115,7 +137,6 @@ export default function App() {
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
-      {/* Backend unreachable banner */}
       {backendStatus === "unreachable" && (
         <div style={{
           background: "#7f1d1d", color: "#fca5a5", padding: "10px 16px",
@@ -125,10 +146,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Service status bar */}
       <ServiceStatusBar statuses={serviceStatuses} />
 
-      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 0 }}>
         <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: "#e2e8f0" }}>
           DB Migration
@@ -142,77 +161,43 @@ export default function App() {
         </div>
       </div>
 
-      {/* Tab bar */}
       <div style={{
         display: "flex",
         gap: 0,
         marginTop: 16,
         borderBottom: "1px solid #1e293b",
       }}>
-        <TabButton
-          label="DDL Каталог"
-          active={activeTab === "catalog"}
-          onClick={() => setActiveTab("catalog")}
-        />
-        <TabButton
-          label="Миграции"
-          active={activeTab === "migrations"}
-          onClick={() => setActiveTab("migrations")}
-        />
-        <TabButton
-          label="Группы коннекторов"
-          active={activeTab === "connector-groups"}
-          onClick={() => setActiveTab("connector-groups")}
-        />
-        <TabButton
-          label="Подготовка таргета"
-          active={activeTab === "target-prep"}
-          onClick={() => setActiveTab("target-prep")}
-        />
-        <TabButton
-          label="Сравнение данных"
-          active={activeTab === "data-compare"}
-          onClick={() => setActiveTab("data-compare")}
-        />
-        <TabButton
-          label="Чек-лист"
-          active={activeTab === "checklist"}
-          onClick={() => setActiveTab("checklist")}
-        />
+        {TABS.map(tab => (
+          <NavLink
+            key={tab.path}
+            to={tab.path}
+            style={({ isActive }) => tabLinkStyle(isActive)}
+          >
+            {tab.label}
+          </NavLink>
+        ))}
       </div>
 
-      {/* Tab content */}
       <div style={{ marginTop: 16 }}>
-        {activeTab === "catalog"           && <DDLCatalog />}
-        {activeTab === "migrations"       && <MigrationList sseEvents={events} />}
-        {activeTab === "connector-groups" && <ConnectorGroupsPanel />}
-        {activeTab === "target-prep"      && <TargetPrep />}
-        {activeTab === "data-compare"    && <DataCompare />}
-        {activeTab === "checklist"        && <Checklist />}
+        <Routes>
+          <Route path="/" element={<Navigate to="/catalog" replace />} />
+          <Route path="/catalog" element={<DDLCatalog />} />
+          <Route path="/migrations" element={<MigrationList sseEvents={events} />} />
+          <Route path="/connector-groups" element={<ConnectorGroupsPanel />} />
+          <Route path="/target-prep" element={<TargetPrep />} />
+          <Route path="/data-compare" element={<DataCompare />} />
+          <Route path="/checklist" element={<Checklist />} />
+        </Routes>
       </div>
     </div>
   );
 }
 
-function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+export default function App() {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        background: "none",
-        border: "none",
-        borderBottom: `2px solid ${active ? "#3b82f6" : "transparent"}`,
-        color: active ? "#93c5fd" : "#475569",
-        padding: "8px 16px",
-        fontSize: 13,
-        fontWeight: active ? 700 : 500,
-        cursor: "pointer",
-        marginBottom: -1,
-        transition: "color 0.15s, border-color 0.15s",
-      }}
-    >
-      {label}
-    </button>
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
   );
 }
 
