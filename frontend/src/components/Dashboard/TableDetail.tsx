@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { PhaseBadge } from "../PhaseBadge";
 import { fmtTs, fmtNum } from "../../utils/format";
 
@@ -34,62 +34,91 @@ interface HistoryEntry {
   created_at: string;
 }
 
+type ChunkTab = "bulk" | "baseline" | "compare";
+
+const CHUNK_TABS: { key: ChunkTab; label: string; apiType: string }[] = [
+  { key: "bulk", label: "Bulk", apiType: "BULK" },
+  { key: "baseline", label: "Baseline", apiType: "BASELINE" },
+  { key: "compare", label: "Compare", apiType: "COMPARE" },
+];
+
 export function TableDetail({ tableName, migration, onCreateMigration }: Props) {
   const [showDetails, setShowDetails] = useState(false);
-  const [chunkStats, setChunkStats] = useState<ChunkStats | null>(null);
+  const [chunkTab, setChunkTab] = useState<ChunkTab>("bulk");
+  const [chunkStats, setChunkStats] = useState<Record<ChunkTab, ChunkStats | null>>({
+    bulk: null, baseline: null, compare: null,
+  });
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
+  const loadChunkStats = useCallback((mid: string) => {
+    for (const tab of CHUNK_TABS) {
+      if (tab.key === "compare") {
+        // Compare chunks are in data_compare_chunks, loaded via migration detail
+        fetch(`/api/migrations/${mid}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data?.data_compare_task_id) {
+              fetch(`/api/data-compare/${data.data_compare_task_id}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(task => {
+                  if (task) {
+                    setChunkStats(prev => ({
+                      ...prev,
+                      compare: {
+                        total: task.chunks_total || 0,
+                        pending: 0, claimed: 0, running: 0,
+                        done: task.chunks_done || 0,
+                        failed: (task.chunks_total || 0) - (task.chunks_done || 0),
+                        rows_loaded: 0,
+                      },
+                    }));
+                  }
+                })
+                .catch(() => {});
+            }
+          })
+          .catch(() => {});
+      } else {
+        fetch(`/api/migrations/${mid}/chunks?chunk_type=${tab.apiType}&page=1&page_size=1`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data?.stats) {
+              setChunkStats(prev => ({ ...prev, [tab.key]: data.stats }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!migration || !showDetails) return;
     const mid = migration.migration_id;
+    loadChunkStats(mid);
 
-    // Load chunk stats
-    fetch(`/api/migrations/${mid}/chunks?chunk_type=BULK&page=1&page_size=1`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.stats) setChunkStats(data.stats); })
-      .catch(() => {});
-
-    // Load recent history
+    // Load history
     fetch(`/api/migrations/${mid}`)
       .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.history) setHistory(data.history.slice(0, 10));
-      })
+      .then(data => { if (data?.history) setHistory(data.history.slice(0, 15)); })
       .catch(() => {});
-  }, [migration, showDetails]);
+  }, [migration, showDetails, loadChunkStats]);
 
-  // Polling for chunk stats
+  // Polling
   useEffect(() => {
     if (!migration || !showDetails) return;
-    const mid = migration.migration_id;
-    const id = setInterval(() => {
-      fetch(`/api/migrations/${mid}/chunks?chunk_type=BULK&page=1&page_size=1`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => { if (data?.stats) setChunkStats(data.stats); })
-        .catch(() => {});
-    }, 5000);
+    const id = setInterval(() => loadChunkStats(migration.migration_id), 5000);
     return () => clearInterval(id);
-  }, [migration, showDetails]);
+  }, [migration, showDetails, loadChunkStats]);
 
   return (
     <div style={{
-      background: "#0f172a",
-      borderLeft: "3px solid #3b82f6",
-      padding: 16,
-      marginLeft: 40,
-      marginBottom: 4,
+      background: "#0f172a", borderLeft: "3px solid #3b82f6",
+      padding: 16, marginLeft: 40, marginBottom: 4,
     }}>
       {!migration ? (
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ color: "#64748b", fontSize: 13 }}>Миграция не создана</span>
-          <button
-            onClick={() => onCreateMigration(tableName)}
-            style={{
-              background: "#3b82f6", color: "#fff", border: "none",
-              borderRadius: 6, padding: "6px 16px", fontSize: 13,
-              fontWeight: 600, cursor: "pointer",
-            }}
-          >
+          <button onClick={() => onCreateMigration(tableName)} style={btnCreate}>
             Создать миграцию
           </button>
         </div>
@@ -108,79 +137,61 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
 
           {/* Stats */}
           <div style={{ display: "flex", gap: 24, fontSize: 13, color: "#94a3b8", flexWrap: "wrap" }}>
-            <span>
-              <strong style={{ color: "#e2e8f0" }}>Чанков:</strong>{" "}
-              {fmtNum(migration.chunks_done)}/{migration.total_chunks != null ? fmtNum(migration.total_chunks) : "—"}
-            </span>
-            <span>
-              <strong style={{ color: "#e2e8f0" }}>Строк:</strong> {fmtNum(migration.rows_loaded)}
-            </span>
+            <span><strong style={{ color: "#e2e8f0" }}>Чанков:</strong> {fmtNum(migration.chunks_done)}/{migration.total_chunks != null ? fmtNum(migration.total_chunks) : "—"}</span>
+            <span><strong style={{ color: "#e2e8f0" }}>Строк:</strong> {fmtNum(migration.rows_loaded)}</span>
           </div>
 
           {/* Progress bar */}
           {migration.total_chunks != null && migration.total_chunks > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, height: 8, background: "#334155", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{
-                  width: `${Math.round((migration.chunks_done / migration.total_chunks) * 100)}%`,
-                  height: "100%", background: "#3b82f6", borderRadius: 4, transition: "width 0.3s",
-                }} />
-              </div>
-              <span style={{ fontSize: 12, color: "#94a3b8", whiteSpace: "nowrap" }}>
-                {Math.round((migration.chunks_done / migration.total_chunks) * 100)}%
-              </span>
-            </div>
+            <ProgressBar done={migration.chunks_done} total={migration.total_chunks} />
           )}
 
           {/* Error */}
           {migration.error_text && (
-            <div style={{
-              background: "#450a0a", border: "1px solid #7f1d1d",
-              borderRadius: 6, padding: "8px 12px", color: "#fca5a5",
-              fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word",
-            }}>
-              {migration.error_text}
-            </div>
+            <div style={errBlock}>{migration.error_text}</div>
           )}
 
-          {/* Expand/Collapse */}
+          {/* Expand */}
           <div>
-            <span
-              onClick={() => setShowDetails(!showDetails)}
-              style={{ color: "#3b82f6", fontSize: 13, cursor: "pointer", fontWeight: 600 }}
-            >
+            <span onClick={() => setShowDetails(!showDetails)}
+              style={{ color: "#3b82f6", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
               {showDetails ? "Свернуть ▲" : "Подробнее ▼"}
             </span>
           </div>
 
-          {/* Expanded details */}
+          {/* Expanded */}
           {showDetails && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, borderTop: "1px solid #1e293b", paddingTop: 12 }}>
-              {/* Chunk stats */}
-              {chunkStats && chunkStats.total > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>
-                    Чанки (BULK)
-                  </div>
-                  <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#94a3b8", flexWrap: "wrap" }}>
-                    <StatChip label="Всего" value={chunkStats.total} />
-                    <StatChip label="Ожидает" value={chunkStats.pending} color="#fcd34d" />
-                    <StatChip label="В работе" value={chunkStats.claimed + chunkStats.running} color="#60a5fa" />
-                    <StatChip label="Готово" value={chunkStats.done} color="#4ade80" />
-                    {chunkStats.failed > 0 && <StatChip label="Ошибка" value={chunkStats.failed} color="#f87171" />}
-                    <span>
-                      Строк: <strong style={{ color: "#e2e8f0" }}>{fmtNum(chunkStats.rows_loaded)}</strong>
-                    </span>
-                  </div>
+
+              {/* Chunk tabs */}
+              <div>
+                <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #1e293b", marginBottom: 8 }}>
+                  {CHUNK_TABS.map(tab => {
+                    const stats = chunkStats[tab.key];
+                    const hasData = stats && stats.total > 0;
+                    return (
+                      <button key={tab.key} onClick={() => setChunkTab(tab.key)} style={{
+                        background: "none", border: "none",
+                        borderBottom: `2px solid ${chunkTab === tab.key ? "#3b82f6" : "transparent"}`,
+                        color: chunkTab === tab.key ? "#93c5fd" : hasData ? "#94a3b8" : "#475569",
+                        padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                        cursor: "pointer", marginBottom: -1,
+                      }}>
+                        {tab.label}
+                        {hasData && <span style={{ marginLeft: 4, fontSize: 10, color: "#64748b" }}>({stats.total})</span>}
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
+
+                {/* Active tab content */}
+                <ChunkStatsPanel stats={chunkStats[chunkTab]} label={CHUNK_TABS.find(t => t.key === chunkTab)!.label} />
+              </div>
 
               {/* History */}
               {history.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>
-                    История переходов
-                  </div>
+                  <div style={sectionTitle}>История переходов</div>
                   <div style={{ maxHeight: 150, overflowY: "auto" }}>
                     {history.map((h, i) => (
                       <div key={i} style={{
@@ -192,14 +203,11 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
                           {fmtTs(h.created_at, "short")}
                         </span>
                         {h.from_phase && (
-                          <>
-                            <PhaseBadge phase={h.from_phase} size="sm" />
-                            <span style={{ color: "#475569" }}>→</span>
-                          </>
+                          <><PhaseBadge phase={h.from_phase} size="sm" /><span style={{ color: "#475569" }}>→</span></>
                         )}
                         <PhaseBadge phase={h.to_phase} size="sm" />
                         {h.message && (
-                          <span style={{ color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ color: "#64748b", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                             {h.message}
                           </span>
                         )}
@@ -216,10 +224,59 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
   );
 }
 
-function StatChip({ label, value, color }: { label: string; value: number; color?: string }) {
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function ChunkStatsPanel({ stats, label }: { stats: ChunkStats | null; label: string }) {
+  if (!stats || stats.total === 0) {
+    return <div style={{ fontSize: 12, color: "#475569", padding: "8px 0" }}>Нет чанков типа {label}</div>;
+  }
   return (
-    <span>
-      {label}: <strong style={{ color: color || "#e2e8f0" }}>{fmtNum(value)}</strong>
-    </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#94a3b8", flexWrap: "wrap" }}>
+        <Chip label="Всего" value={stats.total} />
+        {stats.pending > 0 && <Chip label="Ожидает" value={stats.pending} color="#fcd34d" />}
+        {(stats.claimed + stats.running) > 0 && <Chip label="В работе" value={stats.claimed + stats.running} color="#60a5fa" />}
+        <Chip label="Готово" value={stats.done} color="#4ade80" />
+        {stats.failed > 0 && <Chip label="Ошибка" value={stats.failed} color="#f87171" />}
+        {stats.rows_loaded > 0 && (
+          <span>Строк: <strong style={{ color: "#e2e8f0" }}>{fmtNum(stats.rows_loaded)}</strong></span>
+        )}
+      </div>
+      <ProgressBar done={stats.done} total={stats.total} />
+    </div>
   );
 }
+
+function ProgressBar({ done, total }: { done: number; total: number }) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 6, background: "#334155", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: "#3b82f6", borderRadius: 3, transition: "width 0.3s" }} />
+      </div>
+      <span style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>{pct}%</span>
+    </div>
+  );
+}
+
+function Chip({ label, value, color }: { label: string; value: number; color?: string }) {
+  return <span>{label}: <strong style={{ color: color || "#e2e8f0" }}>{fmtNum(value)}</strong></span>;
+}
+
+// ── Styles ──────────────────────────────────────────────────────────────────
+
+const btnCreate: React.CSSProperties = {
+  background: "#3b82f6", color: "#fff", border: "none",
+  borderRadius: 6, padding: "6px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+};
+
+const errBlock: React.CSSProperties = {
+  background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 6,
+  padding: "8px 12px", color: "#fca5a5", fontSize: 12,
+  fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word",
+};
+
+const sectionTitle: React.CSSProperties = {
+  fontSize: 11, color: "#64748b", fontWeight: 700,
+  textTransform: "uppercase", marginBottom: 6,
+};

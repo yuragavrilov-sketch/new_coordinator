@@ -108,9 +108,17 @@ export function Dashboard() {
     return tables.map((t) => {
       const key = `${selectedSchema.toUpperCase()}.${t.object_name.toUpperCase()}`;
       const mig = migrationMap.get(key);
-      if (!mig) return { ...t, migration: undefined };
+      if (!mig) return { ...t, migration_status: t.migration_status || "NONE" as const, migration: undefined };
+      // Derive migration_status from live phase
+      const phase = mig.phase;
+      const liveStatus: EnrichedTable["migration_status"] =
+        (phase === "COMPLETED") ? "COMPLETED"
+        : (phase === "FAILED" || phase === "CANCELLED") ? "FAILED"
+        : (phase === "DRAFT" || phase === "NEW") ? "PLANNED"
+        : "IN_PROGRESS";
       return {
         ...t,
+        migration_status: liveStatus,
         migration: {
           migration_id: mig.migration_id,
           migration_name: mig.migration_name,
