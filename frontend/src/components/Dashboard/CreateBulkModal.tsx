@@ -100,6 +100,32 @@ export function CreateBulkModal({ schema, tables, tablesMeta, createGroup, onClo
           const data = await resp.json().catch(() => ({ error: resp.statusText }));
           throw new Error(data.error || `HTTP ${resp.status}`);
         }
+        const wizardResult = await resp.json();
+        const groupId = wizardResult.group?.group_id;
+        const groupTables: { id: string }[] = wizardResult.tables || [];
+
+        // Create migrations for each table in the group
+        for (let i = 0; i < groupTables.length; i++) {
+          setProgress(i + 1);
+          const gt = groupTables[i];
+          const migResp = await fetch(`/api/connector-groups/${groupId}/create-migration`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              table_id: gt.id,
+              migration_strategy: strategy,
+              migration_mode: migrationMode,
+              stage_tablespace: strategy === "STAGE" ? stageTablespace : "",
+              chunk_size: chunkSize,
+              max_parallel_workers: maxWorkers,
+              baseline_parallel_degree: baselineParallel,
+            }),
+          });
+          if (!migResp.ok) {
+            const d = await migResp.json().catch(() => ({ error: migResp.statusText }));
+            console.error(`Failed to create migration for table ${gt.id}: ${d.error}`);
+          }
+        }
         onCreated();
         return;
       }
