@@ -20,14 +20,27 @@ export function Dashboard() {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
 
-  // Load snapshots on mount
+  // Load schemas on mount — try snapshots first, fallback to Oracle source schemas
   useEffect(() => {
     fetch("/api/catalog/snapshots")
       .then((r) => r.json())
       .then((snaps: { snapshot_id: number; src_schema: string }[]) => {
         const unique = [...new Set(snaps.map((s) => s.src_schema))];
-        setSchemas(unique);
-        if (unique.length > 0 && !selectedSchema) setSelectedSchema(unique[0]);
+        if (unique.length > 0) {
+          setSchemas(unique);
+          if (!selectedSchema) setSelectedSchema(unique[0]);
+        } else {
+          // No snapshots — load from Oracle, also check migration schemas
+          return Promise.all([
+            fetch("/api/db/source/schemas").then(r => r.ok ? r.json() : []).catch(() => []),
+            fetch("/api/migrations").then(r => r.ok ? r.json() : []).catch(() => []),
+          ]).then(([oraSchemas, migs]: [string[], Migration[]]) => {
+            const fromMigs = migs.map(m => m.source_schema?.toUpperCase()).filter(Boolean);
+            const all = [...new Set([...oraSchemas, ...fromMigs])].sort();
+            setSchemas(all);
+            if (all.length > 0 && !selectedSchema) setSelectedSchema(all[0]);
+          });
+        }
       })
       .catch(console.error);
   }, []);
