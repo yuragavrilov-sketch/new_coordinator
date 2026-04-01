@@ -131,11 +131,13 @@ def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> in
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
     src_conn.outputtypehandler = _lob_output_handler
 
+    phase = "connect"
     rows_loaded = 0
     try:
         with src_conn.cursor() as cur:
             cur.arraysize = batch_size
             cur.prefetchrows = batch_size + 1
+            phase = "execute-select"
             if start_scn:
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
@@ -151,14 +153,18 @@ def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> in
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
+                phase = f"fetch(loaded={rows_loaded})"
                 rows = cur.fetchmany(batch_size)
                 if not rows:
                     break
+                phase = f"insert(loaded={rows_loaded},batch={len(rows)})"
                 batch = [dict(zip(bind_names, row)) for row in rows]
                 _flush_batch(dst_conn, insert_sql, batch)
                 rows_loaded += len(batch)
                 db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
                 print(f"  → {rows_loaded} rows")
+    except Exception as exc:
+        raise type(exc)(f"[phase={phase}] {exc}") from exc
     finally:
         for c in (src_conn, dst_conn):
             try: c.close()
