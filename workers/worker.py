@@ -106,10 +106,30 @@ def _build_insert(cursor_description, target_schema: str,
 
 
 def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
-    """Execute one batch insert and commit."""
-    with dst_conn.cursor() as ic:
-        ic.executemany(insert_sql, batch)
-    dst_conn.commit()
+    """Execute one batch insert and commit.
+
+    On ORA-03106 from executemany (large LOB values), falls back to
+    row-by-row execute to isolate the problematic row.
+    """
+    try:
+        with dst_conn.cursor() as ic:
+            ic.executemany(insert_sql, batch)
+        dst_conn.commit()
+    except Exception as exc:
+        if "ORA-03106" not in str(exc):
+            raise
+        # Row-by-row fallback
+        dst_conn.rollback()
+        for i, row in enumerate(batch):
+            try:
+                with dst_conn.cursor() as ic:
+                    ic.execute(insert_sql, row)
+                dst_conn.commit()
+            except Exception as row_exc:
+                dst_conn.rollback()
+                raise type(row_exc)(
+                    f"[row {i}/{len(batch)}] {row_exc}"
+                ) from row_exc
 
 
 def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> int:
