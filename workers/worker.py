@@ -53,14 +53,23 @@ sys.path.insert(0, str(_HERE))
 import common as db
 from common import WORKER_ID
 
-# Fetch LOBs (CLOB/BLOB/NCLOB) as Python str/bytes directly — LOB locators
-# from AS OF SCN flashback cursors are invalid outside the fetching cursor,
-# which causes ORA-64219.  Setting this globally is safe for bulk copy.
 try:
     import oracledb
-    oracledb.defaults.fetch_lobs = False
 except ImportError:
     pass
+
+
+def _lob_output_handler(cursor, fetch_name, default_type, size, precision, scale):
+    """Convert LOB columns to LONG/LONG RAW so they are fetched as str/bytes.
+
+    Unlike fetch_lobs=False (which inlines LOB data into the result set and
+    can exceed Oracle's SDU causing ORA-03106), this approach reads LOBs
+    via server-side locators which handles arbitrarily large values safely.
+    """
+    if default_type in (oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB):
+        return cursor.var(oracledb.DB_TYPE_LONG, arraysize=cursor.arraysize)
+    if default_type == oracledb.DB_TYPE_BLOB:
+        return cursor.var(oracledb.DB_TYPE_LONG_RAW, arraysize=cursor.arraysize)
 
 BULK_BATCH_SIZE    = int(os.environ.get("BULK_BATCH_SIZE",    5_000))
 BULK_POLL_INTERVAL = int(os.environ.get("BULK_POLL_INTERVAL", 5))
@@ -122,6 +131,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
 
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
+    src_conn.outputtypehandler = _lob_output_handler
 
     rows_loaded = 0
     try:
