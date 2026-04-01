@@ -55,16 +55,15 @@ from common import WORKER_ID
 
 try:
     import oracledb
+    oracledb.defaults.fetch_lobs = False   # fast path: inline LOBs
 except ImportError:
     pass
 
 
 def _lob_output_handler(cursor, fetch_name, default_type, size, precision, scale):
-    """Convert LOB columns to LONG/LONG RAW so they are fetched as str/bytes.
+    """Fallback LOB handler: fetch via locator (slower but no SDU limit).
 
-    Unlike fetch_lobs=False (which inlines LOB data into the result set and
-    can exceed Oracle's SDU causing ORA-03106), this approach reads LOBs
-    via server-side locators which handles arbitrarily large values safely.
+    Used on retry after ORA-03106 when inline LOBs exceed protocol limits.
     """
     if default_type in (oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB):
         return cursor.var(oracledb.DB_TYPE_LONG, arraysize=cursor.arraysize)
@@ -112,12 +111,10 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
     dst_conn.commit()
 
 
-def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
-    """BULK/DIRECT: read from source, write to stage or target.
-
-    If start_scn is set (legacy per-migration connector): read AS OF SCN.
-    If start_scn is NULL (group-based connector): read current data.
-    """
+def _do_bulk_read_write(
+    chunk: dict, pg_conn, configs: dict, use_lob_handler: bool,
+) -> int:
+    """Core bulk read/write logic. Returns rows loaded."""
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
@@ -129,17 +126,20 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
 
+    batch_size = BULK_BATCH_SIZE
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
-    src_conn.outputtypehandler = _lob_output_handler
+
+    if use_lob_handler:
+        src_conn.outputtypehandler = _lob_output_handler
+        batch_size = min(batch_size, 500)
 
     rows_loaded = 0
     try:
         with src_conn.cursor() as cur:
-            cur.arraysize = BULK_BATCH_SIZE
-            cur.prefetchrows = BULK_BATCH_SIZE + 1
+            cur.arraysize = batch_size
+            cur.prefetchrows = batch_size + 1
             if start_scn:
-                # Legacy mode: consistent snapshot via flashback query
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                     f'AS OF SCN :p_scn '
@@ -147,7 +147,6 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                     {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
                 )
             else:
-                # Group mode: read current data (no flashback, CDC handles consistency)
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                     f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
@@ -155,7 +154,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
-                rows = cur.fetchmany(BULK_BATCH_SIZE)
+                rows = cur.fetchmany(batch_size)
                 if not rows:
                     break
                 batch = [dict(zip(bind_names, row)) for row in rows]
@@ -168,6 +167,22 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
             try: c.close()
             except Exception: pass
     return rows_loaded
+
+
+def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    """BULK/DIRECT: read from source, write to stage or target.
+
+    First attempt uses fetch_lobs=False (fast, inline LOBs).
+    On ORA-03106 (protocol error from large LOBs), retries with
+    output type handler that reads LOBs via locator (slower but safe).
+    """
+    try:
+        return _do_bulk_read_write(chunk, pg_conn, configs, use_lob_handler=False)
+    except Exception as exc:
+        if "ORA-03106" not in str(exc):
+            raise
+        print(f"[bulk] {chunk['chunk_id'][:8]}: ORA-03106 — retrying with LOB locator handler")
+        return _do_bulk_read_write(chunk, pg_conn, configs, use_lob_handler=True)
 
 
 def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> int:
