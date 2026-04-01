@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
 import { SearchSelect } from "../ui/SearchSelect";
+import type { EnrichedTable } from "./TableList";
 
 interface Props {
   schema: string;
   tables: string[];
+  tablesMeta?: EnrichedTable[];
   onClose: () => void;
   onCreated: () => void;
 }
 
-export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
+export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated }: Props) {
   const isMulti = tables.length > 1;
 
   const [targetSchema, setTargetSchema] = useState(schema.toLowerCase());
@@ -48,6 +50,25 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
       for (let i = 0; i < tables.length; i++) {
         const table = tables[i];
         const name = isMulti ? `${schema}.${table}` : migrationName;
+
+        // Resolve PK/UK from metadata
+        const meta = tablesMeta?.find(
+          t => t.object_name.toUpperCase() === table.toUpperCase(),
+        )?.metadata;
+        const pkCols = meta?.pk_columns ?? [];
+        const ukConstraints = meta?.uk_constraints ?? [];
+        const hasPk = pkCols.length > 0;
+        const hasUk = ukConstraints.length > 0;
+
+        let keyType = "NONE";
+        let keySource = "NONE";
+        let keyCols: string[] = [];
+        if (hasPk) {
+          keyType = "PRIMARY_KEY"; keySource = "PK"; keyCols = pkCols;
+        } else if (hasUk) {
+          keyType = "UNIQUE_KEY"; keySource = "UK"; keyCols = ukConstraints[0]?.columns ?? [];
+        }
+
         const resp = await fetch("/api/migrations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -67,6 +88,11 @@ export function CreateBulkModal({ schema, tables, onClose, onCreated }: Props) {
             chunk_size: chunkSize,
             max_parallel_workers: maxWorkers,
             baseline_parallel_degree: baselineParallel,
+            source_pk_exists: hasPk,
+            source_uk_exists: hasUk,
+            effective_key_type: keyType,
+            effective_key_source: keySource,
+            effective_key_columns_json: JSON.stringify(keyCols),
           }),
         });
         if (!resp.ok) {

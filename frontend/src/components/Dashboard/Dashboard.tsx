@@ -211,6 +211,7 @@ export function Dashboard() {
         <CreateBulkModal
           schema={selectedSchema}
           tables={createTables}
+          tablesMeta={enrichedTables}
           onClose={() => setShowCreateModal(false)}
           onCreated={() => {
             setShowCreateModal(false);
