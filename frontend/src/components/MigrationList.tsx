@@ -37,7 +37,8 @@ const ACTIVE_PHASES = new Set([
   "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ]);
-const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
+// Delete allowed from any phase
+const NON_STOPPABLE = new Set(["COMPLETED", "CANCELLED", "CANCELLING"]);
 
 type FilterKey = "all" | "active" | "done" | "error" | "draft";
 
@@ -321,8 +322,8 @@ function MigrationRow({
   onAction: (id: string, action: "run" | "stop" | "delete") => void;
 }) {
   const canRun    = m.phase === "DRAFT";
-  const canStop   = ACTIVE_PHASES.has(m.phase);
-  const canDelete = DELETABLE_PHASES.has(m.phase);
+  const canStop   = !NON_STOPPABLE.has(m.phase) && m.phase !== "DRAFT";
+  const canDelete = true;
 
   const showProgress = BULK_PHASES.has(m.phase) && m.total_chunks != null && m.total_chunks > 0;
   const pct = showProgress ? Math.min(100, (m.chunks_done / m.total_chunks!) * 100) : 0;
