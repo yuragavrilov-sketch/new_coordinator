@@ -112,11 +112,9 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
     dst_conn.commit()
 
 
-def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
-    """BULK/DIRECT: read from source, write to stage or target.
-
-    If start_scn is set (legacy per-migration connector): read AS OF SCN.
-    If start_scn is NULL (group-based connector): read current data.
+def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> int:
+    """Core bulk copy: SELECT from source → INSERT into target.
+    Returns rows loaded.
     """
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
@@ -136,8 +134,8 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     rows_loaded = 0
     try:
         with src_conn.cursor() as cur:
-            cur.arraysize = BULK_BATCH_SIZE
-            cur.prefetchrows = BULK_BATCH_SIZE + 1
+            cur.arraysize = batch_size
+            cur.prefetchrows = batch_size + 1
             if start_scn:
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
@@ -153,7 +151,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
             while True:
-                rows = cur.fetchmany(BULK_BATCH_SIZE)
+                rows = cur.fetchmany(batch_size)
                 if not rows:
                     break
                 batch = [dict(zip(bind_names, row)) for row in rows]
@@ -166,6 +164,35 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
             try: c.close()
             except Exception: pass
     return rows_loaded
+
+
+# Descending batch sizes to try on ORA-03106
+_BATCH_FALLBACKS = [500, 50, 10]
+
+
+def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
+    """BULK/DIRECT with automatic batch reduction on ORA-03106.
+
+    Tries BULK_BATCH_SIZE first, then progressively smaller batches
+    if Oracle's SDU is exceeded due to wide rows or large LOBs.
+    """
+    try:
+        return _bulk_read_write(chunk, pg_conn, configs, BULK_BATCH_SIZE)
+    except Exception as exc:
+        if "ORA-03106" not in str(exc):
+            raise
+        last_exc = exc
+
+    for smaller in _BATCH_FALLBACKS:
+        print(f"[bulk] {chunk['chunk_id'][:8]}: ORA-03106 — retrying batch={smaller}")
+        try:
+            return _bulk_read_write(chunk, pg_conn, configs, smaller)
+        except Exception as exc:
+            if "ORA-03106" not in str(exc):
+                raise
+            last_exc = exc
+
+    raise last_exc
 
 
 def _process_baseline_chunk(chunk: dict, pg_conn, configs: dict) -> int:
