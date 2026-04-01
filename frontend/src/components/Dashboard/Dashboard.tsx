@@ -17,6 +17,7 @@ export function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createTables, setCreateTables] = useState<string[]>([]);
+  const [createGroup, setCreateGroup] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
 
@@ -173,6 +174,7 @@ export function Dashboard() {
 
   // Open CreateBulkModal for a single table (called from TableDetail)
   const handleOpenCreateModal = (tableName: string) => {
+    setCreateGroup(false);
     setCreateTables([tableName]);
     setShowCreateModal(true);
   };
@@ -187,8 +189,8 @@ export function Dashboard() {
         refreshing={refreshing}
         counts={counts}
         selectedCount={selected.size}
-        onBulkCreate={() => { setCreateTables([...selected]); setShowCreateModal(true); }}
-        onBulkGroup={() => { setCreateTables([...selected]); setShowCreateModal(true); }}
+        onBulkCreate={() => { setCreateGroup(false); setCreateTables([...selected]); setShowCreateModal(true); }}
+        onBulkGroup={() => { setCreateGroup(true); setCreateTables([...selected]); setShowCreateModal(true); }}
       />
 
       <TableList
@@ -212,6 +214,7 @@ export function Dashboard() {
           schema={selectedSchema}
           tables={createTables}
           tablesMeta={enrichedTables}
+          createGroup={createGroup}
           onClose={() => setShowCreateModal(false)}
           onCreated={() => {
             setShowCreateModal(false);

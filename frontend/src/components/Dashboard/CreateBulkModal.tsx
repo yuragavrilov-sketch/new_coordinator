@@ -6,16 +6,19 @@ interface Props {
   schema: string;
   tables: string[];
   tablesMeta?: EnrichedTable[];
+  createGroup?: boolean;
   onClose: () => void;
   onCreated: () => void;
 }
 
-export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated }: Props) {
+function shortId() { return Math.random().toString(36).slice(2, 8); }
+
+export function CreateBulkModal({ schema, tables, tablesMeta, createGroup, onClose, onCreated }: Props) {
   const isMulti = tables.length > 1;
 
   const [targetSchema, setTargetSchema] = useState(schema.toLowerCase());
   const [targetSchemas, setTargetSchemas] = useState<string[]>([]);
-  const [migrationMode, setMigrationMode] = useState<"CDC" | "BULK_ONLY">("BULK_ONLY");
+  const [migrationMode, setMigrationMode] = useState<"CDC" | "BULK_ONLY">(createGroup ? "CDC" : "BULK_ONLY");
   const [strategy, setStrategy] = useState<"STAGE" | "DIRECT">("STAGE");
   const [chunkSize, setChunkSize] = useState(500_000);
   const [maxWorkers, setMaxWorkers] = useState(10);
@@ -24,6 +27,12 @@ export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated
   const [migrationName, setMigrationName] = useState(
     isMulti ? `bulk-${schema.toLowerCase()}` : `${schema}.${tables[0]}`,
   );
+
+  // Group fields (CDC mode)
+  const id = shortId();
+  const [groupName, setGroupName] = useState(`grp-${schema.toLowerCase()}-${id}`);
+  const [connectorName, setConnectorName] = useState(`${schema.toLowerCase()}_${id}_connector`);
+  const [topicPrefix, setTopicPrefix] = useState(`grp.${schema.toLowerCase()}.${id}`);
 
   // Load target schemas
   useEffect(() => {
@@ -42,32 +51,64 @@ export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
+  const _resolveKey = (table: string) => {
+    const meta = tablesMeta?.find(
+      t => t.object_name.toUpperCase() === table.toUpperCase(),
+    )?.metadata;
+    const pkCols = meta?.pk_columns ?? [];
+    const ukConstraints = meta?.uk_constraints ?? [];
+    const hasPk = pkCols.length > 0;
+    const hasUk = ukConstraints.length > 0;
+    let keyType = "NONE", keySource = "NONE", keyCols: string[] = [];
+    if (hasPk) { keyType = "PRIMARY_KEY"; keySource = "PK"; keyCols = pkCols; }
+    else if (hasUk) { keyType = "UNIQUE_KEY"; keySource = "UK"; keyCols = ukConstraints[0]?.columns ?? []; }
+    return { hasPk, hasUk, keyType, keySource, keyCols };
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     setError("");
     setProgress(0);
     try {
+      // CDC + group mode → use wizard API
+      if (migrationMode === "CDC" && createGroup && isMulti) {
+        const wizardTables = tables.map(table => {
+          const k = _resolveKey(table);
+          return {
+            source_schema: schema.toUpperCase(),
+            source_table: table.toUpperCase(),
+            target_schema: targetSchema.toLowerCase(),
+            target_table: table.toLowerCase(),
+            effective_key_type: k.keyType,
+            effective_key_columns: k.keyCols,
+            source_pk_exists: k.hasPk,
+            source_uk_exists: k.hasUk,
+          };
+        });
+        const resp = await fetch("/api/connector-groups/wizard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            group_name: groupName,
+            connector_name: connectorName,
+            topic_prefix: topicPrefix,
+            source_connection_id: "oracle_source",
+            tables: wizardTables,
+          }),
+        });
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({ error: resp.statusText }));
+          throw new Error(data.error || `HTTP ${resp.status}`);
+        }
+        onCreated();
+        return;
+      }
+
+      // Individual migrations (BULK_ONLY or single CDC)
       for (let i = 0; i < tables.length; i++) {
         const table = tables[i];
         const name = isMulti ? `${schema}.${table}` : migrationName;
-
-        // Resolve PK/UK from metadata
-        const meta = tablesMeta?.find(
-          t => t.object_name.toUpperCase() === table.toUpperCase(),
-        )?.metadata;
-        const pkCols = meta?.pk_columns ?? [];
-        const ukConstraints = meta?.uk_constraints ?? [];
-        const hasPk = pkCols.length > 0;
-        const hasUk = ukConstraints.length > 0;
-
-        let keyType = "NONE";
-        let keySource = "NONE";
-        let keyCols: string[] = [];
-        if (hasPk) {
-          keyType = "PRIMARY_KEY"; keySource = "PK"; keyCols = pkCols;
-        } else if (hasUk) {
-          keyType = "UNIQUE_KEY"; keySource = "UK"; keyCols = ukConstraints[0]?.columns ?? [];
-        }
+        const k = _resolveKey(table);
 
         const resp = await fetch("/api/migrations", {
           method: "POST",
@@ -88,11 +129,11 @@ export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated
             chunk_size: chunkSize,
             max_parallel_workers: maxWorkers,
             baseline_parallel_degree: baselineParallel,
-            source_pk_exists: hasPk,
-            source_uk_exists: hasUk,
-            effective_key_type: keyType,
-            effective_key_source: keySource,
-            effective_key_columns_json: JSON.stringify(keyCols),
+            source_pk_exists: k.hasPk,
+            source_uk_exists: k.hasUk,
+            effective_key_type: k.keyType,
+            effective_key_source: k.keySource,
+            effective_key_columns_json: JSON.stringify(k.keyCols),
           }),
         });
         if (!resp.ok) {
@@ -118,7 +159,9 @@ export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated
         {/* Header */}
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>
-            {isMulti ? `Разовая переливка (${tables.length} таблиц)` : "Разовая переливка"}
+            {createGroup
+              ? `Группа + миграции (${tables.length} таблиц)`
+              : isMulti ? `Миграция (${tables.length} таблиц)` : "Миграция"}
           </span>
           <span style={{ flex: 1 }} />
           <button onClick={() => !creating && onClose()} style={S.closeBtn}>✕</button>
@@ -190,6 +233,23 @@ export function CreateBulkModal({ schema, tables, tablesMeta, onClose, onCreated
               </div>
             </Field>
           </Section>
+
+          {/* Group params (CDC only) */}
+          {migrationMode === "CDC" && createGroup && (
+            <Section title="Группа коннектора" accent="#f59e0b">
+              <Field label="Имя группы">
+                <input value={groupName} onChange={e => setGroupName(e.target.value)} style={S.input} />
+              </Field>
+              <div style={S.row2}>
+                <Field label="Connector name">
+                  <input value={connectorName} onChange={e => setConnectorName(e.target.value)} style={S.input} />
+                </Field>
+                <Field label="Topic prefix">
+                  <input value={topicPrefix} onChange={e => setTopicPrefix(e.target.value)} style={S.input} />
+                </Field>
+              </div>
+            </Section>
+          )}
 
           {/* Migration params */}
           <Section title="Параметры миграции">
