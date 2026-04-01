@@ -47,10 +47,7 @@ def handle_new_group(mid: str, m: dict) -> None:
             fail(mid, "Группа коннектора не найдена", "GROUP_NOT_FOUND")
             return
         if group["status"] != "RUNNING":
-            fail(mid,
-                 f"Коннектор группы не запущен (status={group['status']}). "
-                 "Запустите коннектор группы перед миграцией.",
-                 "GROUP_NOT_RUNNING")
+            # Wait for connector to start — don't fail, just skip this tick
             return
 
     update(mid, {"queue_position": None})
