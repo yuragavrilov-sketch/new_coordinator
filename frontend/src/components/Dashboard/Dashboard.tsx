@@ -191,6 +191,7 @@ export function Dashboard() {
         onSearchChange={setSearch}
         schema={selectedSchema}
         onCreateMigration={handleOpenCreateModal}
+        onMigrationChanged={loadMigrations}
       />
 
       {showCreateModal && (

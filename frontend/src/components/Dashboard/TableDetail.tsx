@@ -19,6 +19,7 @@ interface Props {
   schema: string;
   migration?: MigrationInfo;
   onCreateMigration: (tableName: string) => void;
+  onMigrationChanged?: () => void;
 }
 
 interface ChunkStats {
@@ -42,8 +43,9 @@ const CHUNK_TABS: { key: ChunkTab; label: string; apiType: string }[] = [
   { key: "compare", label: "Compare", apiType: "COMPARE" },
 ];
 
-export function TableDetail({ tableName, migration, onCreateMigration }: Props) {
+export function TableDetail({ tableName, migration, onCreateMigration, onMigrationChanged }: Props) {
   const [showDetails, setShowDetails] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [chunkTab, setChunkTab] = useState<ChunkTab>("bulk");
   const [chunkStats, setChunkStats] = useState<Record<ChunkTab, ChunkStats | null>>({
     bulk: null, baseline: null, compare: null,
@@ -103,6 +105,34 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
       .catch(() => {});
   }, [migration, showDetails, loadChunkStats]);
 
+  const handleCancel = async () => {
+    if (!migration || !confirm("Остановить миграцию?")) return;
+    setActionBusy(true);
+    try {
+      await fetch(`/api/migrations/${migration.migration_id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      onMigrationChanged?.();
+    } catch (e) { console.error(e); }
+    finally { setActionBusy(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!migration || !confirm("Удалить миграцию? Это действие необратимо.")) return;
+    setActionBusy(true);
+    try {
+      const r = await fetch(`/api/migrations/${migration.migration_id}`, { method: "DELETE" });
+      if (r.ok) onMigrationChanged?.();
+      else {
+        const d = await r.json().catch(() => ({}));
+        alert(d.error || "Ошибка удаления");
+      }
+    } catch (e) { console.error(e); }
+    finally { setActionBusy(false); }
+  };
+
   // Polling
   useEffect(() => {
     if (!migration || !showDetails) return;
@@ -130,8 +160,18 @@ export function TableDetail({ tableName, migration, onCreateMigration }: Props) 
             <span style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600 }}>
               {migration.migration_name}
             </span>
-            <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>
-              {fmtTs(migration.state_changed_at, "short")}
+            <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#64748b" }}>
+                {fmtTs(migration.state_changed_at, "short")}
+              </span>
+              {migration.phase !== "COMPLETED" && migration.phase !== "CANCELLED" && migration.phase !== "CANCELLING" && (
+                <button onClick={handleCancel} disabled={actionBusy} style={btnDanger}>
+                  Остановить
+                </button>
+              )}
+              <button onClick={handleDelete} disabled={actionBusy} style={btnDangerOutline}>
+                Удалить
+              </button>
             </span>
           </div>
 
@@ -264,6 +304,16 @@ function Chip({ label, value, color }: { label: string; value: number; color?: s
 }
 
 // ── Styles ──────────────────────────────────────────────────────────────────
+
+const btnDanger: React.CSSProperties = {
+  background: "#991b1b", color: "#fca5a5", border: "1px solid #7f1d1d",
+  borderRadius: 4, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+};
+
+const btnDangerOutline: React.CSSProperties = {
+  background: "transparent", color: "#f87171", border: "1px solid #7f1d1d",
+  borderRadius: 4, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+};
 
 const btnCreate: React.CSSProperties = {
   background: "#3b82f6", color: "#fff", border: "none",

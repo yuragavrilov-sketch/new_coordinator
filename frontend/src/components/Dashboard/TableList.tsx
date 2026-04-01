@@ -43,6 +43,7 @@ interface Props {
   onSearchChange: (s: string) => void;
   schema: string;
   onCreateMigration: (tableName: string) => void;
+  onMigrationChanged?: () => void;
 }
 
 const FILTER_BTNS: { key: Filter; label: string }[] = [
@@ -120,7 +121,7 @@ export function TableList({
   tables, selected, onToggleSelect, onToggleAll,
   expandedTable, onExpandTable,
   filter, onFilterChange, search, onSearchChange,
-  schema, onCreateMigration,
+  schema, onCreateMigration, onMigrationChanged,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -224,7 +225,8 @@ export function TableList({
           />
           {expandedTable === table.object_name && (
             <TableDetail tableName={table.object_name} schema={schema}
-              migration={table.migration} onCreateMigration={onCreateMigration} />
+              migration={table.migration} onCreateMigration={onCreateMigration}
+              onMigrationChanged={onMigrationChanged} />
           )}
         </div>
       ))}

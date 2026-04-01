@@ -280,33 +280,44 @@ def delete_migration(migration_id: str):
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT phase FROM migrations WHERE migration_id = %s FOR UPDATE",
+                    "SELECT phase, connector_name, target_connection_id, "
+                    "       target_schema, stage_table_name, data_compare_task_id "
+                    "FROM   migrations WHERE migration_id = %s FOR UPDATE",
                     (migration_id,),
                 )
                 row = cur.fetchone()
                 if not row:
                     return jsonify({"error": "Not found"}), 404
-                phase = row[0]
-                if phase not in DELETABLE_PHASES:
-                    return jsonify({
-                        "error": f"Нельзя удалить миграцию в фазе {phase}. "
-                                 f"Допустимо: {', '.join(sorted(DELETABLE_PHASES))}"
-                    }), 409
+                phase            = row[0]
+                connector_name   = row[1]
+                target_conn_id   = row[2]
+                target_schema    = row[3]
+                stage_table_name = row[4]
+                compare_task_id  = row[5]
+
+                print(f"[delete_migration] {migration_id} phase={phase}")
+
+                # Delete related chunks
                 cur.execute(
-                    "SELECT connector_name, target_connection_id, "
-                    "       target_schema, stage_table_name "
-                    "FROM   migrations WHERE migration_id = %s",
+                    "DELETE FROM migration_chunks WHERE migration_id = %s",
                     (migration_id,),
                 )
-                crow = cur.fetchone()
-                connector_name      = crow[0] if crow else None
-                target_conn_id      = crow[1] if crow else None
-                target_schema       = crow[2] if crow else None
-                stage_table_name    = crow[3] if crow else None
+                # Delete compare chunks + task
+                if compare_task_id:
+                    cur.execute(
+                        "DELETE FROM data_compare_chunks WHERE task_id = %s",
+                        (compare_task_id,),
+                    )
+                    cur.execute(
+                        "DELETE FROM data_compare_tasks WHERE task_id = %s",
+                        (compare_task_id,),
+                    )
+                # Delete state history
                 cur.execute(
                     "DELETE FROM migration_state_history WHERE migration_id = %s",
                     (migration_id,),
                 )
+                # Delete migration
                 cur.execute(
                     "DELETE FROM migrations WHERE migration_id = %s",
                     (migration_id,),
@@ -314,13 +325,13 @@ def delete_migration(migration_id: str):
             conn.commit()
         finally:
             conn.close()
-        # Delete Debezium connector best-effort (after DB commit so row is gone)
+
+        # Best-effort cleanup outside transaction
         if connector_name:
             try:
                 debezium.delete_connector(connector_name)
             except Exception as exc:
                 print(f"[delete_migration] connector delete failed (ignored): {exc}")
-        # Drop stage table on target Oracle best-effort
         load_configs = _state.get("load_configs")
         if load_configs and target_conn_id and target_schema and stage_table_name:
             try:

@@ -17,7 +17,7 @@ ACTION_TRANSITIONS: dict[str, tuple[str | None, str]] = {
     "force_complete": ("DATA_MISMATCH",   "COMPLETED"),
 }
 
-DELETABLE_PHASES = frozenset({"DRAFT", "CANCELLING", "CANCELLED", "FAILED"})
+DELETABLE_PHASES = None  # any phase — force-delete always allowed
 
 
 class CreateMigrationRequest(BaseModel):
