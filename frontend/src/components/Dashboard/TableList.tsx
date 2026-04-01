@@ -11,6 +11,7 @@ export interface EnrichedTable {
     pk_columns?: string[];
     uk_constraints?: { name: string; columns: string[] }[];
     num_rows?: number | null;
+    columns?: { name: string; data_type: string }[];
   };
   migration?: {
     migration_id: string;
@@ -153,7 +154,7 @@ export function TableList({
       {/* Table header */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr 60px 100px 130px 130px 180px 110px",
+        gridTemplateColumns: "40px 1fr 60px 42px 100px 130px 130px 180px 110px",
         gap: 4, alignItems: "center", padding: "8px 12px",
         borderBottom: "1px solid #334155",
         color: "#64748b", fontSize: 11, fontWeight: 700,
@@ -164,6 +165,7 @@ export function TableList({
         </div>
         <SortHeader label="Таблица" sortKey="name" current={sortKey} dir={sortDir} onClick={handleSort} arrow={arrow} />
         <div>Ключ</div>
+        <div>LOB</div>
         <SortHeader label="Строк" sortKey="rows" current={sortKey} dir={sortDir} onClick={handleSort} arrow={arrow} />
         <SortHeader label="Статус" sortKey="status" current={sortKey} dir={sortDir} onClick={handleSort} arrow={arrow} />
         <SortHeader label="Фаза" sortKey="phase" current={sortKey} dir={sortDir} onClick={handleSort} arrow={arrow} />

@@ -37,7 +37,7 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       }}
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr 60px 100px 130px 130px 180px 110px",
+        gridTemplateColumns: "40px 1fr 60px 42px 100px 130px 130px 180px 110px",
         gap: 4,
         alignItems: "center",
         padding: "8px 12px",
@@ -77,6 +77,14 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
           : table.metadata?.uk_constraints && table.metadata.uk_constraints.length > 0
             ? <span style={{ color: "#c4b5fd", fontWeight: 700 }}>UK</span>
             : <span style={{ color: "#475569" }}>—</span>}
+      </div>
+
+      {/* LOB indicator */}
+      <div style={{ fontSize: 10, textAlign: "center" }}>
+        {table.metadata?.columns?.some(c =>
+          ["CLOB", "BLOB", "NCLOB", "LONG", "LONG RAW"].includes(c.data_type))
+          ? <span style={{ color: "#fbbf24", fontWeight: 700 }}>LOB</span>
+          : null}
       </div>
 
       {/* Estimated rows */}
