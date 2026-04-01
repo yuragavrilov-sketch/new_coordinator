@@ -59,12 +59,33 @@ const STATUS_ORDER: Record<string, number> = {
   IN_PROGRESS: 0, PLANNED: 1, FAILED: 2, COMPLETED: 3, NONE: 4,
 };
 
-function applyFilters(tables: EnrichedTable[], filter: Filter, search: string): EnrichedTable[] {
+const LOB_TYPES = new Set(["CLOB", "BLOB", "NCLOB", "LONG", "LONG RAW"]);
+
+function _hasLob(t: EnrichedTable): boolean {
+  return t.metadata?.columns?.some(c => LOB_TYPES.has(c.data_type)) ?? false;
+}
+function _hasPk(t: EnrichedTable): boolean {
+  return (t.metadata?.pk_columns?.length ?? 0) > 0;
+}
+function _hasUk(t: EnrichedTable): boolean {
+  return (t.metadata?.uk_constraints?.length ?? 0) > 0;
+}
+
+// null = any, true = has, false = hasn't
+type TriState = boolean | null;
+
+interface StructFilters { pk: TriState; lob: TriState }
+
+function applyFilters(tables: EnrichedTable[], filter: Filter, search: string, struct: StructFilters): EnrichedTable[] {
   let result = tables;
   if (filter === "none") result = result.filter(t => t.migration_status === "NONE");
   else if (filter === "active") result = result.filter(t => t.migration_status === "IN_PROGRESS" || t.migration_status === "PLANNED");
   else if (filter === "completed") result = result.filter(t => t.migration_status === "COMPLETED");
   else if (filter === "errors") result = result.filter(t => t.migration_status === "FAILED");
+  if (struct.pk === true) result = result.filter(t => _hasPk(t) || _hasUk(t));
+  else if (struct.pk === false) result = result.filter(t => !_hasPk(t) && !_hasUk(t));
+  if (struct.lob === true) result = result.filter(_hasLob);
+  else if (struct.lob === false) result = result.filter(t => !_hasLob(t));
   if (search.trim()) {
     const q = search.trim().toLowerCase();
     result = result.filter(t => t.object_name.toLowerCase().includes(q));
@@ -105,8 +126,11 @@ export function TableList({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
+  const [structFilters, setStructFilters] = useState<StructFilters>({ pk: null, lob: null });
 
-  const filtered = useMemo(() => applyFilters(tables, filter, search), [tables, filter, search]);
+  const toggleTri = (val: TriState): TriState => val === null ? true : val === true ? false : null;
+
+  const filtered = useMemo(() => applyFilters(tables, filter, search, structFilters), [tables, filter, search, structFilters]);
   const sorted = useMemo(() => sortTables(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(sorted.length / pageSize));
@@ -140,6 +164,15 @@ export function TableList({
             </button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: 4, marginLeft: 8, borderLeft: "1px solid #334155", paddingLeft: 8 }}>
+          <TriBtn label="PK/UK" value={structFilters.pk}
+            colors={{ on: "#86efac", off: "#f87171" }}
+            onClick={() => { setStructFilters(s => ({ ...s, pk: toggleTri(s.pk) })); setPage(1); }} />
+          <TriBtn label="LOB" value={structFilters.lob}
+            colors={{ on: "#fbbf24", off: "#94a3b8" }}
+            onClick={() => { setStructFilters(s => ({ ...s, lob: toggleTri(s.lob) })); setPage(1); }} />
+        </div>
+
         <input type="text" placeholder="Поиск таблицы…" value={search}
           onChange={e => { onSearchChange(e.target.value); setPage(1); }}
           style={{
@@ -249,3 +282,22 @@ const pgBtn = (disabled: boolean): React.CSSProperties => ({
   color: disabled ? "#475569" : "#e2e8f0", padding: "3px 8px", fontSize: 12,
   cursor: disabled ? "not-allowed" : "pointer",
 });
+
+function TriBtn({ label, value, colors, onClick }: {
+  label: string; value: TriState;
+  colors: { on: string; off: string };
+  onClick: () => void;
+}) {
+  const color = value === null ? "#64748b" : value ? colors.on : colors.off;
+  const prefix = value === null ? "" : value ? "+" : "−";
+  return (
+    <button onClick={onClick} style={{
+      background: value === null ? "#1e293b" : value ? "#1e293b" : "#1e293b",
+      color, border: `1px solid ${value === null ? "#334155" : color}`,
+      borderRadius: 4, padding: "3px 8px", fontSize: 11, fontWeight: 600,
+      cursor: "pointer", minWidth: 50,
+    }}>
+      {prefix}{label}
+    </button>
+  );
+}
