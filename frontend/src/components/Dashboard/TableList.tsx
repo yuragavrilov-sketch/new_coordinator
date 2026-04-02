@@ -77,7 +77,14 @@ function _hasUk(t: EnrichedTable): boolean {
 // null = any, true = has, false = hasn't
 type TriState = boolean | null;
 
-interface StructFilters { pk: TriState; lob: TriState }
+function _hasSup(t: EnrichedTable): boolean {
+  return t.metadata?.supplemental_logging ?? false;
+}
+function _hasIdentity(t: EnrichedTable): boolean {
+  return (t.metadata?.identity_columns?.length ?? 0) > 0;
+}
+
+interface StructFilters { pk: TriState; lob: TriState; sup: TriState; identity: TriState }
 
 function applyFilters(tables: EnrichedTable[], filter: Filter, search: string, struct: StructFilters): EnrichedTable[] {
   let result = tables;
@@ -89,6 +96,10 @@ function applyFilters(tables: EnrichedTable[], filter: Filter, search: string, s
   else if (struct.pk === false) result = result.filter(t => !_hasPk(t) && !_hasUk(t));
   if (struct.lob === true) result = result.filter(_hasLob);
   else if (struct.lob === false) result = result.filter(t => !_hasLob(t));
+  if (struct.sup === true) result = result.filter(_hasSup);
+  else if (struct.sup === false) result = result.filter(t => !_hasSup(t));
+  if (struct.identity === true) result = result.filter(_hasIdentity);
+  else if (struct.identity === false) result = result.filter(t => !_hasIdentity(t));
   if (search.trim()) {
     const q = search.trim().toLowerCase();
     result = result.filter(t => t.object_name.toLowerCase().includes(q));
@@ -129,7 +140,7 @@ export function TableList({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
-  const [structFilters, setStructFilters] = useState<StructFilters>({ pk: null, lob: null });
+  const [structFilters, setStructFilters] = useState<StructFilters>({ pk: null, lob: null, sup: null, identity: null });
 
   const toggleTri = (val: TriState): TriState => val === null ? true : val === true ? false : null;
 
@@ -174,6 +185,12 @@ export function TableList({
           <TriBtn label="LOB" value={structFilters.lob}
             colors={{ on: "#fbbf24", off: "#94a3b8" }}
             onClick={() => { setStructFilters(s => ({ ...s, lob: toggleTri(s.lob) })); setPage(1); }} />
+          <TriBtn label="SUP" value={structFilters.sup}
+            colors={{ on: "#a78bfa", off: "#94a3b8" }}
+            onClick={() => { setStructFilters(s => ({ ...s, sup: toggleTri(s.sup) })); setPage(1); }} />
+          <TriBtn label="ID" value={structFilters.identity}
+            colors={{ on: "#f472b6", off: "#94a3b8" }}
+            onClick={() => { setStructFilters(s => ({ ...s, identity: toggleTri(s.identity) })); setPage(1); }} />
         </div>
 
         <input type="text" placeholder="Поиск таблицы…" value={search}
