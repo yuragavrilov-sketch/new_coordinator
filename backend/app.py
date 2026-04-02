@@ -193,6 +193,13 @@ catalog_mod.init(
 )
 app.register_blueprint(catalog_bp)
 
+# ── Sequences blueprint ─────────────────────────────────────────────────────
+import routes.sequences as sequences_mod
+from routes.sequences import bp as sequences_bp
+
+sequences_mod.init(load_configs_fn=_load_cfg)
+app.register_blueprint(sequences_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp
