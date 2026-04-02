@@ -47,6 +47,7 @@ class CreateMigrationRequest(BaseModel):
     effective_key_type: str = ""
     effective_key_source: str = ""
     effective_key_columns_json: str = "[]"
+    source_filter: str | None = None
     created_by: str | None = None
     description: str | None = None
 

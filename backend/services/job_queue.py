@@ -57,8 +57,8 @@ def claim_chunk(conn, worker_id: str) -> Optional[dict]:
             SELECT u.chunk_id, u.migration_id, u.chunk_seq, u.rowid_start, u.rowid_end,
                    m.source_connection_id, m.target_connection_id,
                    m.source_schema, m.source_table,
-                   m.target_schema, m.stage_table_name,
-                   m.start_scn
+                   m.target_schema, m.target_table, m.stage_table_name,
+                   m.start_scn, m.migration_strategy, m.source_filter
             FROM   updated u
             JOIN   migrations m ON m.migration_id = u.migration_id
         """, (worker_id,))
@@ -69,8 +69,8 @@ def claim_chunk(conn, worker_id: str) -> Optional[dict]:
         (chunk_id, migration_id, chunk_seq, rowid_start, rowid_end,
          src_conn_id, dst_conn_id,
          src_schema, src_table,
-         tgt_schema, stage_table,
-         start_scn) = row
+         tgt_schema, tgt_table, stage_table,
+         start_scn, migration_strategy, source_filter) = row
 
     conn.commit()
     return {
@@ -84,8 +84,11 @@ def claim_chunk(conn, worker_id: str) -> Optional[dict]:
         "source_schema":        src_schema,
         "source_table":         src_table,
         "target_schema":        tgt_schema,
+        "target_table":         tgt_table,
         "stage_table":          stage_table,
         "start_scn":            str(start_scn) if start_scn is not None else None,
+        "migration_strategy":   migration_strategy or "STAGE",
+        "source_filter":        source_filter,
     }
 
 

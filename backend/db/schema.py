@@ -132,6 +132,7 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS queue_position            INTEGER",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_mode            VARCHAR(32) NOT NULL DEFAULT 'CDC'",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS data_compare_task_id      UUID",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS source_filter             TEXT",
             ]:
                 cur.execute(col_sql)
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]

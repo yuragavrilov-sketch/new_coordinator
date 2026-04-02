@@ -47,6 +47,8 @@ export function CreateBulkModal({ schema, tables, tablesMeta, createGroup, onClo
       .catch(() => {});
   }, []);
 
+  const [sourceFilter, setSourceFilter] = useState("");
+
   const [creating, setCreating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
@@ -137,6 +139,7 @@ export function CreateBulkModal({ schema, tables, tablesMeta, createGroup, onClo
             effective_key_type: k.keyType,
             effective_key_source: k.keySource,
             effective_key_columns_json: JSON.stringify(k.keyCols),
+            ...(sourceFilter.trim() ? { source_filter: sourceFilter.trim() } : {}),
           }),
         });
         if (!resp.ok) {
@@ -300,6 +303,20 @@ export function CreateBulkModal({ schema, tables, tablesMeta, createGroup, onClo
                 </Field>
               </div>
             )}
+
+            <Field label="WHERE фильтр" hint="Условие для выборки строк из source (опционально)">
+              <input
+                value={sourceFilter}
+                onChange={e => setSourceFilter(e.target.value)}
+                style={{ ...S.input, fontFamily: "monospace", fontSize: 12 }}
+                placeholder='например: STATUS = 1 AND CREATED_AT > DATE "2024-01-01"'
+              />
+              {sourceFilter.trim() && (
+                <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 3 }}>
+                  SELECT * FROM {schema}.{tables[0]} WHERE ... AND ({sourceFilter.trim()})
+                </div>
+              )}
+            </Field>
 
             <div style={S.row2}>
               <Field label="Chunk size" hint="Строк на чанк (500k–2M)">

@@ -137,7 +137,7 @@ def create_migration():
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
                         migration_strategy, migration_mode,
-                        group_id,
+                        group_id, source_filter,
                         created_at, updated_at
                     ) VALUES (
                         %s, %s, %s, %s,
@@ -150,7 +150,7 @@ def create_migration():
                         %s, %s,
                         %s, %s, %s,
                         %s, %s,
-                        %s,
+                        %s, %s,
                         %s, %s
                     )
                 """, (
@@ -172,7 +172,7 @@ def create_migration():
                     data.effective_key_type, data.effective_key_source,
                     data.effective_key_columns_json,
                     data.migration_strategy, data.migration_mode,
-                    group_id,
+                    group_id, data.source_filter,
                     now, now,
                 ))
                 cur.execute("""

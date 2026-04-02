@@ -146,6 +146,7 @@ def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> in
     start_scn   = int(raw_scn) if raw_scn else None
     rowid_start = chunk["rowid_start"]
     rowid_end   = chunk["rowid_end"]
+    source_filter = (chunk.get("source_filter") or "").strip()
 
     src_conn = db.open_oracle(chunk["source_connection_id"], configs)
     dst_conn = db.open_oracle(chunk["target_connection_id"], configs)
@@ -153,6 +154,11 @@ def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> in
 
     phase = "connect"
     rows_loaded = 0
+    # Build WHERE clause: ROWID range + optional user filter
+    where = "ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)"
+    if source_filter:
+        where += f" AND ({source_filter})"
+
     try:
         with src_conn.cursor() as cur:
             cur.arraysize = batch_size
@@ -162,13 +168,13 @@ def _bulk_read_write(chunk: dict, pg_conn, configs: dict, batch_size: int) -> in
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                     f'AS OF SCN :p_scn '
-                    f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
+                    f'WHERE {where}',
                     {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
                 )
             else:
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
-                    f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',
+                    f'WHERE {where}',
                     {"p_start": rowid_start, "p_end": rowid_end},
                 )
             insert_sql, bind_names = _build_insert(cur.description, tgt_schema, dest_table)
