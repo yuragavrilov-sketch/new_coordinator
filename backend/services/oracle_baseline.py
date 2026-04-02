@@ -15,6 +15,7 @@ import threading
 
 from services.oracle_chunker import ChunkRange, create_chunks
 from services.oracle_scn import open_oracle_conn
+from db.oracle_browser import disable_referencing_fks, enable_referencing_fks
 
 
 def publish_baseline(
@@ -38,13 +39,22 @@ def publish_baseline(
     tgt = f'"{target_schema.upper()}"."{target_table.upper()}"'
     stg = f'"{target_schema.upper()}"."{stage_table.upper()}"'
 
-    # ── 1. TRUNCATE ───────────────────────────────────────────────────────────
+    # ── 1. Disable referencing FKs + TRUNCATE ────────────────────────────────
     conn = open_oracle_conn(dst_cfg)
     try:
+        disabled_fks = disable_referencing_fks(conn, target_schema, target_table)
+        if disabled_fks:
+            print(f"[baseline] disabled {len(disabled_fks)} referencing FKs")
+
         with conn.cursor() as cur:
             cur.execute(f"TRUNCATE TABLE {tgt}")
         conn.commit()
         print(f"[baseline] truncated {tgt}")
+
+        if disabled_fks:
+            fk_errors = enable_referencing_fks(conn, disabled_fks)
+            if fk_errors:
+                print(f"[baseline] FK re-enable errors: {fk_errors}")
     finally:
         conn.close()
 

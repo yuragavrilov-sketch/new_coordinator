@@ -690,6 +690,69 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     return {"enabled": enabled, "errors": errors}
 
 
+def disable_referencing_fks(conn, schema: str, table: str) -> list[dict]:
+    """Disable FK constraints on OTHER tables that reference this table.
+
+    This is needed before TRUNCATE — Oracle raises ORA-02266 if enabled FKs
+    on other tables point to the table being truncated.
+
+    Returns [{"owner": ..., "table": ..., "constraint": ...}, ...] for
+    re-enabling later with enable_referencing_fks().
+    """
+    s = schema.upper()
+    t = table.upper()
+    disabled: list[dict] = []
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT c.owner, c.table_name, c.constraint_name
+            FROM   all_constraints c
+            JOIN   all_constraints r
+              ON   r.owner = c.r_owner
+              AND  r.constraint_name = c.r_constraint_name
+            WHERE  r.owner = :s
+              AND  r.table_name = :t
+              AND  c.constraint_type = 'R'
+              AND  c.status = 'ENABLED'
+        """, {"s": s, "t": t})
+        refs = cur.fetchall()
+
+        for ref_owner, ref_table, ref_constraint in refs:
+            try:
+                cur.execute(
+                    f'ALTER TABLE "{ref_owner}"."{ref_table}" '
+                    f'DISABLE CONSTRAINT "{ref_constraint}"'
+                )
+                disabled.append({
+                    "owner": ref_owner,
+                    "table": ref_table,
+                    "constraint": ref_constraint,
+                })
+            except Exception as exc:
+                print(f"[oracle_browser] could not disable FK "
+                      f"{ref_owner}.{ref_table}.{ref_constraint}: {exc}")
+    conn.commit()
+    return disabled
+
+
+def enable_referencing_fks(conn, fks: list[dict]) -> list[dict]:
+    """Re-enable FK constraints previously disabled by disable_referencing_fks().
+
+    Returns list of errors (empty if all succeeded).
+    """
+    errors: list[dict] = []
+    with conn.cursor() as cur:
+        for fk in fks:
+            try:
+                cur.execute(
+                    f'ALTER TABLE "{fk["owner"]}"."{fk["table"]}" '
+                    f'ENABLE CONSTRAINT "{fk["constraint"]}"'
+                )
+            except Exception as exc:
+                errors.append({**fk, "error": str(exc)})
+    conn.commit()
+    return errors
+
+
 def enable_triggers(conn, schema: str, table: str) -> dict:
     """Re-enable all DISABLED triggers on *table*.
 

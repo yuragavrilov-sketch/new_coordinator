@@ -189,11 +189,22 @@ def handle_target_clearing(mid: str, m: dict) -> None:
             try:
                 tgt_quoted = f'"{tgt_schema.upper()}"."{tgt_table.upper()}"'
 
-                # 1. TRUNCATE
+                # 1. Disable referencing FKs, then TRUNCATE
+                disabled_fks = oracle_browser.disable_referencing_fks(
+                    conn, tgt_schema, tgt_table)
+                if disabled_fks:
+                    print(f"[orchestrator] {mid}: disabled {len(disabled_fks)} referencing FKs")
+
                 with conn.cursor() as cur:
                     cur.execute(f"TRUNCATE TABLE {tgt_quoted}")
                 conn.commit()
                 print(f"[orchestrator] {mid}: truncated {tgt_quoted}")
+
+                # Re-enable referencing FKs
+                if disabled_fks:
+                    fk_errors = oracle_browser.enable_referencing_fks(conn, disabled_fks)
+                    if fk_errors:
+                        print(f"[orchestrator] {mid}: FK re-enable errors: {fk_errors}")
 
                 # 2. Disable triggers
                 disabled_trg = oracle_browser.disable_triggers(conn, tgt_schema, tgt_table)
