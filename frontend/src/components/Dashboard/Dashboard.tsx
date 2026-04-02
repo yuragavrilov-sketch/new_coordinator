@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { DashboardToolbar } from "./DashboardToolbar";
 import { TableList, type EnrichedTable } from "./TableList";
 import { CreateBulkModal } from "./CreateBulkModal";
+import { SequenceDiffPanel } from "./SequenceDiffPanel";
 import type { Migration } from "../../types/migration";
 
 type Filter = "all" | "none" | "active" | "completed" | "errors";
@@ -20,6 +21,7 @@ export function Dashboard() {
   const [createGroup, setCreateGroup] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  const [showSeqDiff, setShowSeqDiff] = useState(false);
 
   // Load schemas on mount — try snapshots first, fallback to Oracle source schemas
   useEffect(() => {
@@ -191,7 +193,12 @@ export function Dashboard() {
         selectedCount={selected.size}
         onBulkCreate={() => { setCreateGroup(false); setCreateTables([...selected]); setShowCreateModal(true); }}
         onBulkGroup={() => { setCreateGroup(true); setCreateTables([...selected]); setShowCreateModal(true); }}
+        onCompareSequences={() => setShowSeqDiff((v) => !v)}
       />
+
+      {showSeqDiff && (
+        <SequenceDiffPanel schema={selectedSchema} />
+      )}
 
       <TableList
         tables={enrichedTables}

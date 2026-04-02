@@ -19,12 +19,14 @@ interface Props {
   selectedCount: number;
   onBulkCreate: () => void;
   onBulkGroup: () => void;
+  onCompareSequences?: () => void;
 }
 
 export function DashboardToolbar({
   schemas, selectedSchema, onSchemaChange,
   onRefresh, refreshing, counts,
   selectedCount, onBulkCreate, onBulkGroup,
+  onCompareSequences,
 }: Props) {
   const pct = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
 
@@ -51,6 +53,16 @@ export function DashboardToolbar({
           {refreshing && <Spinner />}
           Обновить из Oracle
         </button>
+        {onCompareSequences && (
+          <button onClick={onCompareSequences} style={{
+            padding: "6px 14px", borderRadius: 6,
+            border: "1px solid #334155", background: "#1e293b",
+            color: "#e2e8f0", cursor: "pointer",
+            fontSize: 13, fontWeight: 500,
+          }}>
+            Сравнить сиквенсы
+          </button>
+        )}
         <div style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
           {counts.total > 0 && `${pct}% завершено`}
         </div>
