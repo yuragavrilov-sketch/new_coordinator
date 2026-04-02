@@ -200,6 +200,13 @@ from routes.sequences import bp as sequences_bp
 sequences_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(sequences_bp)
 
+# ── Switchover blueprint ─────────────────────────────────────────────────────
+import routes.switchover as switchover_mod
+from routes.switchover import bp as switchover_bp
+
+switchover_mod.init(get_conn_fn=get_conn, load_configs_fn=_load_cfg)
+app.register_blueprint(switchover_bp)
+
 # ── Workers blueprint ─────────────────────────────────────────────────────────
 import routes.workers as workers_mod
 from routes.workers import bp as workers_bp

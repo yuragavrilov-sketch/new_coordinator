@@ -11,6 +11,7 @@ import { DataCompare } from "./components/DataCompare";
 import { DDLCatalog } from "./components/DDLCatalog/DDLCatalog";
 import { Dashboard } from "./components/Dashboard";
 import { Sequences } from "./components/Sequences";
+import { Switchover } from "./components/Switchover";
 import { StatusBadge } from "./components/StatusBadge";
 
 const SSE_URL = "/api/events";
@@ -98,6 +99,7 @@ const TABS = [
   { path: "/target-prep", label: "Подготовка таргета" },
   { path: "/sequences", label: "Сиквенсы" },
   { path: "/data-compare", label: "Сравнение данных" },
+  { path: "/switchover", label: "Переключение" },
   { path: "/checklist", label: "Чек-лист" },
 ] as const;
 
@@ -192,6 +194,7 @@ function AppShell() {
           <Route path="/target-prep" element={<TargetPrep />} />
           <Route path="/sequences" element={<Sequences />} />
           <Route path="/data-compare" element={<DataCompare />} />
+          <Route path="/switchover" element={<Switchover />} />
           <Route path="/checklist" element={<Checklist />} />
         </Routes>
       </div>
