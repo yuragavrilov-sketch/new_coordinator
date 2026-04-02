@@ -549,6 +549,96 @@ def column_diff(task_id: str):
         tgt_conn.close()
 
 
+@bp.get("/api/data-compare/row-diff/<task_id>")
+def row_diff(task_id: str):
+    """Find actual differing rows using MINUS between source and target.
+    Returns up to `limit` rows from each direction.
+    Query params: limit (default 50)
+    """
+    limit = int(request.args.get("limit", 50))
+    if limit > 500:
+        limit = 500
+
+    pg = _state["get_conn"]()
+    try:
+        with pg.cursor() as cur:
+            cur.execute(
+                "SELECT source_schema, source_table, target_schema, target_table, "
+                "compare_mode, last_n, order_column, status "
+                "FROM data_compare_tasks WHERE task_id = %s", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "task not found"}), 404
+    finally:
+        pg.close()
+
+    src_schema, src_table, tgt_schema, tgt_table, mode, last_n, order_col, status = row
+    if status != "DONE":
+        return jsonify({"error": "task not DONE"}), 400
+
+    configs = _state["load_configs"]()
+    src_conn = get_oracle_conn("source", configs)
+    tgt_conn = get_oracle_conn("target", configs)
+    try:
+        src_cols = get_comparable_columns(src_conn, src_schema, src_table)
+        tgt_cols = get_comparable_columns(tgt_conn, tgt_schema, tgt_table)
+        tgt_names = {c["name"] for c in tgt_cols}
+        common_cols = [c for c in src_cols if c["name"] in tgt_names]
+
+        if not common_cols:
+            return jsonify({"columns": [], "source_only": [], "target_only": []})
+
+        col_names = [c["name"] for c in common_cols]
+        col_list = ", ".join(f'"{c}"' for c in col_names)
+
+        # Build source/target sub-queries (respect last_n mode)
+        if mode == "last_n" and last_n and order_col:
+            src_sub = (f'(SELECT {col_list} FROM "{src_schema}"."{src_table}" '
+                       f'ORDER BY "{order_col}" DESC FETCH FIRST {int(last_n)} ROWS ONLY)')
+            tgt_sub = (f'(SELECT {col_list} FROM "{tgt_schema}"."{tgt_table}" '
+                       f'ORDER BY "{order_col}" DESC FETCH FIRST {int(last_n)} ROWS ONLY)')
+        else:
+            src_sub = f'(SELECT {col_list} FROM "{src_schema}"."{src_table}")'
+            tgt_sub = f'(SELECT {col_list} FROM "{tgt_schema}"."{tgt_table}")'
+
+        # Rows in source but not in target
+        sql_src_only = f"SELECT * FROM ({src_sub} MINUS {tgt_sub}) WHERE ROWNUM <= :lim"
+        # Rows in target but not in source
+        sql_tgt_only = f"SELECT * FROM ({tgt_sub} MINUS {src_sub}) WHERE ROWNUM <= :lim"
+
+        def _fetch_rows(conn, sql):
+            with conn.cursor() as cur:
+                cur.execute(sql, {"lim": limit})
+                rows = []
+                for r in cur.fetchall():
+                    row_dict = {}
+                    for i, c in enumerate(col_names):
+                        v = r[i]
+                        if v is None:
+                            row_dict[c] = None
+                        elif isinstance(v, (int, float)):
+                            row_dict[c] = v
+                        else:
+                            row_dict[c] = str(v)
+                    rows.append(row_dict)
+                return rows
+
+        source_only_rows = _fetch_rows(src_conn, sql_src_only)
+        target_only_rows = _fetch_rows(tgt_conn, sql_tgt_only)
+
+        return jsonify({
+            "columns": col_names,
+            "source_only": source_only_rows,
+            "target_only": target_only_rows,
+            "limit": limit,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        src_conn.close()
+        tgt_conn.close()
+
+
 @bp.delete("/api/data-compare/tasks/<task_id>")
 def delete_task(task_id: str):
     conn = _state["get_conn"]()

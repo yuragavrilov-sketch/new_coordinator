@@ -394,11 +394,148 @@ function ColumnDiffPanel({ taskId }: { taskId: string }) {
   );
 }
 
+// ── Row diff detail ─────────────────────────────────────────────────────────
+
+interface RowDiffData {
+  columns: string[];
+  source_only: Record<string, unknown>[];
+  target_only: Record<string, unknown>[];
+  limit: number;
+}
+
+function RowDiffPanel({ taskId }: { taskId: string }) {
+  const [data, setData] = useState<RowDiffData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [limit, setLimit] = useState(50);
+
+  const load = (lim: number) => {
+    setLoading(true);
+    setError(null);
+    fetch(`/api/data-compare/row-diff/${taskId}?limit=${lim}`)
+      .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || "error")))
+      .then(d => { setData(d); setLimit(lim); })
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(50); }, [taskId]);
+
+  if (loading) return <div style={{ padding: "8px 10px", fontSize: 11, color: "#94a3b8" }}>Ищем различающиеся строки (MINUS)...</div>;
+  if (error) return <div style={{ padding: "8px 10px", fontSize: 11, color: "#fca5a5" }}>{error}</div>;
+  if (!data) return null;
+
+  const { columns, source_only, target_only } = data;
+
+  if (source_only.length === 0 && target_only.length === 0) {
+    return <div style={{ padding: "8px 10px", fontSize: 11, color: "#4ade80" }}>MINUS не нашёл расхождений (возможно, разница в LOB/исключённых колонках)</div>;
+  }
+
+  const renderTable = (rows: Record<string, unknown>[], label: string, color: string) => {
+    if (rows.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color, marginBottom: 4 }}>
+          {label} ({rows.length}{rows.length >= limit ? "+" : ""})
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 10, whiteSpace: "nowrap" }}>
+            <thead>
+              <tr>
+                {columns.map(c => (
+                  <th key={c} style={{
+                    padding: "3px 6px", textAlign: "left", color: "#64748b",
+                    fontWeight: 500, borderBottom: "1px solid #1e293b",
+                    position: "sticky", top: 0, background: "#0a0f1a",
+                  }}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #0f172a" }}>
+                  {columns.map(c => (
+                    <td key={c} style={{
+                      padding: "2px 6px", color: "#94a3b8",
+                      maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis",
+                    }} title={String(row[c] ?? "NULL")}>
+                      {row[c] !== null && row[c] !== undefined ? String(row[c]) : <span style={{ color: "#475569" }}>NULL</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: "8px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>
+          Найдено: {source_only.length} только в source, {target_only.length} только в target
+        </span>
+        {(source_only.length >= limit || target_only.length >= limit) && limit < 500 && (
+          <button
+            onClick={() => load(Math.min(limit * 5, 500))}
+            style={{
+              background: "none", border: "1px solid #334155", borderRadius: 3,
+              color: "#64748b", padding: "2px 8px", fontSize: 10, cursor: "pointer",
+            }}
+          >
+            Загрузить больше (до {Math.min(limit * 5, 500)})
+          </button>
+        )}
+      </div>
+      {renderTable(source_only, "Только в Source (нет в Target)", "#f59e0b")}
+      {renderTable(target_only, "Только в Target (нет в Source)", "#3b82f6")}
+    </div>
+  );
+}
+
+// ── Diff mode tabs ──────────────────────────────────────────────────────────
+
+function DiffTabs({ taskId }: { taskId: string }) {
+  const [tab, setTab] = useState<"columns" | "rows">("columns");
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #1e293b" }}>
+        <button
+          onClick={() => setTab("columns")}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "6px 14px", fontSize: 11, fontWeight: 600,
+            color: tab === "columns" ? "#93c5fd" : "#64748b",
+            borderBottom: `2px solid ${tab === "columns" ? "#3b82f6" : "transparent"}`,
+          }}
+        >
+          По колонкам
+        </button>
+        <button
+          onClick={() => setTab("rows")}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "6px 14px", fontSize: 11, fontWeight: 600,
+            color: tab === "rows" ? "#93c5fd" : "#64748b",
+            borderBottom: `2px solid ${tab === "rows" ? "#3b82f6" : "transparent"}`,
+          }}
+        >
+          По строкам (MINUS)
+        </button>
+      </div>
+      {tab === "columns" ? <ColumnDiffPanel taskId={taskId} /> : <RowDiffPanel taskId={taskId} />}
+    </div>
+  );
+}
+
 // ── Task result row ──────────────────────────────────────────────────────────
 
 function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false);
-  const canExpand = t.status === "DONE" && t.hash_match === false;
+  const canExpand = t.status === "DONE" && (t.hash_match === false || t.counts_match === false);
 
   const statusColors: Record<string, { bg: string; text: string }> = {
     PENDING:  { bg: "#1e293b", text: "#94a3b8" },
@@ -519,13 +656,13 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
               fontSize: 11, fontWeight: 600, color: "#ef4444",
               cursor: "pointer", textDecoration: "underline", textDecorationStyle: "dotted",
             }}
-            title="Показать разницу по колонкам"
+            title="Показать разницу по колонкам / строкам"
           >
             <span style={{
               width: 7, height: 7, borderRadius: "50%",
               background: "#ef4444", display: "inline-block",
             }} />
-            Diff {expanded ? "▲" : "▼"}
+            Diff {expanded ? "\u25B2" : "\u25BC"}
           </span>
         ) : (
           matchBadge(t.hash_match, "Diff")
@@ -556,7 +693,7 @@ function TaskRow({ task: t, onDelete }: { task: CompareTask; onDelete: (id: stri
     {expanded && (
       <tr style={{ borderBottom: "1px solid #0f1624" }}>
         <td colSpan={9} style={{ background: "#0a0f1a", padding: 0 }}>
-          <ColumnDiffPanel taskId={t.task_id} />
+          <DiffTabs taskId={t.task_id} />
         </td>
       </tr>
     )}
