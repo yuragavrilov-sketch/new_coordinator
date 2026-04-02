@@ -17,15 +17,25 @@ def _col_type_str(data_type: str, data_length, data_precision, data_scale,
         return "NUMBER"
     if dt in ("VARCHAR2", "NVARCHAR2"):
         unit = " CHAR" if char_used == "C" else ""
-        return f"{dt}({data_length}{unit})"
+        length = data_length if data_length else 4000
+        return f"{dt}({length}{unit})"
     if dt in ("CHAR", "NCHAR"):
         unit = " CHAR" if char_used == "C" else ""
-        return f"{dt}({data_length}{unit})"
+        length = data_length if data_length else 1
+        return f"{dt}({length}{unit})"
     if dt == "FLOAT":
         return f"FLOAT({data_precision})" if data_precision else "FLOAT"
     if dt == "RAW":
-        return f"RAW({data_length})"
-    # DATE, CLOB, BLOB, XMLTYPE, TIMESTAMP*, INTERVAL* — keep as-is
+        return f"RAW({data_length or 2000})"
+    # LONG, LONG RAW — no length spec allowed
+    if dt in ("LONG", "LONG RAW"):
+        return dt
+    # DATE, CLOB, BLOB, NCLOB, XMLTYPE, ROWID, UROWID — keep as-is
+    if dt in ("DATE", "CLOB", "BLOB", "NCLOB", "XMLTYPE", "ROWID", "BFILE"):
+        return dt
+    if dt == "UROWID":
+        return f"UROWID({data_length or 4000})"
+    # TIMESTAMP(n), TIMESTAMP(n) WITH TIME ZONE, INTERVAL ... — keep as-is
     return data_type
 
 
@@ -131,8 +141,8 @@ def create_stage_table(
     for col_name, data_type, data_length, data_precision, data_scale, nullable, char_used in columns:
         type_str = _col_type_str(data_type, data_length, data_precision,
                                  data_scale, char_used or "B")
-        null_str = "" if nullable == "Y" else " NOT NULL"
-        col_defs.append(f'  "{col_name}" {type_str}{null_str}')
+        # Stage tables are for temporary data — skip NOT NULL to avoid issues
+        col_defs.append(f'  "{col_name}" {type_str}')
 
     ts_clause = f' TABLESPACE "{tablespace.strip().upper()}"' if tablespace.strip() else ""
     tgt_full = f'"{target_schema.upper()}"."{stage_table.upper()}"'
@@ -141,6 +151,8 @@ def create_stage_table(
         + ",\n".join(col_defs)
         + "\n) NOLOGGING" + ts_clause
     )
+
+    print(f"[oracle_stage] DDL:\n{ddl}")
 
     dst_conn = open_oracle_conn(dst_cfg)
     try:
