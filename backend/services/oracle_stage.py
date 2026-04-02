@@ -16,12 +16,14 @@ def _col_type_str(data_type: str, data_length, data_precision, data_scale,
             return f"NUMBER({data_precision},{data_scale or 0})"
         return "NUMBER"
     if dt in ("VARCHAR2", "NVARCHAR2"):
-        unit = " CHAR" if char_used == "C" else ""
         length = data_length if data_length else 4000
+        # NVARCHAR2 is always in chars — CHAR/BYTE suffix not allowed
+        unit = " CHAR" if char_used == "C" and dt == "VARCHAR2" else ""
         return f"{dt}({length}{unit})"
     if dt in ("CHAR", "NCHAR"):
-        unit = " CHAR" if char_used == "C" else ""
         length = data_length if data_length else 1
+        # NCHAR is always in chars — CHAR/BYTE suffix not allowed
+        unit = " CHAR" if char_used == "C" and dt == "CHAR" else ""
         return f"{dt}({length}{unit})"
     if dt == "FLOAT":
         return f"FLOAT({data_precision})" if data_precision else "FLOAT"
