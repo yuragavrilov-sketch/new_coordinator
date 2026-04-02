@@ -311,10 +311,27 @@ export function Sequences() {
             background: "#1e293b",
             border: "1px solid #334155",
             borderRadius: 6,
-            overflow: "hidden",
+            overflowX: "auto",
           }}
         >
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 12,
+              tableLayout: "fixed",
+            }}
+          >
+            <colgroup>
+              <col style={{ width: 36 }} />
+              <col />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 140 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 60 }} />
+              <col style={{ width: 60 }} />
+              <col style={{ width: 100 }} />
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: "1px solid #334155" }}>
                 <th style={thStyle}>
@@ -325,9 +342,9 @@ export function Sequences() {
                   />
                 </th>
                 <Th label="Sequence" sortKey="name" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} />
-                <Th label="Source" sortKey="source" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} />
-                <Th label="Target" sortKey="target" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} />
-                <Th label="Delta" sortKey="delta" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} />
+                <Th label="Source" sortKey="source" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} align="right" />
+                <Th label="Target" sortKey="target" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} align="right" />
+                <Th label="Delta" sortKey="delta" current={sortKey} dir={sortDir} onClick={toggleSort} arrow={sortArrow} align="right" />
                 <th style={{ ...thStyle, textAlign: "center" }}>Inc</th>
                 <th style={{ ...thStyle, textAlign: "center" }}>Cache</th>
                 <th style={{ ...thStyle, textAlign: "center" }}>Status</th>
@@ -349,7 +366,17 @@ export function Sequences() {
                       onChange={() => toggleSelect(r.sequence_name)}
                     />
                   </td>
-                  <td style={{ ...tdStyle, fontFamily: "monospace", color: "#e2e8f0" }}>
+                  <td
+                    style={{
+                      ...tdStyle,
+                      fontFamily: "monospace",
+                      color: "#e2e8f0",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={r.sequence_name}
+                  >
                     {r.sequence_name}
                   </td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>
@@ -443,6 +470,7 @@ function Th({
   dir,
   onClick,
   arrow,
+  align,
 }: {
   label: string;
   sortKey: SortKey;
@@ -450,10 +478,11 @@ function Th({
   dir: SortDir;
   onClick: (k: SortKey) => void;
   arrow: (k: SortKey) => string;
+  align?: "left" | "right" | "center";
 }) {
   return (
     <th
-      style={{ ...thStyle, cursor: "pointer", userSelect: "none" }}
+      style={{ ...thStyle, cursor: "pointer", userSelect: "none", textAlign: align || "left" }}
       onClick={() => onClick(sortKey)}
     >
       {label}
