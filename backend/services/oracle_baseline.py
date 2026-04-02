@@ -15,7 +15,7 @@ import threading
 
 from services.oracle_chunker import ChunkRange, create_chunks
 from services.oracle_scn import open_oracle_conn
-from db.oracle_browser import disable_referencing_fks
+from db.oracle_browser import disable_referencing_fks, switch_identity_to_default
 
 
 def publish_baseline(
@@ -50,6 +50,10 @@ def publish_baseline(
             cur.execute(f"TRUNCATE TABLE {tgt}")
         conn.commit()
         print(f"[baseline] truncated {tgt}")
+
+        id_cols = switch_identity_to_default(conn, target_schema, target_table)
+        if id_cols:
+            print(f"[baseline] switched IDENTITY to BY DEFAULT: {id_cols}")
     finally:
         conn.close()
 
