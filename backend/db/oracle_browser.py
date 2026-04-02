@@ -468,14 +468,14 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         nr = cur.fetchone()
         num_rows = nr[0] if nr and nr[0] is not None else None
 
-        # Supplemental logging
+        # Supplemental logging (check via log_groups)
         cur.execute("""
-            SELECT NVL(supplemental_log_data_all, 'NO')
-            FROM   all_tables
+            SELECT COUNT(*) FROM all_log_groups
             WHERE  owner = :s AND table_name = :t
+              AND  log_group_type = 'ALL COLUMN LOGGING'
         """, {"s": schema, "t": table})
         sl_row = cur.fetchone()
-        supplemental_logging = sl_row[0] == "YES" if sl_row else False
+        supplemental_logging = (sl_row[0] or 0) > 0 if sl_row else False
 
         # Identity columns
         try:
