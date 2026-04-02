@@ -35,6 +35,16 @@ interface HistoryEntry {
   created_at: string;
 }
 
+interface CompareResult {
+  task_id: string;
+  status: string;
+  source_count: number | null;
+  target_count: number | null;
+  counts_match: boolean | null;
+  hash_match: boolean | null;
+  error_text: string | null;
+}
+
 type ChunkTab = "bulk" | "baseline" | "compare";
 
 const CHUNK_TABS: { key: ChunkTab; label: string; apiType: string }[] = [
@@ -43,9 +53,11 @@ const CHUNK_TABS: { key: ChunkTab; label: string; apiType: string }[] = [
   { key: "compare", label: "Compare", apiType: "COMPARE" },
 ];
 
-export function TableDetail({ tableName, migration, onCreateMigration, onMigrationChanged }: Props) {
+export function TableDetail({ tableName, schema, migration, onCreateMigration, onMigrationChanged }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [chunkTab, setChunkTab] = useState<ChunkTab>("bulk");
   const [chunkStats, setChunkStats] = useState<Record<ChunkTab, ChunkStats | null>>({
     bulk: null, baseline: null, compare: null,
@@ -133,6 +145,44 @@ export function TableDetail({ tableName, migration, onCreateMigration, onMigrati
     finally { setActionBusy(false); }
   };
 
+  const handleCompare = async () => {
+    setComparing(true);
+    setCompareResult(null);
+    try {
+      const r = await fetch("/api/data-compare/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source_schema: schema,
+          source_table: tableName,
+          target_schema: schema,
+          target_table: tableName,
+          compare_mode: "full",
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setCompareResult({ task_id: "", status: "FAILED", source_count: null, target_count: null, counts_match: null, hash_match: null, error_text: data.error }); return; }
+      // Poll until done
+      const taskId = data.task_id;
+      const poll = async () => {
+        const resp = await fetch("/api/data-compare/tasks");
+        const tasks = await resp.json();
+        const task = tasks.find((t: any) => t.task_id === taskId);
+        if (!task) return;
+        if (task.status === "DONE" || task.status === "FAILED") {
+          setCompareResult(task);
+          setComparing(false);
+        } else {
+          setTimeout(poll, 2000);
+        }
+      };
+      poll();
+    } catch (e: any) {
+      setCompareResult({ task_id: "", status: "FAILED", source_count: null, target_count: null, counts_match: null, hash_match: null, error_text: e.message });
+      setComparing(false);
+    }
+  };
+
   // Polling
   useEffect(() => {
     if (!migration || !showDetails) return;
@@ -146,11 +196,15 @@ export function TableDetail({ tableName, migration, onCreateMigration, onMigrati
       padding: 16, marginLeft: 40, marginBottom: 4,
     }}>
       {!migration ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <span style={{ color: "#64748b", fontSize: 13 }}>Миграция не создана</span>
           <button onClick={() => onCreateMigration(tableName)} style={btnCreate}>
             Создать миграцию
           </button>
+          <button onClick={handleCompare} disabled={comparing} style={btnCompare}>
+            {comparing ? "Сравниваем..." : "Сравнить данные"}
+          </button>
+          {compareResult && <CompareResultPanel result={compareResult} />}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -172,6 +226,9 @@ export function TableDetail({ tableName, migration, onCreateMigration, onMigrati
               <button onClick={handleDelete} disabled={actionBusy} style={btnDangerOutline}>
                 Удалить
               </button>
+              <button onClick={handleCompare} disabled={comparing} style={btnCompare}>
+                {comparing ? "Сравниваем..." : "Сравнить данные"}
+              </button>
             </span>
           </div>
 
@@ -189,6 +246,11 @@ export function TableDetail({ tableName, migration, onCreateMigration, onMigrati
           {/* Error */}
           {migration.error_text && (
             <div style={errBlock}>{migration.error_text}</div>
+          )}
+
+          {/* Compare result */}
+          {compareResult && (
+            <CompareResultPanel result={compareResult} />
           )}
 
           {/* Expand */}
@@ -326,7 +388,175 @@ const errBlock: React.CSSProperties = {
   fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word",
 };
 
+const btnCompare: React.CSSProperties = {
+  background: "#1e293b", color: "#93c5fd", border: "1px solid #334155",
+  borderRadius: 4, padding: "3px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+};
+
 const sectionTitle: React.CSSProperties = {
   fontSize: 11, color: "#64748b", fontWeight: 700,
   textTransform: "uppercase", marginBottom: 6,
 };
+
+// ── Compare result inline ───────────────────────────────────────────────────
+
+function CompareResultPanel({ result: r }: { result: CompareResult }) {
+  const [diffTab, setDiffTab] = useState<"columns" | "rows" | null>(null);
+
+  if (r.status === "FAILED") {
+    return (
+      <div style={{ background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 6, padding: "6px 10px", fontSize: 11, color: "#fca5a5", width: "100%" }}>
+        Ошибка: {r.error_text}
+      </div>
+    );
+  }
+
+  const ok = r.counts_match && r.hash_match;
+  const hasDiff = !r.counts_match || !r.hash_match;
+
+  return (
+    <div style={{
+      background: ok ? "#052e16" : "#1a0f00",
+      border: `1px solid ${ok ? "#166534" : "#78350f"}`,
+      borderRadius: 6, padding: "8px 12px", fontSize: 11, width: "100%", marginTop: 4,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ color: ok ? "#4ade80" : "#fbbf24", fontWeight: 700 }}>
+          {ok ? "Данные совпадают" : "Найдены расхождения"}
+        </span>
+        <span style={{ color: "#94a3b8" }}>
+          Source: {fmtNum(r.source_count)} | Target: {fmtNum(r.target_count)}
+        </span>
+        <span style={{ color: r.counts_match ? "#4ade80" : "#ef4444", fontWeight: 600 }}>
+          Count: {r.counts_match ? "OK" : "DIFF"}
+        </span>
+        <span style={{ color: r.hash_match ? "#4ade80" : "#ef4444", fontWeight: 600 }}>
+          Hash: {r.hash_match ? "OK" : "DIFF"}
+        </span>
+        {hasDiff && (
+          <div style={{ display: "flex", gap: 0, marginLeft: "auto" }}>
+            {(["columns", "rows"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setDiffTab(diffTab === tab ? null : tab)}
+                style={{
+                  background: "none", border: "1px solid #334155",
+                  borderRadius: tab === "columns" ? "3px 0 0 3px" : "0 3px 3px 0",
+                  borderLeft: tab === "rows" ? "none" : undefined,
+                  padding: "2px 8px", fontSize: 10, cursor: "pointer",
+                  color: diffTab === tab ? "#93c5fd" : "#64748b",
+                  fontWeight: diffTab === tab ? 600 : 400,
+                }}
+              >
+                {tab === "columns" ? "По колонкам" : "По строкам"}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {diffTab === "columns" && r.task_id && <InlineColDiff taskId={r.task_id} />}
+      {diffTab === "rows" && r.task_id && <InlineRowDiff taskId={r.task_id} />}
+    </div>
+  );
+}
+
+function InlineColDiff({ taskId }: { taskId: string }) {
+  const [cols, setCols] = useState<{ column: string; data_type: string; match: boolean; source_hash: string | null; target_hash: string | null }[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/data-compare/column-diff/${taskId}`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setCols(d.columns))
+      .catch(() => setCols([]))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  if (loading) return <div style={{ padding: "6px 0", fontSize: 10, color: "#94a3b8" }}>Загрузка...</div>;
+  if (!cols || cols.length === 0) return null;
+
+  const mismatched = cols.filter((c) => !c.match);
+  const displayed = showAll ? cols : mismatched;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 10, color: "#94a3b8" }}>Различия в {mismatched.length} из {cols.length} колонок</span>
+        <label style={{ fontSize: 10, color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}>
+          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} style={{ accentColor: "#3b82f6" }} />
+          Все
+        </label>
+      </div>
+      <table style={{ borderCollapse: "collapse", fontSize: 10, width: "100%" }}>
+        <tbody>
+          {displayed.map((c) => (
+            <tr key={c.column} style={{ borderBottom: "1px solid #1e293b" }}>
+              <td style={{ padding: "2px 6px", color: c.match ? "#94a3b8" : "#fca5a5", fontWeight: c.match ? 400 : 600 }}>{c.column}</td>
+              <td style={{ padding: "2px 6px", color: "#64748b" }}>{c.data_type}</td>
+              <td style={{ padding: "2px 6px", color: c.match ? "#4ade80" : "#ef4444", fontWeight: 600 }}>{c.match ? "OK" : "DIFF"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function InlineRowDiff({ taskId }: { taskId: string }) {
+  const [data, setData] = useState<{ columns: string[]; source_only: Record<string, unknown>[]; target_only: Record<string, unknown>[]; limit: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/data-compare/row-diff/${taskId}?limit=10`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  if (loading) return <div style={{ padding: "6px 0", fontSize: 10, color: "#94a3b8" }}>Ищем строки...</div>;
+  if (!data) return null;
+
+  if (data.source_only.length === 0 && data.target_only.length === 0) {
+    return <div style={{ padding: "6px 0", fontSize: 10, color: "#4ade80" }}>MINUS не нашёл расхождений</div>;
+  }
+
+  const renderRows = (rows: Record<string, unknown>[], label: string, color: string) => {
+    if (rows.length === 0) return null;
+    return (
+      <div style={{ marginTop: 6 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color, marginBottom: 3 }}>{label} ({rows.length}{rows.length >= data.limit ? "+" : ""})</div>
+        <div style={{ overflowX: "auto", maxHeight: 150 }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 9, whiteSpace: "nowrap" }}>
+            <thead>
+              <tr>
+                {data.columns.map((c) => (
+                  <th key={c} style={{ padding: "2px 4px", textAlign: "left", color: "#64748b", fontWeight: 500, borderBottom: "1px solid #1e293b" }}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i}>
+                  {data.columns.map((c) => (
+                    <td key={c} style={{ padding: "1px 4px", color: "#94a3b8", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }} title={String(row[c] ?? "NULL")}>
+                      {row[c] != null ? String(row[c]) : <span style={{ color: "#475569" }}>NULL</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {renderRows(data.source_only, "Только в Source", "#f59e0b")}
+      {renderRows(data.target_only, "Только в Target", "#3b82f6")}
+    </div>
+  );
+}
