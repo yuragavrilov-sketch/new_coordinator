@@ -37,7 +37,7 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       }}
       style={{
         display: "grid",
-        gridTemplateColumns: "40px 1fr 60px 42px 100px 130px 130px 180px 110px",
+        gridTemplateColumns: "40px 1fr 60px 90px 100px 130px 130px 180px 110px",
         gap: 4,
         alignItems: "center",
         padding: "8px 12px",
@@ -79,12 +79,15 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
             : <span style={{ color: "#475569" }}>—</span>}
       </div>
 
-      {/* LOB indicator */}
-      <div style={{ fontSize: 10, textAlign: "center" }}>
+      {/* Flags: LOB, SUP.LOG, ID */}
+      <div style={{ display: "flex", gap: 3, flexWrap: "wrap", justifyContent: "center" }}>
         {table.metadata?.columns?.some(c =>
           ["CLOB", "BLOB", "NCLOB", "LONG", "LONG RAW"].includes(c.data_type))
-          ? <span style={{ color: "#fbbf24", fontWeight: 700 }}>LOB</span>
-          : null}
+          && <span style={flagBadge("#422006", "#fbbf24")}>LOB</span>}
+        {table.metadata?.supplemental_logging
+          && <span style={flagBadge("#1a0a2e", "#a78bfa")}>SUP</span>}
+        {table.metadata?.identity_columns && table.metadata.identity_columns.length > 0
+          && <span style={flagBadge("#2a0a1e", "#f472b6")}>ID</span>}
       </div>
 
       {/* Estimated rows */}
@@ -152,4 +155,12 @@ export function TableRow({ table, isSelected, isExpanded, onToggleSelect, onExpa
       </div>
     </div>
   );
+}
+
+function flagBadge(bg: string, fg: string): React.CSSProperties {
+  return {
+    background: bg, color: fg,
+    padding: "0 4px", borderRadius: 3,
+    fontSize: 9, fontWeight: 700, lineHeight: "16px",
+  };
 }

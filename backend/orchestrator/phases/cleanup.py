@@ -27,12 +27,8 @@ def handle_indexes_enabling(mid: str, m: dict) -> None:
                     conn, m["target_schema"], m["target_table"],
                 )
 
-                # Restore IDENTITY columns to GENERATED ALWAYS
-                id_restored = oracle_browser.restore_identity_always(
-                    conn, m["target_schema"], m["target_table"],
-                )
-                if id_restored:
-                    print(f"[orchestrator] {mid}: restored IDENTITY ALWAYS: {id_restored}")
+                # Note: IDENTITY columns are restored via the Switchover tab,
+                # not automatically here — user controls the timing.
             finally:
                 conn.close()
 

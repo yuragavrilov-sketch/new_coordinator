@@ -468,6 +468,29 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         nr = cur.fetchone()
         num_rows = nr[0] if nr and nr[0] is not None else None
 
+        # Supplemental logging
+        cur.execute("""
+            SELECT NVL(supplemental_log_data_all, 'NO')
+            FROM   all_tables
+            WHERE  owner = :s AND table_name = :t
+        """, {"s": schema, "t": table})
+        sl_row = cur.fetchone()
+        supplemental_logging = sl_row[0] == "YES" if sl_row else False
+
+        # Identity columns
+        try:
+            cur.execute("""
+                SELECT column_name, generation_type
+                FROM   all_tab_identity_cols
+                WHERE  owner = :s AND table_name = :t
+            """, {"s": schema, "t": table})
+            identity_columns = [
+                {"name": r[0], "generation_type": r[1]}
+                for r in cur.fetchall()
+            ]
+        except Exception:
+            identity_columns = []
+
     return {
         "schema":         schema,
         "table":          table,
@@ -478,6 +501,8 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         "pk_columns":     pk_columns,
         "uk_constraints": [{"name": n, "columns": []} for n in uk_names],
         "num_rows":       num_rows,
+        "supplemental_logging": supplemental_logging,
+        "identity_columns":     identity_columns,
     }
 
 
