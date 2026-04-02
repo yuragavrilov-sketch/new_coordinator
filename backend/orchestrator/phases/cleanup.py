@@ -20,15 +20,19 @@ def handle_indexes_enabling(mid: str, m: dict) -> None:
             dst_cfg = oracle_cfg(m["target_connection_id"])
             conn = oracle_scn.open_oracle_conn(dst_cfg)
             try:
-                # Restore LOGGING before rebuilding indexes — indexes themselves
-                # are rebuilt NOLOGGING (inside enable_all_disabled_objects), but
-                # the table should return to protected mode for ongoing CDC DML.
                 oracle_browser.set_table_logging(
                     conn, m["target_schema"], m["target_table"], nologging=False,
                 )
                 result = oracle_browser.enable_all_disabled_objects(
                     conn, m["target_schema"], m["target_table"],
                 )
+
+                # Restore IDENTITY columns to GENERATED ALWAYS
+                id_restored = oracle_browser.restore_identity_always(
+                    conn, m["target_schema"], m["target_table"],
+                )
+                if id_restored:
+                    print(f"[orchestrator] {mid}: restored IDENTITY ALWAYS: {id_restored}")
             finally:
                 conn.close()
 
@@ -42,9 +46,6 @@ def handle_indexes_enabling(mid: str, m: dict) -> None:
                     + [e["name"] for e in result["errors"]["constraints"]]
                 )
                 err_detail = str(result["errors"])
-                # Stay in INDEXES_ENABLING so the user can retry via the UI button.
-                # Transitioning to FAILED would make recovery impossible without
-                # manual DB intervention.
                 transition(
                     mid, "INDEXES_ENABLING",
                     message=(
@@ -63,7 +64,6 @@ def handle_indexes_enabling(mid: str, m: dict) -> None:
 
             mode = (m.get("migration_mode") or "CDC").upper()
             if mode == "BULK_ONLY":
-                # No CDC phase — enable triggers immediately and complete
                 try:
                     oracle_browser.enable_triggers(
                         oracle_scn.open_oracle_conn(dst_cfg),
@@ -87,8 +87,6 @@ def handle_indexes_enabling(mid: str, m: dict) -> None:
                     "Триггеры остаются выключенными до завершения CDC. "
                     "Ожидание запуска CDC apply-worker"
                 )
-                # Clear leftover error_code/error_text from previous failed attempts.
-                # Use safe_transition so a concurrent cancel is respected.
                 safe_transition(
                     mid, "INDEXES_ENABLING", "CDC_APPLY_STARTING",
                     message=msg,
@@ -121,6 +119,12 @@ def handle_indexes_enabling_group(mid: str, m: dict) -> None:
                 result = oracle_browser.enable_all_disabled_objects(
                     conn, m["target_schema"], m["target_table"],
                 )
+
+                id_restored = oracle_browser.restore_identity_always(
+                    conn, m["target_schema"], m["target_table"],
+                )
+                if id_restored:
+                    print(f"[orchestrator] {mid}: restored IDENTITY ALWAYS: {id_restored}")
             finally:
                 conn.close()
 

@@ -785,6 +785,44 @@ def switch_identity_to_default(conn, schema: str, table: str) -> list[str]:
     return switched
 
 
+def restore_identity_always(conn, schema: str, table: str) -> list[str]:
+    """Restore IDENTITY columns back to GENERATED ALWAYS (after data load).
+
+    Also resets the internal sequence to MAX(col) + 1 so new inserts
+    don't collide with loaded data.
+    """
+    s = schema.upper()
+    t = table.upper()
+    restored: list[str] = []
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name, generation_type
+            FROM   all_tab_identity_cols
+            WHERE  owner = :s AND table_name = :t
+        """, {"s": s, "t": t})
+        rows = cur.fetchall()
+
+        for col_name, gen_type in rows:
+            try:
+                # Find current max value to reset the sequence
+                cur.execute(
+                    f'SELECT NVL(MAX("{col_name}"), 0) FROM "{s}"."{t}"'
+                )
+                max_val = int(cur.fetchone()[0])
+
+                # Switch back to GENERATED ALWAYS, restart from max+1
+                cur.execute(
+                    f'ALTER TABLE "{s}"."{t}" MODIFY ("{col_name}" '
+                    f'GENERATED ALWAYS AS IDENTITY (START WITH {max_val + 1}))'
+                )
+                restored.append(col_name)
+            except Exception as exc:
+                print(f"[oracle_browser] could not restore identity "
+                      f"{s}.{t}.{col_name}: {exc}")
+    conn.commit()
+    return restored
+
+
 def enable_triggers(conn, schema: str, table: str) -> dict:
     """Re-enable all DISABLED triggers on *table*.
 
