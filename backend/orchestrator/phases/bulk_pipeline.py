@@ -200,12 +200,6 @@ def handle_target_clearing(mid: str, m: dict) -> None:
                 conn.commit()
                 print(f"[orchestrator] {mid}: truncated {tgt_quoted}")
 
-                # Re-enable referencing FKs
-                if disabled_fks:
-                    fk_errors = oracle_browser.enable_referencing_fks(conn, disabled_fks)
-                    if fk_errors:
-                        print(f"[orchestrator] {mid}: FK re-enable errors: {fk_errors}")
-
                 # 2. Disable triggers
                 disabled_trg = oracle_browser.disable_triggers(conn, tgt_schema, tgt_table)
                 if disabled_trg:

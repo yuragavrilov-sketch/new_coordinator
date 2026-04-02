@@ -114,12 +114,6 @@ def handle_baseline_publishing(mid: str, m: dict) -> None:
                 conn.commit()
                 print(f"[baseline_publishing] truncated {tgt_quoted}")
 
-                # Re-enable referencing FKs
-                if disabled_fks:
-                    fk_errors = oracle_browser.enable_referencing_fks(conn, disabled_fks)
-                    if fk_errors:
-                        print(f"[baseline_publishing] FK re-enable errors: {fk_errors}")
-
                 # Recover PK/UK-backing indexes left UNUSABLE by a previous failed
                 # attempt.  ORA-26026 is raised on INSERT if such an index is UNUSABLE.
                 rebuilt = oracle_browser.rebuild_unusable_constraint_indexes(
