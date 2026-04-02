@@ -20,6 +20,7 @@ interface Props {
   onBulkCreate: () => void;
   onBulkGroup: () => void;
   onCompareSequences?: () => void;
+  onCompareData?: () => void;
 }
 
 export function DashboardToolbar({
@@ -27,6 +28,7 @@ export function DashboardToolbar({
   onRefresh, refreshing, counts,
   selectedCount, onBulkCreate, onBulkGroup,
   onCompareSequences,
+  onCompareData,
 }: Props) {
   const pct = counts.total > 0 ? Math.round((counts.completed / counts.total) * 100) : 0;
 
@@ -61,6 +63,16 @@ export function DashboardToolbar({
             fontSize: 13, fontWeight: 500,
           }}>
             Сравнить сиквенсы
+          </button>
+        )}
+        {onCompareData && (
+          <button onClick={onCompareData} style={{
+            padding: "6px 14px", borderRadius: 6,
+            border: "1px solid #334155", background: "#1e293b",
+            color: "#e2e8f0", cursor: "pointer",
+            fontSize: 13, fontWeight: 500,
+          }}>
+            Сравнить данные
           </button>
         )}
         <div style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
