@@ -57,6 +57,17 @@ export function ConnectorGroupsPanel() {
     return () => clearInterval(id);
   }, []);
 
+  const refreshDetail = (gid: string) => {
+    fetch(`/api/connector-groups/${gid}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        setDetail(d);
+        loadTopicCounts(gid);
+        loadHistory(gid);
+      })
+      .catch(() => setDetail(null));
+  };
+
   const toggleExpand = (gid: string) => {
     if (expanded === gid) {
       setExpanded(null);
@@ -65,14 +76,7 @@ export function ConnectorGroupsPanel() {
       setHistory([]);
     } else {
       setExpanded(gid);
-      fetch(`/api/connector-groups/${gid}`)
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(d => {
-          setDetail(d);
-          loadTopicCounts(gid);
-          loadHistory(gid);
-        })
-        .catch(() => setDetail(null));
+      refreshDetail(gid);
     }
   };
 
@@ -382,7 +386,7 @@ export function ConnectorGroupsPanel() {
                       <tbody>
                         {detail.migrations.map(m => (
                           <MigrationRow key={m.migration_id} m={m}
-                            onChanged={() => toggleExpand(g.group_id)} />
+                            onChanged={() => refreshDetail(g.group_id)} />
                         ))}
                       </tbody>
                     </table>
