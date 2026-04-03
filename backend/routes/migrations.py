@@ -391,12 +391,17 @@ def migration_action(migration_id: str):
                     print(f"[action/cancel] connector delete failed: {exc}")
 
             if action == "restart":
-                # Clear error state so the migration starts fresh
+                # Clear error state; pick target phase based on mode
                 with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COALESCE(migration_mode, 'CDC') FROM migrations "
+                        "WHERE migration_id = %s", (migration_id,))
+                    mode = cur.fetchone()[0].upper()
                     cur.execute(
                         "UPDATE migrations SET error_code = NULL, error_text = NULL, "
                         "failed_phase = NULL WHERE migration_id = %s",
                         (migration_id,))
+                to_phase = "NEW" if mode == "BULK_ONLY" else "CHUNKING"
 
             if action == "retry_verify":
                 # Clear old data_compare task reference so orchestrator creates a new one

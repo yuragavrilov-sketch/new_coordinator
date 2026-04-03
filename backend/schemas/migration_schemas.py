@@ -12,7 +12,7 @@ ACTION_TRANSITIONS: dict[str, tuple[str | None, str]] = {
     "pause":          (None,              "PAUSED"),
     "resume":         ("PAUSED",          "BULK_LOADING"),
     "cancel":         (None,              "CANCELLING"),
-    "restart":        ("CANCELLED",       "NEW"),
+    "restart":        ("CANCELLED",       None),  # to_phase resolved dynamically
     "lag_zero":       ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),
     "retry_verify":   ("DATA_MISMATCH",   "DATA_VERIFYING"),
     "force_complete": ("DATA_MISMATCH",   "COMPLETED"),
