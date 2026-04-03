@@ -9,7 +9,7 @@ import { StatisticsTab } from "./MigrationStatistics";
 import { ChunksTab } from "./ChunksTable";
 import {
   EnableIndexesButton, EnableTriggersButton, RestartBaselineButton,
-  DataMismatchButtons, StopDeleteButtons,
+  DataMismatchButtons, RestartMigrationButton, StopDeleteButtons,
 } from "./PhaseActions";
 
 interface Props {
@@ -283,6 +283,7 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
             detail && isCdcMode(detail) && (
             <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
           )}
+          <RestartMigrationButton migrationId={migrationId} phase={phase} onDone={loadDetail} />
           <StopDeleteButtons migrationId={migrationId} phase={phase} onDone={loadDetail} onDeleted={onClose} />
           <button onClick={onClose} style={{
             background: "none", border: "none", color: "#475569",

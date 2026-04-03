@@ -286,6 +286,64 @@ export function DataVerifyCard({ taskId, phase }: { taskId: string; phase: strin
   );
 }
 
+// ── RestartMigrationButton ───────────────────────────────────────────────────
+
+export function RestartMigrationButton({ migrationId, phase, onDone }: {
+  migrationId: string; phase: string; onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  if (phase !== "CANCELLED") return null;
+
+  async function handleRestart() {
+    if (!confirm("Перезапустить миграцию? Она будет переведена в фазу NEW.")) return;
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restart" }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      } else {
+        onDone();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+      <button
+        onClick={handleRestart}
+        disabled={busy}
+        style={{
+          background: busy ? "#1e3a5f" : "#1d4ed8",
+          color: busy ? "#64748b" : "#e2e8f0",
+          border: "1px solid #2563eb",
+          borderRadius: 5,
+          padding: "5px 14px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+      >
+        {busy ? "Перезапуск..." : "Перезапустить"}
+      </button>
+      {errMsg && (
+        <span style={{ fontSize: 11, color: "#fca5a5" }}>{errMsg}</span>
+      )}
+    </div>
+  );
+}
+
 // ── StopDeleteButtons ─────────────────────────────────────────────────────────
 
 const _ACTIVE = new Set([
