@@ -376,17 +376,13 @@ export function ConnectorGroupsPanel() {
                           <th style={{ padding: "4px 8px" }}>Таблица</th>
                           <th style={{ padding: "4px 8px" }}>Фаза</th>
                           <th style={{ padding: "4px 8px" }}>Режим</th>
+                          <th style={{ padding: "4px 8px", textAlign: "right" }}>Действия</th>
                         </tr>
                       </thead>
                       <tbody>
                         {detail.migrations.map(m => (
-                          <tr key={m.migration_id} style={{ borderTop: "1px solid #1e293b" }}>
-                            <td style={{ padding: "4px 8px", color: "#e2e8f0" }}>
-                              {m.source_schema}.{m.source_table}
-                            </td>
-                            <td style={{ padding: "4px 8px", color: "#94a3b8" }}>{m.phase}</td>
-                            <td style={{ padding: "4px 8px", color: "#64748b" }}>{m.migration_mode}</td>
-                          </tr>
+                          <MigrationRow key={m.migration_id} m={m}
+                            onChanged={() => toggleExpand(g.group_id)} />
                         ))}
                       </tbody>
                     </table>
@@ -767,6 +763,89 @@ function MigrateModal({ groupId, table, onClose, onCreated }: {
       </div>
     </div>,
     document.body,
+  );
+}
+
+const _ACTIVE_PHASES = new Set([
+  "NEW", "PREPARING", "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "CHUNKING", "BULK_LOADING", "BULK_LOADED",
+  "STAGE_VALIDATING", "STAGE_VALIDATED",
+  "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
+  "STAGE_DROPPING", "INDEXES_ENABLING",
+  "CDC_APPLY_STARTING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE",
+  "STRUCTURE_READY", "TARGET_CLEARING",
+]);
+const _DELETABLE_PHASES = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
+
+function MigrationRow({ m, onChanged }: { m: MigrationSummary; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const pc = phaseColor(m.phase);
+  const canStop = _ACTIVE_PHASES.has(m.phase);
+  const canDelete = _DELETABLE_PHASES.has(m.phase);
+
+  async function doStop() {
+    if (!confirm(`Остановить миграцию ${m.source_schema}.${m.source_table}?`)) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/migrations/${m.migration_id}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      onChanged();
+    } finally { setBusy(false); }
+  }
+
+  async function doDelete() {
+    if (!confirm(`Удалить миграцию ${m.source_schema}.${m.source_table}? Это действие необратимо.`)) return;
+    setBusy(true);
+    try {
+      await fetch(`/api/migrations/${m.migration_id}`, { method: "DELETE" });
+      onChanged();
+    } finally { setBusy(false); }
+  }
+
+  const smallBtn = (bg: string, border: string, color: string): React.CSSProperties => ({
+    background: busy ? "#1e293b" : bg,
+    color: busy ? "#475569" : color,
+    border: `1px solid ${border}`,
+    borderRadius: 4, padding: "1px 8px",
+    fontSize: 10, fontWeight: 600,
+    cursor: busy ? "not-allowed" : "pointer",
+  });
+
+  return (
+    <tr style={{ borderTop: "1px solid #1e293b" }}>
+      <td style={{ padding: "4px 8px", color: "#e2e8f0" }}>
+        {m.source_schema}.{m.source_table}
+      </td>
+      <td style={{ padding: "4px 8px" }}>
+        <span style={{
+          fontSize: 9, padding: "1px 6px", borderRadius: 3,
+          background: pc.bg, color: pc.text,
+          border: `1px solid ${pc.border}`, fontWeight: 600,
+        }}>
+          {m.phase}
+        </span>
+      </td>
+      <td style={{ padding: "4px 8px", color: "#64748b" }}>{m.migration_mode}</td>
+      <td style={{ padding: "4px 8px", textAlign: "right" }}>
+        <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+          {canStop && (
+            <button onClick={doStop} disabled={busy}
+              style={smallBtn("#450a0a", "#7f1d1d", "#fca5a5")}>
+              Stop
+            </button>
+          )}
+          {canDelete && (
+            <button onClick={doDelete} disabled={busy}
+              style={smallBtn("#450a0a", "#7f1d1d", "#fca5a5")}>
+              Del
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 
