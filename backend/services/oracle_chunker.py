@@ -40,11 +40,16 @@ def create_chunks(
         # Drop stale task if it exists (ignore errors)
         _drop_task(conn, task_name)
 
-        # Create task and partition by ROWID
+        # Create task and partition by ROWID (separate calls for compatibility)
         with conn.cursor() as cur:
             cur.execute("""
                 BEGIN
                   DBMS_PARALLEL_EXECUTE.CREATE_TASK(task_name => :tn);
+                END;
+            """, {"tn": task_name})
+
+            cur.execute("""
+                BEGIN
                   DBMS_PARALLEL_EXECUTE.CREATE_CHUNKS_BY_ROWID(
                     task_name   => :tn,
                     table_owner => :owner,
@@ -86,9 +91,13 @@ def _drop_task(conn, task_name: str) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
+                DECLARE
+                  e_not_found EXCEPTION;
+                  PRAGMA EXCEPTION_INIT(e_not_found, -29498);
                 BEGIN
                   DBMS_PARALLEL_EXECUTE.DROP_TASK(task_name => :tn);
                 EXCEPTION
+                  WHEN e_not_found THEN NULL;
                   WHEN OTHERS THEN NULL;
                 END;
             """, {"tn": task_name})
