@@ -4,7 +4,7 @@ import services.debezium as debezium
 import services.connector_groups as connector_groups_svc
 
 from orchestrator.helpers import (
-    get_conn, fail, broadcast,
+    get_conn, fail, transition, broadcast,
     group_in_prog, mark_group_in_prog, unmark_group_in_prog,
 )
 
@@ -234,14 +234,43 @@ def _auto_create_group_migrations(group_id: str) -> None:
         conn.close()
 
 
+def _cancel_group_migrations(group_id: str) -> int:
+    """Cancel all active migrations belonging to this group.
+    Returns the number of migrations cancelled."""
+    _TERMINAL = ("DRAFT", "COMPLETED", "CANCELLED", "FAILED", "CANCELLING")
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT migration_id FROM migrations
+                WHERE  group_id = %s
+                  AND  phase NOT IN %s
+            """, (group_id, _TERMINAL))
+            mids = [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for mid in mids:
+        try:
+            transition(mid, "CANCELLING",
+                       message=f"Остановка группы коннекторов")
+        except Exception as exc:
+            print(f"[orchestrator] cancel migration {mid} on group stop failed: {exc}")
+    return len(mids)
+
+
 def _handle_group_stopping(group_id: str) -> None:
-    """Stop and delete Debezium connector, then move to STOPPED."""
+    """Stop and delete Debezium connector, cancel migrations, then move to STOPPED."""
     if group_in_prog(group_id):
         return
     mark_group_in_prog(group_id)
 
     def _run():
         try:
+            cancelled = _cancel_group_migrations(group_id)
+            if cancelled:
+                print(f"[orchestrator] group {group_id}: cancelled {cancelled} migration(s)")
+
             connector_groups_svc.do_stop_connector(group_id)
             connector_groups_svc.transition_group(
                 group_id, "STOPPED", "Коннектор остановлен")
