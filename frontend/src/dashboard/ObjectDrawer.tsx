@@ -149,7 +149,37 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
               <span>BILL19</span>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+            {applyOpt && (
+              <button
+                onClick={runApply}
+                disabled={applyBusy}
+                title={`${applyOpt.label} на target через worker`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: t.radius.sm,
+                  fontSize: 12, fontWeight: 600,
+                  cursor: applyBusy ? "default" : "pointer",
+                  background: applyBusy ? t.bg.s2 : t.tone.accent,
+                  color:      applyBusy ? t.text.muted : t.text.inverse,
+                  border:     `1px solid ${t.tone.accent}`,
+                  opacity:    applyBusy ? 0.7 : 1,
+                }}
+              >
+                <Icon name="rotate" size={13}/>
+                {applyBusy ? "очередь…" : applyOpt.label}
+              </button>
+            )}
+            {applyFeedback && (
+              <span style={{
+                fontSize: 11, color: t.text.muted, fontFamily: t.font.mono,
+                maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {applyFeedback}
+              </span>
+            )}
             {status === "running" && (
               <ActionBtn icon="pause"  label="Пауза"     onClick={() => onAction(o, "pause")}/>
             )}
@@ -221,32 +251,7 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
                   {o.note}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                {applyOpt && (
-                  <button
-                    onClick={runApply}
-                    disabled={applyBusy}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      padding: "5px 10px",
-                      borderRadius: t.radius.sm,
-                      fontSize: 12, fontWeight: 600,
-                      cursor: applyBusy ? "default" : "pointer",
-                      background: applyBusy ? t.bg.s2 : t.tone.accent,
-                      color:      applyBusy ? t.text.muted : t.text.inverse,
-                      border:     `1px solid ${t.tone.accent}`,
-                      opacity:    applyBusy ? 0.7 : 1,
-                    }}
-                  >
-                    <Icon name="rotate" size={13}/>
-                    {applyBusy ? "…" : applyOpt.label}
-                  </button>
-                )}
-                {applyFeedback && (
-                  <span style={{ fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
-                    {applyFeedback}
-                  </span>
-                )}
+              <div style={{ display: "flex", gap: 6 }}>
                 {status === "error" && (
                   <ActionBtn icon="rotate" label="Повторить" primary onClick={() => onAction(o, "retry")}/>
                 )}
