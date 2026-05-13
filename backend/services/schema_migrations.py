@@ -23,10 +23,7 @@ _PHASE_TO_STAGE: dict[str, str] = {
     "DRAFT":               "assess",
     "NEW":                 "assess",
     # schema — DDL prep before data movement
-    "PREPARING":           "schema",
-    "SCN_FIXED":           "schema",
     "TOPIC_CREATING":      "schema",
-    "CONNECTOR_STARTING":  "schema",
     # bulk — data loading + stage validation + baseline publish
     "CHUNKING":            "bulk",
     "BULK_LOADING":        "bulk",
@@ -37,8 +34,6 @@ _PHASE_TO_STAGE: dict[str, str] = {
     "BASELINE_LOADING":    "bulk",
     "BASELINE_PUBLISHED":  "bulk",
     # cdc — change-data-capture apply
-    "CDC_BUFFERING":       "cdc",
-    "CDC_APPLY_STARTING":  "cdc",
     "CDC_APPLYING":        "cdc",
     "CDC_CATCHING_UP":     "cdc",
     "CDC_CAUGHT_UP":       "cdc",
@@ -58,14 +53,13 @@ _PHASE_TO_STAGE: dict[str, str] = {
 
 # Phases considered "active" for KPI counting
 _ACTIVE_PHASES = {
-    "NEW", "PREPARING", "SCN_FIXED",
-    "CONNECTOR_STARTING", "CDC_BUFFERING", "TOPIC_CREATING",
+    "NEW", "TOPIC_CREATING",
     "CHUNKING", "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING", "INDEXES_ENABLING",
     "DATA_VERIFYING", "DATA_MISMATCH",
-    "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+    "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
     "STEADY_STATE",
 }
 
@@ -119,8 +113,7 @@ def _aggregate_status(children_phases: list[str], any_failed: bool, paused: bool
     if all(p in _DONE_PHASES for p in children_phases):
         return "done"
     # If any child in CDC phase, consider whole schema in CDC
-    cdc_phases = {"CDC_BUFFERING", "CDC_APPLY_STARTING", "CDC_APPLYING",
-                  "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
+    cdc_phases = {"CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
     if any(p in cdc_phases for p in children_phases):
         return "cdc"
     if any(p in {"DATA_VERIFYING", "STAGE_VALIDATING"} for p in children_phases):
