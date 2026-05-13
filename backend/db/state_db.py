@@ -252,12 +252,10 @@ def init_db() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rows_loaded               BIGINT NOT NULL DEFAULT 0",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_parallel_degree  INTEGER NOT NULL DEFAULT 1",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_batch_size       INTEGER NOT NULL DEFAULT 500000",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_strategy        VARCHAR(32) NOT NULL DEFAULT 'STAGE'",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_total     INTEGER",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_done      INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS stage_tablespace          VARCHAR(128) NOT NULL DEFAULT ''",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS queue_position            INTEGER",
-                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS migration_mode            VARCHAR(32) NOT NULL DEFAULT 'CDC'",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS data_compare_task_id      UUID",
             ]:
                 cur.execute(col_sql)
@@ -304,6 +302,26 @@ def init_db() -> None:
                 END$$
             """)
             print("[state_db]   strategy backfilled")
+
+            # ── Drop legacy columns (backfilled above) ──────────────────────
+            cur.execute("ALTER TABLE migrations DROP COLUMN IF EXISTS migration_mode")
+            cur.execute("ALTER TABLE migrations DROP COLUMN IF EXISTS migration_strategy")
+            print("[state_db]   dropped legacy columns: migration_mode, migration_strategy")
+
+            # ── Defensive guard: refuse to start if Legacy phases linger ────
+            cur.execute("""
+                SELECT migration_id, phase FROM migrations
+                WHERE phase IN ('PREPARING','SCN_FIXED','CONNECTOR_STARTING',
+                                'CDC_BUFFERING','CDC_APPLY_STARTING')
+                LIMIT 5
+            """)
+            stuck = cur.fetchall()
+            if stuck:
+                ids = ", ".join(f"{r[0]} ({r[1]})" for r in stuck)
+                raise RuntimeError(
+                    f"Найдены миграции в Legacy-фазах: {ids}. "
+                    "Завершите или отмените их в предыдущей версии перед обновлением."
+                )
 
             # ── migration_chunks ──────────────────────────────────────────
             cur.execute("""
