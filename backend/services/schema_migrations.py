@@ -574,17 +574,69 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
 
 
 def get_metrics(conn, sm_id: str) -> dict:
-    """Best-effort live metrics. For Phase 4 returns zeros + flat sparklines —
-    real Oracle V$SYSSTAT integration is future work."""
+    """Live metrics: source-Oracle V$SYSMETRIC + CDC lag aggregated across
+    child migrations. Failures degrade silently to zeros so the dashboard
+    never crashes on a misconfigured source."""
+    cpu = 0.0
+    net_mb_s = 0.0
+    redo_bps = 0
+    cpu_hist:  list[float] = []
+    net_hist:  list[float] = []
+    redo_hist: list[float] = []
+
+    try:
+        from db.oracle_browser import get_oracle_conn, get_v_sysmetric, get_v_sysmetric_history
+        from db.state_db import load_configs
+
+        configs = load_configs(True)
+        src = get_oracle_conn("source", configs)
+        try:
+            cur_vals  = get_v_sysmetric(src)
+            hist_vals = get_v_sysmetric_history(src, limit_per_metric=10)
+        finally:
+            try: src.close()
+            except Exception: pass
+
+        cpu      = float(cur_vals.get("Host CPU Utilization (%)") or 0)
+        net_bps  = float(cur_vals.get("Network Traffic Volume Per Sec") or 0)
+        net_mb_s = round(net_bps / (1024 * 1024), 2)
+        redo_bps = int(cur_vals.get("Redo Generated Per Sec") or 0)
+
+        cpu_hist  = [round(float(v), 1) for v in hist_vals.get("Host CPU Utilization (%)") or []]
+        net_hist  = [round(float(v) / (1024 * 1024), 2)
+                     for v in hist_vals.get("Network Traffic Volume Per Sec") or []]
+        redo_hist = [int(v) for v in hist_vals.get("Redo Generated Per Sec") or []]
+    except Exception as exc:
+        print(f"[metrics] source-side metrics failed: {exc}")
+
+    # CDC lag: sum across all child migrations of this schema_migration
+    cdc_lag_total = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COALESCE(SUM(cs.total_lag), 0)
+                FROM   schema_migrations sm
+                JOIN   migration_plan_items mpi ON mpi.plan_id = sm.plan_id
+                JOIN   migration_cdc_state  cs  ON cs.migration_id = mpi.migration_id
+                WHERE  sm.schema_migration_id = %s
+            """, (sm_id,))
+            row = cur.fetchone()
+            cdc_lag_total = int(row[0] or 0) if row else 0
+    except Exception as exc:
+        print(f"[metrics] CDC lag query failed: {exc}")
+
+    def _pad10(arr: list) -> list:
+        return ([0] * (10 - len(arr)) + arr)[-10:] if arr else [0] * 10
+
     return {
-        "sourceCpu": 0,
-        "network":   0,
-        "redoPerSec": 0,
-        "cdcLagMs":  0,
-        "cpuSpark":  [0] * 10,
-        "netSpark":  [0] * 10,
-        "redoSpark": [0] * 10,
-        "lagSpark":  [0] * 10,
+        "sourceCpu":  round(cpu, 1),
+        "network":    net_mb_s,
+        "redoPerSec": redo_bps,
+        "cdcLagMs":   cdc_lag_total,
+        "cpuSpark":   _pad10(cpu_hist),
+        "netSpark":   _pad10(net_hist),
+        "redoSpark":  _pad10(redo_hist),
+        "lagSpark":   [0] * 10,
     }
 
 

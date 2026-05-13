@@ -12,6 +12,7 @@ export function DiffSections({ detail }: { detail: DdlDetailResp }) {
   const diff = detail.diff || {};
   const src = (detail.source?.metadata || {}) as Record<string, unknown>;
   const tgt = (detail.target?.metadata || {}) as Record<string, unknown>;
+  const ms  = detail.match_status || "UNKNOWN";
 
   if (!detail.found) {
     return (
@@ -21,47 +22,75 @@ export function DiffSections({ detail }: { detail: DdlDetailResp }) {
     );
   }
 
-  if (detail.match_status === "MATCH") {
-    return (
-      <Section title="DDL совпадает" tone="ok">
-        <Empty text="Source и target одинаковы — миграция этого объекта не требует изменений."/>
-      </Section>
-    );
-  }
+  return (
+    <>
+      <StatusBanner status={ms}/>
+      {(() => {
+        switch (type) {
+          case "TABLE":             return <TableDiff diff={diff} src={src} tgt={tgt}/>;
+          case "VIEW":
+          case "MATERIALIZED VIEW": return <SqlTextDiff diff={diff} src={src} tgt={tgt}/>;
+          case "PACKAGE":           return <PackageDiff diff={diff} src={src} tgt={tgt}/>;
+          case "PROCEDURE":
+          case "FUNCTION":          return <CodeDiff diff={diff} src={src} tgt={tgt}/>;
+          case "TRIGGER":           return <TriggerDiff diff={diff} src={src} tgt={tgt}/>;
+          case "INDEX":             return <IndexDiff diff={diff} src={src} tgt={tgt}/>;
+          case "TYPE":              return <TypeDiff diff={diff} src={src} tgt={tgt}/>;
+          case "SEQUENCE":          return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
+          case "SYNONYM":           return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
+          case "DATABASE LINK":     return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
+          case "JOB":               return <JobDiff   diff={diff} src={src} tgt={tgt}/>;
+          default:                  return <RawDiff diff={diff}/>;
+        }
+      })()}
+    </>
+  );
+}
 
-  if (detail.match_status === "MISSING") {
-    return (
-      <Section title="Отсутствует в target" tone="info">
-        <Empty text="Объект есть в source, в target ещё не создан. Создаётся через миграцию или DDL Catalog «sync».">
-        </Empty>
-      </Section>
-    );
-  }
+/** Top banner that summarises the match state. Shows for every object so
+ *  the user immediately sees "✓ совпадает" / "⚠ отличается" / etc. */
+function StatusBanner({ status }: { status: string }) {
+  const cfg = {
+    MATCH:   { tone: "ok"    as const, label: "DDL совпадает",
+               hint: "Source и target идентичны — миграция объекта не требуется." },
+    DIFF:    { tone: "warn"  as const, label: "DDL отличается",
+               hint: "Поля и/или тело различаются — см. блоки ниже." },
+    MISSING: { tone: "info"  as const, label: "Нет в target",
+               hint: "Есть в source, не создан в target. Кнопка «Создать на target» поставит CREATE в очередь." },
+    EXTRA:   { tone: "warn"  as const, label: "Только в target",
+               hint: "Объект есть в target, но отсутствует в source — возможно лишний." },
+    UNKNOWN: { tone: "info"  as const, label: "Статус неизвестен",
+               hint: "Сравнение не выполнялось — загрузите snapshot." },
+  }[status] || { tone: "info" as const, label: status, hint: "" };
 
-  if (detail.match_status === "EXTRA") {
-    return (
-      <Section title="Только в target" tone="warn">
-        <Empty text="Объект есть в target, но отсутствует в source — лишний."/>
-      </Section>
-    );
-  }
+  const bg =
+    cfg.tone === "ok"   ? t.tone.okSoft   :
+    cfg.tone === "warn" ? t.tone.warnSoft :
+                          t.tone.infoSoft;
+  const fg =
+    cfg.tone === "ok"   ? t.tone.ok       :
+    cfg.tone === "warn" ? t.tone.warn     :
+                          t.tone.info;
 
-  switch (type) {
-    case "TABLE":             return <TableDiff diff={diff} src={src} tgt={tgt}/>;
-    case "VIEW":
-    case "MATERIALIZED VIEW": return <SqlTextDiff diff={diff} src={src} tgt={tgt}/>;
-    case "PACKAGE":           return <PackageDiff diff={diff} src={src} tgt={tgt}/>;
-    case "PROCEDURE":
-    case "FUNCTION":          return <CodeDiff diff={diff} src={src} tgt={tgt}/>;
-    case "TRIGGER":           return <TriggerDiff diff={diff} src={src} tgt={tgt}/>;
-    case "INDEX":             return <IndexDiff diff={diff} src={src} tgt={tgt}/>;
-    case "TYPE":              return <TypeDiff diff={diff} src={src} tgt={tgt}/>;
-    case "SEQUENCE":          return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
-    case "SYNONYM":           return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
-    case "DATABASE LINK":     return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
-    case "JOB":               return <JobDiff   diff={diff} src={src} tgt={tgt}/>;
-    default:                  return <RawDiff diff={diff}/>;
-  }
+  return (
+    <div style={{
+      background: bg,
+      border:     `1px solid color-mix(in oklab, ${fg} 30%, transparent)`,
+      borderRadius: t.radius.lg,
+      padding: "10px 14px",
+      display: "flex", gap: 10, alignItems: "center",
+    }}>
+      <span style={{ color: fg, display: "grid", placeItems: "center" }}>
+        <Icon name={cfg.tone === "ok" ? "check" : "warn"} size={14}/>
+      </span>
+      <div>
+        <div style={{ fontSize: "12.5px", fontWeight: 600, color: fg }}>{cfg.label}</div>
+        {cfg.hint && (
+          <div style={{ fontSize: 11, color: t.text.muted, marginTop: 2 }}>{cfg.hint}</div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function TriggerDiff({ diff, src, tgt }: {
@@ -74,18 +103,18 @@ function TriggerDiff({ diff, src, tgt }: {
   return (
     <>
       <FieldDiff diff={diff} src={src} tgt={tgt}/>
-      <Section title="Что отличается">
+      <Section title="Сводка">
         <KeyValueList items={[
           { k: "When clause", v: whenMatch ? "совпадает" : "отличается", tone: whenMatch ? "ok" : "warn" },
           { k: "Body",        v: bodyMatch ? "совпадает" : "отличается", tone: bodyMatch ? "ok" : "warn" },
         ]}/>
       </Section>
-      {!bodyMatch && (
-        <>
-          <Section title="Body — Source"><CodeBlock code={(src.trigger_body as string) || "—"}/></Section>
-          <Section title="Body — Target"><CodeBlock code={(tgt.trigger_body as string) || "—"}/></Section>
-        </>
-      )}
+      <Section title="Body — Source" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.trigger_body as string) || "—"}/>
+      </Section>
+      <Section title="Body — Target" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.trigger_body as string) || "—"}/>
+      </Section>
     </>
   );
 }
@@ -95,25 +124,27 @@ function IndexDiff({ diff, src, tgt }: {
   src:  Record<string, unknown>;
   tgt:  Record<string, unknown>;
 }) {
-  const srcCols = (diff.src_cols as Array<[string, boolean]> | undefined) || [];
-  const tgtCols = (diff.tgt_cols as Array<[string, boolean]> | undefined) || [];
+  const srcCols = (diff.src_cols as Array<[string, boolean]> | undefined)
+    ?? ((src.columns as Array<{ name: string; descending?: boolean }> | undefined)
+        ?? []).map(c => [c.name, !!c.descending] as [string, boolean]);
+  const tgtCols = (diff.tgt_cols as Array<[string, boolean]> | undefined)
+    ?? ((tgt.columns as Array<{ name: string; descending?: boolean }> | undefined)
+        ?? []).map(c => [c.name, !!c.descending] as [string, boolean]);
   const colsMatch = diff.cols_match !== false;
   return (
     <>
       <FieldDiff diff={diff} src={src} tgt={tgt}/>
-      {!colsMatch && (
-        <Section title="Колонки индекса">
-          <table style={tableStyle}>
-            <thead><tr><Th>Source</Th><Th>Target</Th></tr></thead>
-            <tbody>
-              <Tr>
-                <TdMono>{srcCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
-                <TdMono>{tgtCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
-              </Tr>
-            </tbody>
-          </table>
-        </Section>
-      )}
+      <Section title="Колонки индекса" tone={colsMatch ? "ok" : "warn"}>
+        <table style={tableStyle}>
+          <thead><tr><Th>Source</Th><Th>Target</Th></tr></thead>
+          <tbody>
+            <Tr>
+              <TdMono>{srcCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
+              <TdMono>{tgtCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
+            </Tr>
+          </tbody>
+        </table>
+      </Section>
     </>
   );
 }
@@ -127,17 +158,11 @@ function JobDiff({ diff, src, tgt }: {
   return (
     <>
       <FieldDiff diff={diff} src={src} tgt={tgt}/>
-      <Section title="Job action">
-        <KeyValueList items={[
-          { k: "action", v: actionMatch ? "совпадает" : "отличается", tone: actionMatch ? "ok" : "warn" },
-        ]}/>
-        {!actionMatch && (
-          <>
-            <div style={{ marginTop: 10 }}><CodeBlock code={(src.job_action as string) || "—"}/></div>
-            <div style={{ marginTop: 6,  color: t.text.muted, fontSize: 11 }}>↑ source · ↓ target</div>
-            <div style={{ marginTop: 6 }}><CodeBlock code={(tgt.job_action as string) || "—"}/></div>
-          </>
-        )}
+      <Section title="Job action — Source" tone={actionMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.job_action as string) || "—"}/>
+      </Section>
+      <Section title="Job action — Target" tone={actionMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.job_action as string) || "—"}/>
       </Section>
     </>
   );
@@ -163,41 +188,43 @@ function TableDiff({ diff, src, tgt }: {
   const srcColMap = new Map(srcCols.map(c => [c.name, c]));
   const tgtColMap = new Map(tgtCols.map(c => [c.name, c]));
 
+  // Union of column names, preserving source order first, then target-extras
+  const colsOrdered: string[] = [];
+  for (const c of srcCols) colsOrdered.push(c.name);
+  for (const c of tgtCols) if (!srcColMap.has(c.name)) colsOrdered.push(c.name);
+  const colsMissingSet = new Set(colsMissing);
+  const colsExtraSet   = new Set(colsExtra);
+  const colsTypeSet    = new Set(colsType);
+  const anyColIssue = colsMissing.length + colsExtra.length + colsType.length > 0;
+
   return (
     <>
-      {(colsMissing.length > 0 || colsExtra.length > 0 || colsType.length > 0) && (
-        <Section title="Колонки">
+      {colsOrdered.length > 0 && (
+        <Section title={`Колонки · ${colsOrdered.length}`} tone={anyColIssue ? "warn" : "ok"}>
           <table style={tableStyle}>
             <thead>
               <tr>
-                <Th>Имя</Th><Th>Source</Th><Th>Target</Th><Th>Статус</Th>
+                <Th>Имя</Th><Th>Source</Th><Th>Target</Th><Th>Δ</Th>
               </tr>
             </thead>
             <tbody>
-              {colsMissing.map(name => (
-                <Tr key={`m-${name}`}>
-                  <TdMono>{name}</TdMono>
-                  <TdMono>{srcColMap.get(name)?.data_type || "—"}</TdMono>
-                  <TdMono dim>—</TdMono>
-                  <TdTag tone="error">отсутствует</TdTag>
-                </Tr>
-              ))}
-              {colsType.map(name => (
-                <Tr key={`t-${name}`}>
-                  <TdMono>{name}</TdMono>
-                  <TdMono>{srcColMap.get(name)?.data_type || "—"}</TdMono>
-                  <TdMono>{tgtColMap.get(name)?.data_type || "—"}</TdMono>
-                  <TdTag tone="warn">тип отличается</TdTag>
-                </Tr>
-              ))}
-              {colsExtra.map(name => (
-                <Tr key={`e-${name}`}>
-                  <TdMono>{name}</TdMono>
-                  <TdMono dim>—</TdMono>
-                  <TdMono>{tgtColMap.get(name)?.data_type || "—"}</TdMono>
-                  <TdTag tone="info">только в target</TdTag>
-                </Tr>
-              ))}
+              {colsOrdered.map(name => {
+                const s = srcColMap.get(name);
+                const tg = tgtColMap.get(name);
+                let tone: "ok" | "warn" | "error" | "info" = "ok";
+                let label = "✓";
+                if (colsMissingSet.has(name)) { tone = "error"; label = "нет в target"; }
+                else if (colsExtraSet.has(name)) { tone = "info"; label = "только в target"; }
+                else if (colsTypeSet.has(name)) { tone = "warn"; label = "тип ≠"; }
+                return (
+                  <Tr key={name}>
+                    <TdMono>{name}</TdMono>
+                    <TdMono dim={!s}>{s?.data_type || "—"}</TdMono>
+                    <TdMono dim={!tg}>{tg?.data_type || "—"}</TdMono>
+                    <TdTag tone={tone}>{label}</TdTag>
+                  </Tr>
+                );
+              })}
             </tbody>
           </table>
         </Section>
@@ -238,20 +265,23 @@ function SqlTextDiff({ diff, src, tgt }: {
   const sqlMatch = diff.sql_match !== false;
   const statusMatch = diff.status_match !== false;
   const refreshMatch = diff.refresh_match !== false;
+  const flags = [
+    { k: "SQL текст",        v: sqlMatch     ? "совпадает" : "отличается", tone: sqlMatch     ? "ok" as const : "warn" as const },
+    { k: "Статус",           v: statusMatch  ? "совпадает" : "отличается", tone: statusMatch  ? "ok" as const : "warn" as const },
+    ...(diff.refresh_match !== undefined
+      ? [{ k: "Refresh", v: refreshMatch ? "совпадает" : "отличается", tone: refreshMatch ? "ok" as const : "warn" as const }]
+      : []),
+  ];
 
   return (
     <>
-      <Section title="Что отличается">
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: t.text.secondary }}>
-          {!sqlMatch     && <li>SQL текст</li>}
-          {!statusMatch  && <li>Статус (ENABLED/DISABLED)</li>}
-          {!refreshMatch && <li>Тип refresh для MVIEW</li>}
-        </ul>
+      <Section title="Сводка">
+        <KeyValueList items={flags}/>
       </Section>
-      <Section title="SQL — Source">
+      <Section title="SQL — Source" tone={sqlMatch ? "ok" : "warn"}>
         <CodeBlock code={srcSql || "—"}/>
       </Section>
-      <Section title="SQL — Target">
+      <Section title="SQL — Target" tone={sqlMatch ? "ok" : "warn"}>
         <CodeBlock code={tgtSql || "—"}/>
       </Section>
     </>
@@ -268,40 +298,45 @@ function PackageDiff({ diff, src, tgt }: {
   const bodyMatch = diff.body_match !== false;
   return (
     <>
-      <Section title="Что отличается">
+      <Section title="Сводка">
         <KeyValueList items={[
           { k: "Спецификация", v: specMatch ? "совпадает" : "отличается", tone: specMatch ? "ok" : "warn" },
           { k: "Тело",         v: bodyMatch ? "совпадает" : "отличается", tone: bodyMatch ? "ok" : "warn" },
         ]}/>
       </Section>
-      {!specMatch && (
-        <>
-          <Section title="Spec — Source"><CodeBlock code={(src.spec_source as string) || "—"}/></Section>
-          <Section title="Spec — Target"><CodeBlock code={(tgt.spec_source as string) || "—"}/></Section>
-        </>
-      )}
-      {!bodyMatch && (
-        <>
-          <Section title="Body — Source"><CodeBlock code={(src.body_source as string) || "—"}/></Section>
-          <Section title="Body — Target"><CodeBlock code={(tgt.body_source as string) || "—"}/></Section>
-        </>
-      )}
+      <Section title="Spec — Source" tone={specMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.spec_source as string) || "—"}/>
+      </Section>
+      <Section title="Spec — Target" tone={specMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.spec_source as string) || "—"}/>
+      </Section>
+      <Section title="Body — Source" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.body_source as string) || "—"}/>
+      </Section>
+      <Section title="Body — Target" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.body_source as string) || "—"}/>
+      </Section>
     </>
   );
 }
 
 // ── PROCEDURE / FUNCTION / TRIGGER: single source body
-function CodeDiff({ src, tgt }: {
+function CodeDiff({ diff, src, tgt }: {
   diff: Record<string, unknown>;
   src:  Record<string, unknown>;
   tgt:  Record<string, unknown>;
 }) {
   const srcCode = (src.source_code as string) || "";
   const tgtCode = (tgt.source_code as string) || "";
+  const codeMatch = diff.code_match !== false;
   return (
     <>
-      <Section title="Source"><CodeBlock code={srcCode || "—"}/></Section>
-      <Section title="Target"><CodeBlock code={tgtCode || "—"}/></Section>
+      <Section title="Source" tone={codeMatch ? "ok" : "warn"}>
+        <CodeBlock code={srcCode || "—"}/>
+      </Section>
+      <Section title="Target" tone={codeMatch ? "ok" : "warn"}>
+        <CodeBlock code={tgtCode || "—"}/>
+      </Section>
     </>
   );
 }
@@ -315,49 +350,62 @@ function TypeDiff({ diff, src, tgt }: {
   const bodyMatch   = diff.body_match   !== false;
   return (
     <>
-      <Section title="Что отличается">
+      <Section title="Сводка">
         <KeyValueList items={[
           { k: "Объявление", v: sourceMatch ? "совпадает" : "отличается", tone: sourceMatch ? "ok" : "warn" },
           { k: "Тело",       v: bodyMatch   ? "совпадает" : "отличается", tone: bodyMatch   ? "ok" : "warn" },
         ]}/>
       </Section>
-      {!sourceMatch && (
-        <>
-          <Section title="Объявление — Source"><CodeBlock code={(src.source as string) || "—"}/></Section>
-          <Section title="Объявление — Target"><CodeBlock code={(tgt.source as string) || "—"}/></Section>
-        </>
-      )}
-      {!bodyMatch && (
-        <>
-          <Section title="Body — Source"><CodeBlock code={(src.body_source as string) || "—"}/></Section>
-          <Section title="Body — Target"><CodeBlock code={(tgt.body_source as string) || "—"}/></Section>
-        </>
-      )}
+      <Section title="Объявление — Source" tone={sourceMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.source as string) || "—"}/>
+      </Section>
+      <Section title="Объявление — Target" tone={sourceMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.source as string) || "—"}/>
+      </Section>
+      <Section title="Body — Source" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(src.body_source as string) || "—"}/>
+      </Section>
+      <Section title="Body — Target" tone={bodyMatch ? "ok" : "warn"}>
+        <CodeBlock code={(tgt.body_source as string) || "—"}/>
+      </Section>
     </>
   );
 }
 
-// ── SEQUENCE / SYNONYM: field diffs ({ field: [src, tgt] })
-function FieldDiff({ diff }: {
+// ── SEQUENCE / SYNONYM / INDEX header / TRIGGER header / DBLINK / JOB header
+// Shows every field from src ∪ tgt (skipping nested arrays/objects), with
+// mismatched rows highlighted by an "≠" badge.
+function FieldDiff({ src, tgt }: {
   diff: Record<string, unknown>;
   src:  Record<string, unknown>;
   tgt:  Record<string, unknown>;
 }) {
-  const fieldDiffs = (diff.field_diffs as Record<string, [unknown, unknown]> | undefined) || {};
-  const entries = Object.entries(fieldDiffs);
-  if (entries.length === 0) return <Empty text="Структурных различий не зафиксировано."/>;
+  const isScalar = (v: unknown) =>
+    v === null || ["string", "number", "boolean"].includes(typeof v);
+  const keys = Array.from(new Set([...Object.keys(src), ...Object.keys(tgt)]))
+    .filter(k => isScalar(src[k]) && isScalar(tgt[k]) || (k in src ? isScalar(src[k]) : isScalar(tgt[k])))
+    .sort();
+  if (keys.length === 0) return null;
   return (
-    <Section title="Различия полей">
+    <Section title="Поля">
       <table style={tableStyle}>
-        <thead><tr><Th>Поле</Th><Th>Source</Th><Th>Target</Th></tr></thead>
+        <thead><tr><Th>Поле</Th><Th>Source</Th><Th>Target</Th><Th>Δ</Th></tr></thead>
         <tbody>
-          {entries.map(([field, [s, tg]]) => (
-            <Tr key={field}>
-              <TdMono>{field}</TdMono>
-              <TdMono>{String(s ?? "—")}</TdMono>
-              <TdMono>{String(tg ?? "—")}</TdMono>
-            </Tr>
-          ))}
+          {keys.map(k => {
+            const s  = src[k];
+            const tg = tgt[k];
+            const has = (v: unknown) => v !== undefined && v !== null && v !== "";
+            const both = has(s) && has(tg);
+            const diff = both ? String(s) !== String(tg) : (has(s) !== has(tg));
+            return (
+              <Tr key={k}>
+                <TdMono>{k}</TdMono>
+                <TdMono dim={!has(s)}>{has(s) ? String(s) : "—"}</TdMono>
+                <TdMono dim={!has(tg)}>{has(tg) ? String(tg) : "—"}</TdMono>
+                <TdTag tone={diff ? "warn" : "ok"}>{diff ? "≠" : "✓"}</TdTag>
+              </Tr>
+            );
+          })}
         </tbody>
       </table>
     </Section>

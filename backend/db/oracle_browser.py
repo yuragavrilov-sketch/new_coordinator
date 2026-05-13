@@ -51,6 +51,63 @@ def list_schemas(conn) -> list[str]:
         return [r[0] for r in cur.fetchall() if r[0] not in _SYSTEM_SCHEMAS]
 
 
+_SYSMETRIC_NAMES = (
+    "Host CPU Utilization (%)",
+    "Network Traffic Volume Per Sec",   # B/s
+    "Redo Generated Per Sec",           # B/s
+    "Physical Reads Per Sec",
+    "Physical Writes Per Sec",
+)
+
+
+def get_v_sysmetric(conn) -> dict:
+    """Return current value per metric_name from V$SYSMETRIC (60-second window).
+    Returns {} if the user lacks SELECT on V$SYSMETRIC."""
+    try:
+        with conn.cursor() as cur:
+            placeholders = ", ".join(f":m{i}" for i in range(len(_SYSMETRIC_NAMES)))
+            binds = {f"m{i}": n for i, n in enumerate(_SYSMETRIC_NAMES)}
+            cur.execute(f"""
+                SELECT metric_name, value
+                FROM   v$sysmetric
+                WHERE  metric_name IN ({placeholders})
+                  AND  group_id = 2
+            """, binds)
+            return {r[0]: float(r[1] or 0) for r in cur.fetchall()}
+    except Exception as exc:
+        print(f"[metrics] V$SYSMETRIC unavailable: {exc}")
+        return {}
+
+
+def get_v_sysmetric_history(conn, limit_per_metric: int = 10) -> dict:
+    """Return up to `limit_per_metric` recent values per metric from
+    V$SYSMETRIC_HISTORY, oldest-first (so a sparkline reads left → right
+    in time order)."""
+    try:
+        with conn.cursor() as cur:
+            placeholders = ", ".join(f":m{i}" for i in range(len(_SYSMETRIC_NAMES)))
+            binds = {f"m{i}": n for i, n in enumerate(_SYSMETRIC_NAMES)}
+            cur.execute(f"""
+                SELECT metric_name, value, begin_time
+                FROM   v$sysmetric_history
+                WHERE  metric_name IN ({placeholders})
+                  AND  group_id   = 2
+                ORDER  BY begin_time DESC
+                FETCH  FIRST 200 ROWS ONLY
+            """, binds)
+            buckets: dict[str, list] = {}
+            for r in cur.fetchall():
+                buckets.setdefault(r[0], []).append(float(r[1] or 0))
+            for k in buckets:
+                buckets[k].reverse()
+                if len(buckets[k]) > limit_per_metric:
+                    buckets[k] = buckets[k][-limit_per_metric:]
+            return buckets
+    except Exception as exc:
+        print(f"[metrics] V$SYSMETRIC_HISTORY unavailable: {exc}")
+        return {}
+
+
 def get_oracle_version(conn) -> dict:
     """Return Oracle version info. Tries product_component_version → V$VERSION.
     Falls back to {short: 'unknown'} on any failure (don't crash on auth)."""
