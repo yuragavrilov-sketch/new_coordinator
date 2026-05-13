@@ -36,10 +36,17 @@ export function ProblemsSummary({
   missing, diff, srcInvalid, tgtInvalid, bothInvalid,
   schemaMigrationId, srcSchema, tgtSchema, onOpen, onApplied,
 }: Props) {
-  const total = missing.length + diff.length + srcInvalid.length + tgtInvalid.length + bothInvalid.length;
+  // ── Hooks (must come BEFORE any early return to keep ordering stable) ──
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [dialogOpen,   setDialogOpen]   = useState(false);
+  // Track running poll so a second submit can supersede the first.
+  // Also cancelled on unmount to avoid setState-after-unmount warnings.
+  const pollAbort = useRef<{ cancelled: boolean } | null>(null);
+  useEffect(() => () => {
+    if (pollAbort.current) pollAbort.current.cancelled = true;
+  }, []);
 
+  const total = missing.length + diff.length + srcInvalid.length + tgtInvalid.length + bothInvalid.length;
   if (total === 0) return null;
 
   // Plan a bulk sync: split current problems into action groups.
@@ -72,13 +79,6 @@ export function ProblemsSummary({
     },
   ];
   const syncGroups = allGroups.filter(g => g.items.length > 0);
-
-  // Track running poll so a second submit can supersede the first.
-  // Also cancelled on unmount to avoid setState-after-unmount warnings.
-  const pollAbort = useRef<{ cancelled: boolean } | null>(null);
-  useEffect(() => () => {
-    if (pollAbort.current) pollAbort.current.cancelled = true;
-  }, []);
 
   const runApply = async (selections: { action: DdlApplyAction; items: SchemaObject[] }[]) => {
     setSyncFeedback("отправляю в очередь…");
