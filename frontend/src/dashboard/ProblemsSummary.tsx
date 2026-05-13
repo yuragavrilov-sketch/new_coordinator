@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { t } from "../theme";
 import { Icon } from "../components/ui";
 import { OBJECT_TYPES, type SchemaObject } from "./types";
@@ -73,8 +73,12 @@ export function ProblemsSummary({
   ];
   const syncGroups = allGroups.filter(g => g.items.length > 0);
 
-  // Track running poll so a second submit can supersede the first
+  // Track running poll so a second submit can supersede the first.
+  // Also cancelled on unmount to avoid setState-after-unmount warnings.
   const pollAbort = useRef<{ cancelled: boolean } | null>(null);
+  useEffect(() => () => {
+    if (pollAbort.current) pollAbort.current.cancelled = true;
+  }, []);
 
   const runApply = async (selections: { action: DdlApplyAction; items: SchemaObject[] }[]) => {
     setSyncFeedback("отправляю в очередь…");
@@ -118,6 +122,8 @@ export function ProblemsSummary({
     token:    { cancelled: boolean },
   ) => {
     const TERMINAL = new Set(["DONE", "FAILED", "CANCELLED"]);
+    const wanted   = new Set(jobIds);
+    const total    = jobIds.length;
     const start = Date.now();
     const TIMEOUT_MS = 10 * 60_000;
 
@@ -130,14 +136,19 @@ export function ProblemsSummary({
       } catch {
         continue;
       }
-      const ours = jobs.filter(j => jobIds.includes(j.job_id));
-      const active = ours.filter(j => !TERMINAL.has(j.state));
-      const done   = ours.filter(j => j.state === "DONE").length;
-      const failed = ours.filter(j => j.state === "FAILED").length;
-      setSyncFeedback(active.length
-        ? `worker: ${done}/${jobIds.length} готово${failed ? `, ${failed} с ошибкой` : ""}`
-        : `worker завершил: ${done}/${jobIds.length}${failed ? `, ${failed} с ошибкой` : ""} · обновляю snapshot…`);
-      if (active.length === 0 && ours.length === jobIds.length) {
+      // Single pass: count states for our jobs only (O(N) vs O(N·M)).
+      let activeCount = 0, doneCount = 0, failedCount = 0, ourCount = 0;
+      for (const j of jobs) {
+        if (!wanted.has(j.job_id)) continue;
+        ourCount++;
+        if (j.state === "DONE")        doneCount++;
+        else if (j.state === "FAILED") failedCount++;
+        else if (!TERMINAL.has(j.state)) activeCount++;
+      }
+      setSyncFeedback(activeCount
+        ? `worker: ${doneCount}/${total} готово${failedCount ? `, ${failedCount} с ошибкой` : ""}`
+        : `worker завершил: ${doneCount}/${total}${failedCount ? `, ${failedCount} с ошибкой` : ""} · обновляю snapshot…`);
+      if (activeCount === 0 && ourCount === total) {
         // All done — refresh snapshot, then trigger parent reload
         if (srcSchema && tgtSchema) {
           try {
@@ -150,7 +161,7 @@ export function ProblemsSummary({
         }
         if (token.cancelled) return;
         onApplied?.();
-        setSyncFeedback(`готово: ${done}/${jobIds.length}${failed ? ` (${failed} с ошибкой)` : ""}`);
+        setSyncFeedback(`готово: ${doneCount}/${total}${failedCount ? ` (${failedCount} с ошибкой)` : ""}`);
         return;
       }
     }

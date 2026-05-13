@@ -239,8 +239,9 @@ function GroupSection({
   onToggleOne:   (id: string) => void;
   onToggleGroup: (v: boolean) => void;
 }) {
-  if (group.items.length === 0) return null;
+  // Hook must come BEFORE any conditional return to keep hook order stable
   const [expanded, setExpanded] = useState(true);
+  if (group.items.length === 0) return null;
   const allSelected = selectedCount === group.items.length;
   const noneSelected = selectedCount === 0;
   // Indeterminate: some but not all selected — show as a half-state visually
