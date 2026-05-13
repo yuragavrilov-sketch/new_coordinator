@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { t } from "../theme";
 import { Icon } from "../components/ui";
 import { OBJECT_TYPES, type SchemaObject } from "./types";
-import { applyDdl, type DdlApplyAction } from "./api";
+import { applyDdl, listDdlJobs, type DdlApplyAction } from "./api";
+import { SyncDdlDialog, type SyncGroup } from "./SyncDdlDialog";
 
 interface Props {
   missing:      SchemaObject[];
@@ -11,8 +12,10 @@ interface Props {
   tgtInvalid:   SchemaObject[];
   bothInvalid:  SchemaObject[];
   schemaMigrationId: string;
+  srcSchema?:   string;
+  tgtSchema?:   string;
   onOpen:       (o: SchemaObject) => void;
-  onApplied?:   () => void;          // called after a successful submit
+  onApplied?:   () => void;          // called after worker finishes + snapshot reloaded
 }
 
 /** Card above the object table summarising decision-required objects:
@@ -31,11 +34,11 @@ const DATA_BEARING_TYPES = new Set(["TABLE", "MVIEW"]);
 
 export function ProblemsSummary({
   missing, diff, srcInvalid, tgtInvalid, bothInvalid,
-  schemaMigrationId, onOpen, onApplied,
+  schemaMigrationId, srcSchema, tgtSchema, onOpen, onApplied,
 }: Props) {
   const total = missing.length + diff.length + srcInvalid.length + tgtInvalid.length + bothInvalid.length;
-  const [syncBusy,     setSyncBusy]     = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [dialogOpen,   setDialogOpen]   = useState(false);
 
   if (total === 0) return null;
 
@@ -43,56 +46,117 @@ export function ProblemsSummary({
   const diffReplace = diff.filter(o => REPLACEABLE_TYPES.has(o.type));
   const diffRecreate = diff.filter(o => !REPLACEABLE_TYPES.has(o.type));
   const toRecreate = [...diffRecreate, ...tgtInvalid];
-  const destructiveItems = toRecreate.filter(o => DATA_BEARING_TYPES.has(o.type));
   const actionable = missing.length + diffReplace.length + toRecreate.length;
 
-  const runSyncAll = async () => {
-    if (actionable === 0) return;
-    const lines = [
-      missing.length      && `создать на target: ${missing.length}`,
-      diffReplace.length  && `CREATE OR REPLACE: ${diffReplace.length}`,
-      toRecreate.length   && `пересоздать: ${toRecreate.length}`,
-    ].filter(Boolean).join("\n  ");
-    let confirmMsg = `Синхронизация ${actionable} объект(ов):\n  ${lines}`;
-    if (destructiveItems.length) {
-      confirmMsg += `\n\n⚠ Среди объектов есть ${destructiveItems.length} таблиц(ы)/MVIEW — будут DROP-нуты до пересоздания.`
-                  + `\n   Данные в этих объектах будут потеряны.`;
-    }
-    if (srcInvalid.length + bothInvalid.length > 0) {
-      confirmMsg += `\n\nINVALID в source (${srcInvalid.length}) и обоих (${bothInvalid.length}) пропущены — требуют ручного решения.`;
-    }
-    confirmMsg += `\n\nПродолжить?`;
-    if (!window.confirm(confirmMsg)) return;
+  const allGroups: SyncGroup[] = [
+    {
+      action:      "create_missing",
+      title:       "Создать недостающие на target",
+      description: "CREATE — объект отсутствует в target.",
+      items:       missing,
+      destructive: false,
+    },
+    {
+      action:      "sync_diff",
+      title:       "CREATE OR REPLACE",
+      description: "VIEW / PACKAGE / PROCEDURE / FUNCTION / TRIGGER / TYPE / SYNONYM с расхождением DDL.",
+      items:       diffReplace,
+      destructive: false,
+    },
+    {
+      action:      "recreate",
+      title:       "DROP + CREATE",
+      description: "Объекты с DDL-расхождением (не replaceable) или INVALID только в target.",
+      items:       toRecreate,
+      destructive: true,
+    },
+  ];
+  const syncGroups = allGroups.filter(g => g.items.length > 0);
 
-    setSyncBusy(true);
-    setSyncFeedback(null);
+  // Track running poll so a second submit can supersede the first
+  const pollAbort = useRef<{ cancelled: boolean } | null>(null);
+
+  const runApply = async (selections: { action: DdlApplyAction; items: SchemaObject[] }[]) => {
+    setSyncFeedback("отправляю в очередь…");
+    const allJobIds: string[] = [];
     let queued = 0;
     let skipped = 0;
     let errors  = 0;
-    const allCalls: Array<{ action: DdlApplyAction; items: SchemaObject[] }> = [
-      { action: "create_missing", items: missing },
-      { action: "sync_diff",      items: diffReplace },
-      { action: "recreate",       items: toRecreate },
-    ];
-    const calls = allCalls.filter(c => c.items.length > 0);
-
-    for (const c of calls) {
+    for (const sel of selections) {
       try {
-        const r = await applyDdl(schemaMigrationId, c.action,
-          c.items.map(o => ({ type: o.type, name: o.name })));
+        const r = await applyDdl(
+          schemaMigrationId, sel.action,
+          sel.items.map(o => ({ type: o.type, name: o.name })),
+        );
         queued  += r.queued;
         skipped += r.skipped.length;
+        allJobIds.push(...r.job_ids);
       } catch {
         errors += 1;
       }
     }
+    const sub: string[] = [];
+    if (skipped) sub.push(`пропущено: ${skipped}`);
+    if (errors)  sub.push(`ошибок: ${errors}`);
+    setSyncFeedback(`в очередь: ${queued}${sub.length ? " · " + sub.join(" · ") : ""}`);
 
-    const parts: string[] = [`в очередь: ${queued}`];
-    if (skipped) parts.push(`пропущено: ${skipped}`);
-    if (errors)  parts.push(`ошибок: ${errors}`);
-    setSyncFeedback(parts.join(" · "));
-    setSyncBusy(false);
-    onApplied?.();
+    // Cancel any previous in-flight poll
+    if (pollAbort.current) pollAbort.current.cancelled = true;
+    const token = { cancelled: false };
+    pollAbort.current = token;
+
+    if (allJobIds.length > 0) {
+      // Poll until all queued jobs reach a terminal state, then refresh snapshot
+      void pollAndRefresh(allJobIds, token);
+    } else {
+      onApplied?.();
+    }
+  };
+
+  const pollAndRefresh = async (
+    jobIds:   string[],
+    token:    { cancelled: boolean },
+  ) => {
+    const TERMINAL = new Set(["DONE", "FAILED", "CANCELLED"]);
+    const start = Date.now();
+    const TIMEOUT_MS = 10 * 60_000;
+
+    while (!token.cancelled && Date.now() - start < TIMEOUT_MS) {
+      await new Promise(r => setTimeout(r, 3000));
+      if (token.cancelled) return;
+      let jobs;
+      try {
+        jobs = await listDdlJobs(schemaMigrationId, 500);
+      } catch {
+        continue;
+      }
+      const ours = jobs.filter(j => jobIds.includes(j.job_id));
+      const active = ours.filter(j => !TERMINAL.has(j.state));
+      const done   = ours.filter(j => j.state === "DONE").length;
+      const failed = ours.filter(j => j.state === "FAILED").length;
+      setSyncFeedback(active.length
+        ? `worker: ${done}/${jobIds.length} готово${failed ? `, ${failed} с ошибкой` : ""}`
+        : `worker завершил: ${done}/${jobIds.length}${failed ? `, ${failed} с ошибкой` : ""} · обновляю snapshot…`);
+      if (active.length === 0 && ours.length === jobIds.length) {
+        // All done — refresh snapshot, then trigger parent reload
+        if (srcSchema && tgtSchema) {
+          try {
+            await fetch("/api/catalog/load", {
+              method:  "POST",
+              headers: { "Content-Type": "application/json" },
+              body:    JSON.stringify({ src_schema: srcSchema, tgt_schema: tgtSchema }),
+            });
+          } catch {}
+        }
+        if (token.cancelled) return;
+        onApplied?.();
+        setSyncFeedback(`готово: ${done}/${jobIds.length}${failed ? ` (${failed} с ошибкой)` : ""}`);
+        return;
+      }
+    }
+    if (!token.cancelled) {
+      setSyncFeedback("timeout — снимок не обновлён, проверьте вручную");
+    }
   };
 
   return (
@@ -126,28 +190,22 @@ export function ProblemsSummary({
           )}
           {actionable > 0 && (
             <button
-              onClick={runSyncAll}
-              disabled={syncBusy}
-              title={destructiveItems.length
-                ? `Синхронизировать весь DDL — ${destructiveItems.length} объект(ов) с потерей данных`
-                : `Синхронизировать весь DDL: ${actionable} объект(ов)`}
+              onClick={() => setDialogOpen(true)}
+              title={`Синхронизировать DDL: до ${actionable} объект(ов)`}
               style={{
                 display: "inline-flex", alignItems: "center", gap: 6,
                 padding: "7px 14px",
                 borderRadius: t.radius.sm,
                 fontSize: 12.5, fontWeight: 700,
-                cursor: syncBusy ? "default" : "pointer",
-                background: syncBusy ? "#cfcfcf" : "#2563eb",
-                color:      syncBusy ? "#666" : "#ffffff",
-                border:     `1px solid ${syncBusy ? "#cfcfcf" : "#1d4ed8"}`,
-                boxShadow:  syncBusy
-                  ? "none"
-                  : "0 1px 0 rgba(37,99,235,.15), 0 4px 12px -2px rgba(37,99,235,.35)",
-                opacity:    syncBusy ? 0.7 : 1,
+                cursor: "pointer",
+                background: "#2563eb",
+                color:      "#ffffff",
+                border:     `1px solid #1d4ed8`,
+                boxShadow:  "0 1px 0 rgba(37,99,235,.15), 0 4px 12px -2px rgba(37,99,235,.35)",
               }}
             >
               <Icon name="rotate" size={13}/>
-              {syncBusy ? "очередь…" : `Синхронизировать весь DDL · ${actionable}`}
+              Синхронизировать весь DDL · {actionable}
             </button>
           )}
         </span>
@@ -196,6 +254,13 @@ export function ProblemsSummary({
           onOpen={onOpen}
         />
       </div>
+      {dialogOpen && (
+        <SyncDdlDialog
+          groups={syncGroups}
+          onClose={() => setDialogOpen(false)}
+          onSubmit={runApply}
+        />
+      )}
     </div>
   );
 }

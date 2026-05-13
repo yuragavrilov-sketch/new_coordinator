@@ -232,6 +232,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           tgtInvalid={problems.tgtInvalid}
           bothInvalid={problems.bothInvalid}
           schemaMigrationId={selectedId}
+          srcSchema={schema.src_schema || ""}
+          tgtSchema={schema.tgt_schema || ""}
           onOpen={o => setOpenObject(o)}
           onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
         />
