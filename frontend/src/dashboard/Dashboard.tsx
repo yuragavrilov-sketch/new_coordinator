@@ -251,6 +251,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           schemaMigrationId={selectedId}
           object={openObject}
           events={events}
+          srcSchema={schema.src_schema || ""}
+          tgtSchema={schema.tgt_schema || ""}
           onClose={() => setOpenObject(null)}
           onAction={(o, a) => console.log("drawer action", a, o.name)}
           onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}

@@ -305,6 +305,40 @@ def get_trigger_info(conn, schema: str, name: str) -> dict:
     }
 
 
+# DBMS-side and ALL_OBJECTS-side type names for the same logical object differ
+# in one place: PACKAGE BODY → "PACKAGE BODY" in ALL_OBJECTS but is queried as
+# its own row in all_errors with TYPE='PACKAGE BODY'. We pass through as-is.
+def get_compilation_errors(conn, schema: str, object_type: str, object_name: str) -> list[dict]:
+    """Return rows from all_errors for an INVALID PL/SQL object.
+
+    Most useful for VIEW / PACKAGE / PACKAGE BODY / PROCEDURE / FUNCTION /
+    TYPE / TYPE BODY / TRIGGER — Oracle stores compilation errors with
+    line/position/text. For non-compilable types (TABLE / INDEX / SEQUENCE)
+    all_errors is normally empty, so this returns [].
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT type, sequence, line, position, text, attribute, message_number
+            FROM   all_errors
+            WHERE  owner = :s
+              AND  name  = :n
+              AND  type  = :t
+            ORDER  BY sequence
+        """, {"s": schema.upper(), "n": object_name.upper(), "t": object_type.upper()})
+        out: list[dict] = []
+        for r in cur.fetchall():
+            out.append({
+                "type":           r[0],
+                "sequence":       r[1],
+                "line":           r[2],
+                "position":       r[3],
+                "text":           r[4],
+                "attribute":      r[5],
+                "message_number": r[6],
+            })
+        return out
+
+
 def get_index_info(conn, schema: str, name: str) -> dict:
     """Get index columns + properties."""
     with conn.cursor() as cur:

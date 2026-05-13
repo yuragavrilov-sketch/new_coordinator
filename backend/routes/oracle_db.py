@@ -3,6 +3,7 @@
 from flask import Blueprint, jsonify, request
 from db.oracle_browser import (
     get_oracle_conn, list_schemas, list_tables, get_table_info, get_oracle_version,
+    get_compilation_errors,
 )
 
 bp = Blueprint("oracle_db", __name__)
@@ -22,6 +23,30 @@ def list_oracle_schemas(db: str):
         conn = get_oracle_conn(db, _state["load_configs"](), prefer_owner=True)
         try:
             return jsonify(list_schemas(conn))
+        finally:
+            conn.close()
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@bp.get("/api/db/<db>/oracle-errors")
+def oracle_errors(db: str):
+    """Return all_errors rows for an INVALID PL/SQL object.
+
+    Query string: schema, type, name (case-insensitive).
+    Used by the Drawer to surface why a VIEW/PACKAGE/etc is INVALID.
+    """
+    if db not in ("source", "target"):
+        return jsonify({"error": "Invalid db"}), 400
+    schema = request.args.get("schema", "").strip().upper()
+    otype  = request.args.get("type",   "").strip().upper()
+    name   = request.args.get("name",   "").strip().upper()
+    if not (schema and otype and name):
+        return jsonify({"error": "schema/type/name required"}), 400
+    try:
+        conn = get_oracle_conn(db, _state["load_configs"](), prefer_owner=True)
+        try:
+            return jsonify(get_compilation_errors(conn, schema, otype, name))
         finally:
             conn.close()
     except Exception as exc:

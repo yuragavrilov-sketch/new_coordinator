@@ -13,9 +13,21 @@ interface Props {
   schemaMigrationId: string;
   object:            SchemaObject;
   events:            MigrationEvent[];
+  srcSchema?:        string;
+  tgtSchema?:        string;
   onClose:           () => void;
   onAction:          (o: SchemaObject, action: "pause" | "retry" | "rollback") => void;
   onApplied?:        () => void;
+}
+
+interface OracleError {
+  type:           string;
+  sequence:       number;
+  line:           number;
+  position:       number;
+  text:           string;
+  attribute:      string;     // "ERROR" or "WARNING"
+  message_number: number;
 }
 
 /** Types that can take CREATE OR REPLACE — sync_diff is offered for these. */
@@ -90,13 +102,43 @@ function detectApplyAction(
   return null;
 }
 
-export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, onAction, onApplied }: Props) {
+export function ObjectDrawer({
+  schemaMigrationId, object: o, events,
+  srcSchema, tgtSchema,
+  onClose, onAction, onApplied,
+}: Props) {
   const detail = useApi<ObjectDetailResp>(
     `/api/schema-migrations/${schemaMigrationId}/objects/${encodeURIComponent(o.id)}/detail`,
   );
   const [applyBusy,     setApplyBusy]     = useState(false);
   const [applyFeedback, setApplyFeedback] = useState<string | null>(null);
   const applyOpt = detectApplyAction(o, detail.data);
+
+  // Derive Oracle "all_errors" query params for compilable PL/SQL objects.
+  // Only fired when the object is INVALID on that side.
+  let oracleType: string | null = null;
+  let oracleName: string | null = null;
+  let srcInvalid = false;
+  let tgtInvalid = false;
+  if (detail.data?.kind === "ddl" && detail.data.found) {
+    oracleType = detail.data.object_type;
+    oracleName = detail.data.object_name;
+    srcInvalid = (detail.data.source?.oracle_status || "").toUpperCase() === "INVALID";
+    tgtInvalid = (detail.data.target?.oracle_status || "").toUpperCase() === "INVALID";
+  } else if (detail.data?.kind === "migration" && detail.data.found && detail.data.ddl_diff?.found) {
+    const d = detail.data.ddl_diff;
+    oracleType = d.object_type;
+    oracleName = d.object_name;
+    srcInvalid = (d.source?.oracle_status || "").toUpperCase() === "INVALID";
+    tgtInvalid = (d.target?.oracle_status || "").toUpperCase() === "INVALID";
+  }
+  const buildErrUrl = (side: "source" | "target", schema?: string) =>
+    schema && oracleType && oracleName
+      ? `/api/db/${side}/oracle-errors?schema=${encodeURIComponent(schema)}`
+        + `&type=${encodeURIComponent(oracleType)}&name=${encodeURIComponent(oracleName)}`
+      : null;
+  const srcErrors = useApi<OracleError[]>(srcInvalid ? buildErrUrl("source", srcSchema) : null);
+  const tgtErrors = useApi<OracleError[]>(tgtInvalid ? buildErrUrl("target", tgtSchema) : null);
 
   const runApply = async () => {
     if (!applyOpt) return;
@@ -363,6 +405,16 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
             </div>
           )}
 
+          {/* Compilation errors (Oracle all_errors) — only fetched for INVALID objects */}
+          {(srcInvalid || tgtInvalid) && (
+            <OracleErrorsBlock
+              srcInvalid={srcInvalid}
+              tgtInvalid={tgtInvalid}
+              src={srcErrors}
+              tgt={tgtErrors}
+            />
+          )}
+
           {/* Diff sections — populated from /objects/:id/detail */}
           {detail.loading && (
             <div style={{ fontSize: 12, color: t.text.muted }}>загружаем детали…</div>
@@ -594,5 +646,123 @@ function ActionBtn({ icon, label, onClick, primary }: {
       <Icon name={icon} size={14}/>
       {label && <span>{label}</span>}
     </button>
+  );
+}
+
+function OracleErrorsBlock({
+  srcInvalid, tgtInvalid, src, tgt,
+}: {
+  srcInvalid: boolean;
+  tgtInvalid: boolean;
+  src: { data: OracleError[] | null; loading: boolean; error: string | null };
+  tgt: { data: OracleError[] | null; loading: boolean; error: string | null };
+}) {
+  return (
+    <div style={{
+      background: t.bg.s1,
+      border: `1px solid ${t.border.subtle}`,
+      borderRadius: t.radius.lg,
+      padding: 14,
+    }}>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        marginBottom: 10, gap: 8,
+      }}>
+        <span style={{ fontSize: "12.5px", fontWeight: 600 }}>
+          Compilation errors (Oracle <code style={{ fontFamily: t.font.mono, fontSize: "11px" }}>all_errors</code>)
+        </span>
+      </div>
+      {srcInvalid && (
+        <ErrorsList side="SOURCE" tone={t.tone.error} api={src}/>
+      )}
+      {tgtInvalid && (
+        <ErrorsList side="TARGET" tone={t.tone.warn} api={tgt}/>
+      )}
+    </div>
+  );
+}
+
+function ErrorsList({
+  side, tone, api,
+}: {
+  side: string;
+  tone: string;
+  api:  { data: OracleError[] | null; loading: boolean; error: string | null };
+}) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{
+        display: "flex", gap: 8, alignItems: "baseline", marginBottom: 4,
+      }}>
+        <span style={{
+          fontFamily: t.font.mono, fontSize: "10px",
+          fontWeight: 600, letterSpacing: "0.06em",
+          padding: "1px 6px", borderRadius: 3,
+          background: tone, color: "#fff",
+        }}>
+          {side}
+        </span>
+        {api.data && (
+          <span style={{ fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+            {api.data.length} запис(ей)
+          </span>
+        )}
+      </div>
+      {api.loading && (
+        <div style={{ fontSize: 11, color: t.text.muted }}>загружаем ошибки…</div>
+      )}
+      {api.error && (
+        <div style={{
+          fontSize: 11, padding: "8px 10px",
+          background: t.tone.errorSoft, color: t.tone.error,
+          borderRadius: t.radius.sm,
+        }}>
+          Не удалось получить all_errors: {api.error}
+        </div>
+      )}
+      {api.data && api.data.length === 0 && (
+        <div style={{ fontSize: 11, color: t.text.muted, fontStyle: "italic" }}>
+          В all_errors пусто — INVALID может быть из-за зависимости от другого объекта.
+        </div>
+      )}
+      {api.data && api.data.length > 0 && (
+        <div style={{
+          fontFamily: t.font.mono, fontSize: "11.5px",
+          background: t.bg.s2, borderRadius: t.radius.sm,
+          padding: 8, maxHeight: 240, overflowY: "auto",
+          display: "flex", flexDirection: "column", gap: 6,
+        }}>
+          {api.data.map((e, i) => (
+            <div key={i} style={{
+              borderLeft: `3px solid ${e.attribute === "ERROR" ? t.tone.error : t.tone.warn}`,
+              paddingLeft: 8,
+              display: "grid",
+              gridTemplateColumns: "auto auto 1fr",
+              columnGap: 10, rowGap: 2,
+              alignItems: "baseline",
+            }}>
+              <span style={{
+                fontSize: "9.5px", fontWeight: 700, letterSpacing: "0.04em",
+                color: e.attribute === "ERROR" ? t.tone.error : t.tone.warn,
+                textTransform: "uppercase",
+              }}>
+                {e.attribute}
+              </span>
+              <span style={{ color: t.text.muted, fontSize: 10 }}>
+                line {e.line}{e.position ? `:${e.position}` : ""}
+                {e.message_number ? ` · PLS-${String(e.message_number).padStart(5, "0")}` : ""}
+              </span>
+              <span style={{
+                color: t.text.primary,
+                gridColumn: "1 / -1",
+                whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>
+                {e.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
