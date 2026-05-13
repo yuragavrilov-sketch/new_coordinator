@@ -282,13 +282,9 @@ export function ObjectDrawer({
               </span>
             )}
             {status === "running" && (
-              <ActionBtn icon="pause"  label="Пауза"     onClick={() => onAction(o, "pause")}/>
+              <ActionBtn icon="pause" label="Пауза" onClick={() => onAction(o, "pause")}/>
             )}
-            {status === "error" && (
-              <ActionBtn icon="rotate" label="Повторить" primary onClick={() => onAction(o, "retry")}/>
-            )}
-            <ActionBtn icon="rotate" onClick={() => onAction(o, "rollback")}/>
-            <ActionBtn icon="close"  onClick={onClose}/>
+            <ActionBtn icon="close" onClick={onClose}/>
           </div>
         </div>
 
@@ -367,12 +363,6 @@ export function ObjectDrawer({
                   <span style={{ fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
                     {applyFeedback}
                   </span>
-                )}
-                {status === "error" && (
-                  <ActionBtn icon="rotate" label="Повторить" primary onClick={() => onAction(o, "retry")}/>
-                )}
-                {!applyOpt && (
-                  <ActionBtn icon="check" label="Подтвердить" onClick={() => onAction(o, "pause")}/>
                 )}
               </div>
             </div>
