@@ -1,0 +1,107 @@
+/** Schema migration domain types — used by Dashboard (mock data + future API). */
+
+export type ObjectStatus =
+  | "running" | "paused" | "error" | "warn"
+  | "validating" | "done" | "queued" | "skipped";
+
+export type ObjectType =
+  | "TABLE" | "INDEX" | "MVIEW" | "SEQUENCE"
+  | "VIEW" | "PACKAGE" | "PROCEDURE" | "FUNCTION"
+  | "TRIGGER" | "TYPE" | "SYNONYM" | "GRANT";
+
+export type SchemaStatus =
+  | "running" | "cdc" | "paused" | "error"
+  | "validating" | "done" | "queued";
+
+export type SchemaStage =
+  | "assess" | "schema" | "bulk" | "cdc" | "validate" | "cutover";
+
+export type Priority = "P0" | "P1" | "P2";
+
+export interface SchemaInfo {
+  id:        string;
+  name:      string;
+  source:    { host: string; version: string; tns: string };
+  target:    { host: string; version: string; tns: string };
+  owner:     string;
+  priority:  Priority;
+  status:    SchemaStatus;
+  stage:     SchemaStage;
+  startedAt: string;
+  windowAt:  string;
+  schemaCompat: number;
+  sizeGb:    number;
+  totals:    { rowsPerSec: number; mbPerSec: number };
+}
+
+export interface SchemaObject {
+  id:         number;
+  type:       ObjectType;
+  name:       string;
+  rows:       number | null;
+  rowsDone:   number | null;
+  sizeMb:     number;
+  status:     ObjectStatus;
+  progress:   number;
+  rowsPerSec: number;
+  mbPerSec:   number;
+  compat:     number;
+  warn:       number;
+  err:        number;
+  eta:        string;
+  dur:        string;
+  note:       string;
+}
+
+export interface MigrationEvent {
+  t:     string;
+  obj:   string;
+  level: "info" | "warn" | "error";
+  msg:   string;
+}
+
+export interface LiveMetrics {
+  sourceCpu: number;   // %
+  network:   number;   // MB/s
+  redoPerSec: number;  // bytes/s, formatted by callee
+  cdcLagMs:  number;
+  cpuSpark:  number[];
+  netSpark:  number[];
+  redoSpark: number[];
+  lagSpark:  number[];
+}
+
+export const STATUS_MAP: Record<ObjectStatus, { label: string; tone: "info" | "ok" | "warn" | "error" | "muted" }> = {
+  running:    { label: "Идёт",     tone: "info"  },
+  paused:     { label: "Пауза",    tone: "muted" },
+  error:      { label: "Ошибка",   tone: "error" },
+  warn:       { label: "Warn",     tone: "warn"  },
+  validating: { label: "Валидация",tone: "warn"  },
+  done:       { label: "Готово",   tone: "ok"    },
+  queued:     { label: "В очереди",tone: "muted" },
+  skipped:    { label: "Пропущен", tone: "muted" },
+};
+
+export const STAGES: { key: SchemaStage; label: string }[] = [
+  { key: "assess",   label: "Анализ"    },
+  { key: "schema",   label: "Схема"     },
+  { key: "bulk",     label: "Bulk Load" },
+  { key: "cdc",      label: "CDC"       },
+  { key: "validate", label: "Валидация" },
+  { key: "cutover",  label: "Cutover"   },
+];
+
+export const OBJECT_TYPES: Record<ObjectType, { label: string; group: string; ord: number }> = {
+  TABLE:     { label: "TABLE",     group: "Данные",  ord:  1 },
+  INDEX:     { label: "INDEX",     group: "Данные",  ord:  2 },
+  MVIEW:     { label: "MVIEW",     group: "Данные",  ord:  3 },
+  SEQUENCE:  { label: "SEQUENCE",  group: "Данные",  ord:  4 },
+  VIEW:      { label: "VIEW",      group: "Код",     ord:  5 },
+  PACKAGE:   { label: "PACKAGE",   group: "Код",     ord:  6 },
+  PROCEDURE: { label: "PROC",      group: "Код",     ord:  7 },
+  FUNCTION:  { label: "FUNC",      group: "Код",     ord:  8 },
+  TRIGGER:   { label: "TRIGGER",   group: "Код",     ord:  9 },
+  TYPE:      { label: "TYPE",      group: "Код",     ord: 10 },
+  SYNONYM:   { label: "SYNONYM",   group: "Доступ",  ord: 11 },
+  GRANT:     { label: "GRANT",     group: "Доступ",  ord: 12 },
+};

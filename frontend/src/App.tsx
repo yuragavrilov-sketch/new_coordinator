@@ -1,20 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { useSSE } from "./hooks/useSSE";
-import { ServiceStatusBar } from "./components/ServiceStatusBar";
 import { SettingsModal } from "./components/SettingsModal";
 import { MigrationList } from "./components/MigrationList";
-import { TargetPrep } from "./components/TargetPrep";
-import { Checklist } from "./components/Checklist";
 import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
-import { DataCompare } from "./components/DataCompare";
-import { DDLCatalog } from "./components/DDLCatalog/DDLCatalog";
-import { StatusBadge } from "./components/StatusBadge";
+import { Sidebar, type NavKey } from "./shell/Sidebar";
+import { RightRail } from "./shell/RightRail";
+import { RulesTabs } from "./shell/RulesTabs";
+import { Dashboard } from "./dashboard/Dashboard";
+import { schemaInfo, initialMetrics, initialEvents } from "./dashboard/mockData";
 import { t } from "./theme";
 
 const SSE_URL = "/api/events";
 
 type BackendStatus = "checking" | "ok" | "unreachable";
-type Tab = "catalog" | "migrations" | "connector-groups" | "target-prep" | "data-compare" | "checklist";
 
 function useBackendHealth(): BackendStatus {
   const [s, setS] = useState<BackendStatus>("checking");
@@ -31,190 +29,64 @@ function useBackendHealth(): BackendStatus {
   return s;
 }
 
-const ACTIVE_PHASES_SET = new Set([
-  "NEW", "PREPARING", "SCN_FIXED", "CONNECTOR_STARTING", "CDC_BUFFERING",
-  "TOPIC_CREATING",
-  "CHUNKING", "BULK_LOADING", "BULK_LOADED",
-  "STAGE_VALIDATING", "STAGE_VALIDATED",
-  "BASELINE_PUBLISHING", "BASELINE_PUBLISHED",
-  "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
-  "STEADY_STATE",
-]);
-
-function SystemStats() {
-  const [stats, setStats] = useState<{ active: number; total: number; rows: number } | null>(null);
-
-  useEffect(() => {
-    const load = () => {
-      fetch("/api/migrations")
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then((data: { phase: string; rows_loaded: number }[]) => {
-          const active = data.filter(m => ACTIVE_PHASES_SET.has(m.phase)).length;
-          const rows   = data.reduce((acc, m) => acc + (m.rows_loaded || 0), 0);
-          setStats({ active, total: data.length, rows });
-        })
-        .catch(() => {});
-    };
-    load();
-    const id = setInterval(load, 10_000);
-    return () => clearInterval(id);
-  }, []);
-
-  if (!stats) return null;
-
-  return (
-    <div style={{
-      display: "flex", gap: 16, fontSize: 11, color: t.text.disabled,
-      alignItems: "center",
-    }}>
-      <span>
-        Активных:{" "}
-        <strong style={{ color: stats.active > 0 ? t.green.base : t.text.disabled }}>
-          {stats.active}
-        </strong>
-      </span>
-      <span>
-        Всего:{" "}
-        <strong style={{ color: t.text.muted }}>{stats.total}</strong>
-      </span>
-      {stats.rows > 0 && (
-        <span>
-          Строк:{" "}
-          <strong style={{ color: t.text.muted }}>
-            {stats.rows.toLocaleString("ru-RU")}
-          </strong>
-        </span>
-      )}
-    </div>
-  );
-}
-
 export default function App() {
-  const { events, status, serviceStatuses, reconnect } = useSSE({ url: SSE_URL });
+  const { events: sseEvents } = useSSE({ url: SSE_URL });
   const backendStatus = useBackendHealth();
-  const [activeTab, setActiveTab] = useState<Tab>("catalog");
+  const [nav, setNav] = useState<NavKey>("dashboard");
   const [showSettings, setShowSettings] = useState(false);
+
+  // Settings is special — clicking sidebar opens modal, doesn't switch view
+  const onNavChange = (key: NavKey) => {
+    if (key === "settings") { setShowSettings(true); return; }
+    setNav(key);
+  };
 
   return (
     <div style={{
       minHeight: "100vh",
       background: t.bg.app,
       color: t.text.primary,
-      fontFamily: "'Inter', 'Segoe UI', sans-serif",
-      padding: 24,
+      fontFamily: t.font.sans,
+      display: "grid",
+      gridTemplateColumns: "224px minmax(0, 1fr) 312px",
     }}>
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <Sidebar
+        active={nav}
+        onChange={onNavChange}
+        schemaName={schemaInfo.name}
+        migrationId={schemaInfo.id}
+        userName="Антон Волков"
+        userInitials="АВ"
+        userRole="DBA · admin"
+      />
 
-      {/* Backend unreachable banner */}
-      {backendStatus === "unreachable" && (
-        <div style={{
-          background: t.red.border, color: t.red.fg, padding: "10px 16px",
-          borderRadius: 6, marginBottom: 16, fontSize: 13,
-        }}>
-          Flask backend недоступен — запусти: <code>python backend/app.py</code>
-        </div>
-      )}
+      <main style={{ padding: "18px 22px", minWidth: 0 }}>
+        {backendStatus === "unreachable" && (
+          <div style={{
+            background: t.tone.errorSoft,
+            color: t.tone.error,
+            padding: "10px 16px",
+            borderRadius: t.radius.sm,
+            marginBottom: 16, fontSize: 13,
+            border: `1px solid color-mix(in oklab, ${t.tone.error} 26%, transparent)`,
+          }}>
+            Flask backend недоступен — запусти: <code>python backend/app.py</code>
+          </div>
+        )}
 
-      {/* Service status bar */}
-      <ServiceStatusBar statuses={serviceStatuses} />
+        {nav === "dashboard" && <Dashboard/>}
+        {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}
+        {nav === "clusters"  && <ConnectorGroupsPanel/>}
+        {nav === "rules"     && <RulesTabs/>}
+      </main>
 
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 0 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: t.text.primary }}>
-          DB Migration
-        </h1>
-        <StatusBadge status={status} onReconnect={reconnect} />
-        <SystemStats />
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={() => setShowSettings(true)} style={btnStyle(t.bg.s2)} title="Connection settings">
-            ⚙ Настройки
-          </button>
-        </div>
-      </div>
+      <RightRail
+        schemaName={schemaInfo.name}
+        metrics={initialMetrics}
+        events={initialEvents}
+      />
 
-      {/* Tab bar */}
-      <div style={{
-        display: "flex",
-        gap: 0,
-        marginTop: 16,
-        borderBottom: `1px solid ${t.border.subtle}`,
-      }}>
-        <TabButton
-          label="DDL Каталог"
-          active={activeTab === "catalog"}
-          onClick={() => setActiveTab("catalog")}
-        />
-        <TabButton
-          label="Миграции"
-          active={activeTab === "migrations"}
-          onClick={() => setActiveTab("migrations")}
-        />
-        <TabButton
-          label="Группы коннекторов"
-          active={activeTab === "connector-groups"}
-          onClick={() => setActiveTab("connector-groups")}
-        />
-        <TabButton
-          label="Подготовка таргета"
-          active={activeTab === "target-prep"}
-          onClick={() => setActiveTab("target-prep")}
-        />
-        <TabButton
-          label="Сравнение данных"
-          active={activeTab === "data-compare"}
-          onClick={() => setActiveTab("data-compare")}
-        />
-        <TabButton
-          label="Чек-лист"
-          active={activeTab === "checklist"}
-          onClick={() => setActiveTab("checklist")}
-        />
-      </div>
-
-      {/* Tab content */}
-      <div style={{ marginTop: 16 }}>
-        {activeTab === "catalog"           && <DDLCatalog />}
-        {activeTab === "migrations"       && <MigrationList sseEvents={events} />}
-        {activeTab === "connector-groups" && <ConnectorGroupsPanel />}
-        {activeTab === "target-prep"      && <TargetPrep />}
-        {activeTab === "data-compare"    && <DataCompare />}
-        {activeTab === "checklist"        && <Checklist />}
-      </div>
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)}/>}
     </div>
   );
-}
-
-function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: "none",
-        border: "none",
-        borderBottom: `2px solid ${active ? t.blue.base : "transparent"}`,
-        color: active ? t.blue.fg : t.text.disabled,
-        padding: "8px 16px",
-        fontSize: 13,
-        fontWeight: active ? 700 : 500,
-        cursor: "pointer",
-        marginBottom: -1,
-        transition: "color 0.15s, border-color 0.15s",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-function btnStyle(bg: string): React.CSSProperties {
-  return {
-    background: bg,
-    border: `1px solid ${t.border.base}`,
-    borderRadius: 6,
-    color: t.text.secondary,
-    padding: "5px 12px",
-    fontSize: 12,
-    cursor: "pointer",
-    fontWeight: 500,
-  };
 }
