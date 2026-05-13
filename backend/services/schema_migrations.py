@@ -355,6 +355,11 @@ def get_objects(conn, sm_id: str) -> list[dict]:
         snap = cur.fetchone()
         if snap:
             snapshot_id = snap[0]
+            # Oracle-internal names (SYS_C / SYS_IL / SYS_LOB / ISEQ$$ / BIN$
+            # / DR$) are auto-generated and always differ between databases —
+            # synchronising them is pointless. Existing snapshots from before
+            # the catalog-side filter still contain them, so we filter again
+            # here as a defensive measure.
             cur.execute("""
                 SELECT s.object_type, s.object_name,
                        s.oracle_status        AS src_status,
@@ -373,6 +378,12 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                        AND c.object_name = s.object_name
                 WHERE  s.snapshot_id = %s
                   AND  s.db_side = 'source'
+                  AND  s.object_name NOT LIKE 'SYS\\_C%%' ESCAPE '\\'
+                  AND  s.object_name NOT LIKE 'SYS\\_IL%%' ESCAPE '\\'
+                  AND  s.object_name NOT LIKE 'SYS\\_LOB%%' ESCAPE '\\'
+                  AND  s.object_name NOT LIKE 'ISEQ$$%%'
+                  AND  s.object_name NOT LIKE 'BIN$%%'
+                  AND  s.object_name NOT LIKE 'DR$%%'
                 ORDER BY s.object_type, s.object_name
             """, (snapshot_id,))
             for r in cur.fetchall():

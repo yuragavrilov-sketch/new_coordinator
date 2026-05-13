@@ -94,7 +94,19 @@ def list_tables(conn, schema: str) -> list[str]:
 
 
 def list_all_objects(conn, schema: str) -> list[dict]:
-    """List all DDL objects in schema (excluding PACKAGE BODY / TYPE BODY)."""
+    """List all DDL objects in schema (excluding PACKAGE BODY / TYPE BODY).
+
+    Skips Oracle-internal object names that always differ between databases:
+      • SYS_C%   — auto-generated names for PK/UK/CHECK constraints (and their
+                   underlying indexes). Recreated implicitly when the parent
+                   constraint is recreated, so synchronising them is pointless.
+      • SYS_IL% — auto-generated LOB column indexes. Same deal — created when
+                   the parent table/column is created.
+      • SYS_LOB% — LOB segment objects (storage artifacts, not DDL).
+      • ISEQ$$% — identity-column sequences (managed by Oracle).
+      • BIN$%   — recycle-bin (already-dropped) objects.
+      • DR$%    — Oracle Text auxiliary objects.
+    """
     placeholders = ",".join(f":t{i}" for i in range(len(_CATALOG_TYPES)))
     binds = {"s": schema}
     binds.update({f"t{i}": t for i, t in enumerate(sorted(_CATALOG_TYPES))})
@@ -104,6 +116,12 @@ def list_all_objects(conn, schema: str) -> list[dict]:
             FROM   all_objects
             WHERE  owner = :s
               AND  object_type IN ({placeholders})
+              AND  object_name NOT LIKE 'SYS_C%'
+              AND  object_name NOT LIKE 'SYS_IL%'
+              AND  object_name NOT LIKE 'SYS_LOB%'
+              AND  object_name NOT LIKE 'ISEQ$$%'
+              AND  object_name NOT LIKE 'BIN$%'
+              AND  object_name NOT LIKE 'DR$%'
             ORDER  BY object_type, object_name
         """, binds)
         return [
