@@ -1,4 +1,5 @@
 import React from "react";
+import { t } from "../../theme";
 
 export type ObjectTabId = "tables" | "views" | "code" | "other";
 
@@ -26,8 +27,8 @@ export function ObjectTabs({ active, onChange, counts }: Props) {
             onClick={() => onChange(tab.id)}
             style={{
               background: "none", border: "none",
-              borderBottom: `2px solid ${isActive ? "#3b82f6" : "transparent"}`,
-              color: isActive ? "#93c5fd" : "#475569",
+              borderBottom: `2px solid ${isActive ? t.blue.base : "transparent"}`,
+              color: isActive ? t.blue.fg : t.text.disabled,
               padding: "8px 16px", fontSize: 13,
               fontWeight: isActive ? 700 : 500,
               cursor: "pointer", marginBottom: -1,

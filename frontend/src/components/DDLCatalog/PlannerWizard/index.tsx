@@ -9,6 +9,7 @@ import { StepIndicator } from "./StepIndicator";
 import { TableSelectionStep } from "./steps/TableSelectionStep";
 import { OrderingStep }       from "./steps/OrderingStep";
 import { ReviewStep }         from "./steps/ReviewStep";
+import { t } from "../../../theme";
 
 interface Props {
   selectedTables: string[];
@@ -229,7 +230,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
 
   return (
     <div style={{
-      background: "#0f172a",
+      background: t.bg.app,
       border: "1px solid #3b82f6",
       borderRadius: 10,
       overflow: "hidden",
@@ -237,20 +238,20 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
     }}>
       <div style={{
         padding: "12px 16px",
-        background: "#0a111f",
+        background: t.bg.s1,
         borderBottom: "1px solid #1e293b",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: t.text.primary }}>
           Настройка миграции
-          <span style={{ fontSize: 12, fontWeight: 400, color: "#64748b", marginLeft: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 400, color: t.text.muted, marginLeft: 8 }}>
             {selectedTables.length} таблиц
           </span>
         </span>
         <button
           onClick={onClose}
           style={{
-            background: "none", border: "none", color: "#475569",
+            background: "none", border: "none", color: t.text.disabled,
             fontSize: 16, cursor: "pointer", padding: "2px 6px", lineHeight: 1,
           }}
           title="Закрыть"
@@ -265,7 +266,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         {executeError && (
           <div style={{
             background: "#7f1d1d22", border: "1px solid #7f1d1d", borderRadius: 6,
-            color: "#fca5a5", padding: "8px 14px", fontSize: 12, marginBottom: 12,
+            color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12,
           }}>
             {executeError}
           </div>
@@ -273,7 +274,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         {startError && (
           <div style={{
             background: "#7f1d1d22", border: "1px solid #7f1d1d", borderRadius: 6,
-            color: "#fca5a5", padding: "8px 14px", fontSize: 12, marginBottom: 12,
+            color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12,
           }}>
             {startError}
           </div>

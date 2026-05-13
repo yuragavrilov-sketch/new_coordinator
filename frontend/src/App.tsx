@@ -9,6 +9,7 @@ import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
 import { DataCompare } from "./components/DataCompare";
 import { DDLCatalog } from "./components/DDLCatalog/DDLCatalog";
 import { StatusBadge } from "./components/StatusBadge";
+import { t } from "./theme";
 
 const SSE_URL = "/api/events";
 
@@ -63,23 +64,23 @@ function SystemStats() {
 
   return (
     <div style={{
-      display: "flex", gap: 16, fontSize: 11, color: "#475569",
+      display: "flex", gap: 16, fontSize: 11, color: t.text.disabled,
       alignItems: "center",
     }}>
       <span>
         Активных:{" "}
-        <strong style={{ color: stats.active > 0 ? "#22c55e" : "#475569" }}>
+        <strong style={{ color: stats.active > 0 ? t.green.base : t.text.disabled }}>
           {stats.active}
         </strong>
       </span>
       <span>
         Всего:{" "}
-        <strong style={{ color: "#64748b" }}>{stats.total}</strong>
+        <strong style={{ color: t.text.muted }}>{stats.total}</strong>
       </span>
       {stats.rows > 0 && (
         <span>
           Строк:{" "}
-          <strong style={{ color: "#64748b" }}>
+          <strong style={{ color: t.text.muted }}>
             {stats.rows.toLocaleString("ru-RU")}
           </strong>
         </span>
@@ -97,8 +98,8 @@ export default function App() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#0f172a",
-      color: "#e2e8f0",
+      background: t.bg.app,
+      color: t.text.primary,
       fontFamily: "'Inter', 'Segoe UI', sans-serif",
       padding: 24,
     }}>
@@ -107,7 +108,7 @@ export default function App() {
       {/* Backend unreachable banner */}
       {backendStatus === "unreachable" && (
         <div style={{
-          background: "#7f1d1d", color: "#fca5a5", padding: "10px 16px",
+          background: t.red.border, color: t.red.fg, padding: "10px 16px",
           borderRadius: 6, marginBottom: 16, fontSize: 13,
         }}>
           Flask backend недоступен — запусти: <code>python backend/app.py</code>
@@ -119,13 +120,13 @@ export default function App() {
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 0 }}>
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: "#e2e8f0" }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: -0.5, color: t.text.primary }}>
           DB Migration
         </h1>
         <StatusBadge status={status} onReconnect={reconnect} />
         <SystemStats />
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button onClick={() => setShowSettings(true)} style={btnStyle("#1e293b")} title="Connection settings">
+          <button onClick={() => setShowSettings(true)} style={btnStyle(t.bg.s2)} title="Connection settings">
             ⚙ Настройки
           </button>
         </div>
@@ -190,8 +191,8 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
       style={{
         background: "none",
         border: "none",
-        borderBottom: `2px solid ${active ? "#3b82f6" : "transparent"}`,
-        color: active ? "#93c5fd" : "#475569",
+        borderBottom: `2px solid ${active ? t.blue.base : "transparent"}`,
+        color: active ? t.blue.fg : t.text.disabled,
         padding: "8px 16px",
         fontSize: 13,
         fontWeight: active ? 700 : 500,
@@ -210,7 +211,7 @@ function btnStyle(bg: string): React.CSSProperties {
     background: bg,
     border: "1px solid #334155",
     borderRadius: 6,
-    color: "#94a3b8",
+    color: t.text.secondary,
     padding: "5px 12px",
     fontSize: 12,
     cursor: "pointer",

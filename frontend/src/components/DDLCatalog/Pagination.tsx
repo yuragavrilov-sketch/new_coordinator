@@ -1,5 +1,6 @@
 import React from "react";
 import { S } from "./styles";
+import { t } from "../../theme";
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -27,7 +28,7 @@ export function Pagination({ total, page, pageSize, onPage, onPageSize }: Props)
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "8px 16px", borderTop: "1px solid #1e293b", fontSize: 11, color: "#64748b",
+      padding: "8px 16px", borderTop: "1px solid #1e293b", fontSize: 11, color: t.text.muted,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span>{from}–{to} из {total}</span>
@@ -42,7 +43,7 @@ export function Pagination({ total, page, pageSize, onPage, onPageSize }: Props)
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <button disabled={page === 0} onClick={() => onPage(0)} style={btnStyle(page === 0)}>«</button>
         <button disabled={page === 0} onClick={() => onPage(page - 1)} style={btnStyle(page === 0)}>‹</button>
-        <span style={{ padding: "0 8px", color: "#94a3b8" }}>
+        <span style={{ padding: "0 8px", color: t.text.secondary }}>
           {page + 1} / {totalPages}
         </span>
         <button disabled={page >= totalPages - 1} onClick={() => onPage(page + 1)} style={btnStyle(page >= totalPages - 1)}>›</button>

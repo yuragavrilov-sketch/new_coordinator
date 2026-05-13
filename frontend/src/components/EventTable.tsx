@@ -1,4 +1,5 @@
 import React from "react";
+import { t } from "../theme";
 
 interface CdcEvent {
   id: string; ts: string; schema: string; table: string;
@@ -6,9 +7,9 @@ interface CdcEvent {
 }
 
 const opColor: Record<string, string> = {
-  INSERT: "#22c55e",
-  UPDATE: "#3b82f6",
-  DELETE: "#ef4444",
+  INSERT: t.green.base,
+  UPDATE: t.blue.base,
+  DELETE: t.red.base,
   UNKNOWN: "#6b7280",
 };
 
@@ -60,7 +61,7 @@ export function EventTable({ events, filter }: Props) {
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
-          <tr style={{ background: "#1e293b", color: "#94a3b8", textAlign: "left" }}>
+          <tr style={{ background: t.bg.s2, color: t.text.secondary, textAlign: "left" }}>
             {["Time", "Schema", "Table", "Op", "Data", "Old Data"].map((h) => (
               <th key={h} style={{ padding: "8px 12px", fontWeight: 600, whiteSpace: "nowrap" }}>
                 {h}
@@ -73,27 +74,27 @@ export function EventTable({ events, filter }: Props) {
             <tr
               key={e.id + i}
               style={{
-                background: i % 2 === 0 ? "#0f172a" : "#111827",
+                background: i % 2 === 0 ? t.bg.app : "#111827",
                 borderBottom: "1px solid #1e293b",
                 animation: i === 0 ? "fadeIn 0.3s ease" : undefined,
               }}
             >
-              <td style={{ padding: "6px 12px", color: "#64748b", whiteSpace: "nowrap" }}>
+              <td style={{ padding: "6px 12px", color: t.text.muted, whiteSpace: "nowrap" }}>
                 {new Date(e.ts).toLocaleTimeString()}
               </td>
-              <td style={{ padding: "6px 12px", color: "#94a3b8" }}>{e.schema}</td>
-              <td style={{ padding: "6px 12px", color: "#e2e8f0", fontWeight: 600 }}>{e.table}</td>
+              <td style={{ padding: "6px 12px", color: t.text.secondary }}>{e.schema}</td>
+              <td style={{ padding: "6px 12px", color: t.text.primary, fontWeight: 600 }}>{e.table}</td>
               <td style={{ padding: "6px 12px" }}>
                 <OpBadge op={e.operation} />
               </td>
-              <td style={{ padding: "6px 12px", color: "#94a3b8", fontFamily: "monospace" }}>
+              <td style={{ padding: "6px 12px", color: t.text.secondary, fontFamily: "monospace" }}>
                 <code style={{ fontSize: 11 }}>{JSON.stringify(e.data)}</code>
               </td>
-              <td style={{ padding: "6px 12px", color: "#475569", fontFamily: "monospace" }}>
+              <td style={{ padding: "6px 12px", color: t.text.disabled, fontFamily: "monospace" }}>
                 {e.old_data ? (
                   <code style={{ fontSize: 11 }}>{JSON.stringify(e.old_data)}</code>
                 ) : (
-                  <span style={{ color: "#334155" }}>—</span>
+                  <span style={{ color: t.border.base }}>—</span>
                 )}
               </td>
             </tr>

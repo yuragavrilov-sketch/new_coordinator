@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { t } from "../theme";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ function Field({
   return (
     <div style={{ marginBottom: 12, gridColumn: span ? `span ${span}` : undefined }}>
       <label style={{
-        display: "block", fontSize: 11, color: "#64748b",
+        display: "block", fontSize: 11, color: t.text.muted,
         marginBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4,
       }}>
         {label}
@@ -71,8 +72,8 @@ function Field({
         placeholder={placeholder}
         autoComplete="off"
         style={{
-          width: "100%", background: "#0f172a", border: "1px solid #334155",
-          borderRadius: 5, color: "#e2e8f0", padding: "6px 10px", fontSize: 13,
+          width: "100%", background: t.bg.app, border: "1px solid #334155",
+          borderRadius: 5, color: t.text.primary, padding: "6px 10px", fontSize: 13,
         }}
       />
     </div>
@@ -165,8 +166,8 @@ export function SettingsModal({ onClose }: Props) {
     return {
       padding: "7px 14px", fontSize: 12, fontWeight: 600,
       cursor: "pointer", border: "none", borderRadius: "5px 5px 0 0",
-      background: active ? "#0f172a" : "transparent",
-      color: active ? "#e2e8f0" : "#64748b",
+      background: active ? t.bg.app : "transparent",
+      color: active ? t.text.primary : t.text.muted,
       borderBottom: active ? "2px solid #3b82f6" : "2px solid transparent",
       marginBottom: -1,
     };
@@ -187,7 +188,7 @@ export function SettingsModal({ onClose }: Props) {
       <div style={{
         position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
-        background: "#1e293b", border: "1px solid #334155",
+        background: t.bg.s2, border: "1px solid #334155",
         borderRadius: 10, padding: "24px 28px",
         width: 500, maxWidth: "92vw", maxHeight: "88vh",
         overflowY: "auto", zIndex: 201,
@@ -195,11 +196,11 @@ export function SettingsModal({ onClose }: Props) {
       }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#e2e8f0" }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: t.text.primary }}>
             Connection Settings
           </h2>
           <button onClick={onClose} style={{
-            background: "none", border: "none", color: "#64748b",
+            background: "none", border: "none", color: t.text.muted,
             cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 2,
           }}>✕</button>
         </div>
@@ -219,7 +220,7 @@ export function SettingsModal({ onClose }: Props) {
         {/* Error */}
         {error && (
           <div style={{
-            background: "#450a0a", color: "#fca5a5", padding: "8px 12px",
+            background: t.red.bg, color: t.red.fg, padding: "8px 12px",
             borderRadius: 6, marginBottom: 14, fontSize: 12,
           }}>
             {error}
@@ -241,7 +242,7 @@ export function SettingsModal({ onClose }: Props) {
               <Field label="Schema" value={configs[activeTab].schema}
                 onChange={(v) => setOracle(activeTab, "schema", v)} placeholder="SCOTT" />
             </div>
-            <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 4, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
+            <div style={{ fontSize: 11, color: t.text.disabled, fontWeight: 600, marginBottom: 4, marginTop: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>
               {activeTab === "oracle_source" ? "Debezium User (CDC)" : "User"}
             </div>
             <Field label="User" value={configs[activeTab].user}
@@ -252,7 +253,7 @@ export function SettingsModal({ onClose }: Props) {
             {activeTab === "oracle_source" && (
               <>
                 <div style={{
-                  fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 4, marginTop: 8,
+                  fontSize: 11, color: t.text.disabled, fontWeight: 600, marginBottom: 4, marginTop: 8,
                   textTransform: "uppercase", letterSpacing: 0.4,
                   borderTop: "1px solid #334155", paddingTop: 12,
                 }}>
@@ -292,9 +293,9 @@ export function SettingsModal({ onClose }: Props) {
         {/* Test result */}
         {testResult && (
           <div style={{
-            background: testResult.status === "up" ? "#052e16" : "#450a0a",
-            color:      testResult.status === "up" ? "#86efac" : "#fca5a5",
-            border:     `1px solid ${testResult.status === "up" ? "#16a34a" : "#7f1d1d"}`,
+            background: testResult.status === "up" ? t.green.bg : t.red.bg,
+            color:      testResult.status === "up" ? t.green.fg : t.red.fg,
+            border:     `1px solid ${testResult.status === "up" ? t.green.dim : t.red.border}`,
             borderRadius: 6, padding: "8px 12px", marginTop: 8, fontSize: 12,
           }}>
             {testResult.status === "up" ? "✓ " : "✗ "}{testResult.message}
@@ -307,8 +308,8 @@ export function SettingsModal({ onClose }: Props) {
             onClick={saveActive}
             disabled={saving}
             style={{
-              background: saved ? "#052e16" : "#1d4ed8",
-              color: saved ? "#86efac" : "#e2e8f0",
+              background: saved ? t.green.bg : t.blue.dim,
+              color: saved ? t.green.fg : t.text.primary,
               border: "none", borderRadius: 6,
               padding: "8px 22px", fontSize: 13, cursor: saving ? "wait" : "pointer", fontWeight: 600,
             }}
@@ -320,22 +321,22 @@ export function SettingsModal({ onClose }: Props) {
               onClick={testConnection}
               disabled={testing}
               style={{
-                background: "#1e293b", border: "1px solid #334155", borderRadius: 6,
-                color: "#94a3b8", padding: "8px 16px", fontSize: 13,
+                background: t.bg.s2, border: "1px solid #334155", borderRadius: 6,
+                color: t.text.secondary, padding: "8px 16px", fontSize: 13,
                 cursor: testing ? "wait" : "pointer", fontWeight: 600,
               }}
             >
               {testing ? "Проверка…" : "Тест подключения"}
             </button>
           )}
-          <span style={{ fontSize: 11, color: "#475569", marginLeft: 4 }}>
+          <span style={{ fontSize: 11, color: t.text.disabled, marginLeft: 4 }}>
             {TABS.find((t) => t.key === activeTab)?.label}
           </span>
         </div>
 
         {/* DB hint */}
-        <p style={{ margin: "18px 0 0", fontSize: 10, color: "#334155", lineHeight: 1.6 }}>
-          State DB: env <code style={{ color: "#475569" }}>STATE_DB_DSN</code>
+        <p style={{ margin: "18px 0 0", fontSize: 10, color: t.border.base, lineHeight: 1.6 }}>
+          State DB: env <code style={{ color: t.text.disabled }}>STATE_DB_DSN</code>
         </p>
       </div>
     </>

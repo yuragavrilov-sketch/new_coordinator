@@ -4,6 +4,7 @@ import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
 import { CatalogObject } from "./TablesTab";
 import { Pagination, usePagination } from "./Pagination";
+import { t } from "../../theme";
 
 interface Props {
   objects: CatalogObject[];
@@ -36,7 +37,7 @@ function SequenceDetail({ meta }: { meta: Record<string, unknown> }) {
       {fields.map(f => (
         <div key={f.key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <span style={S.label}>{f.label}</span>
-          <span style={{ fontSize: 13, color: "#e2e8f0", fontFamily: "monospace" }}>
+          <span style={{ fontSize: 13, color: t.text.primary, fontFamily: "monospace" }}>
             {meta[f.key] != null ? String(meta[f.key]) : "—"}
           </span>
         </div>
@@ -57,7 +58,7 @@ function SynonymDetail({ meta }: { meta: Record<string, unknown> }) {
   return (
     <div style={{ padding: "8px 0" }}>
       <span style={S.label}>Ссылается на</span>
-      <div style={{ marginTop: 4, fontSize: 13, color: "#e2e8f0", fontFamily: "monospace" }}>
+      <div style={{ marginTop: 4, fontSize: 13, color: t.text.primary, fontFamily: "monospace" }}>
         {ref || "—"}
       </div>
     </div>
@@ -78,16 +79,16 @@ function TypeDetail({ meta }: { meta: Record<string, unknown> }) {
         padding: "5px 12px",
         fontSize: 11,
         fontWeight: 700,
-        color: "#64748b",
+        color: t.text.muted,
         letterSpacing: 0.5,
-        background: "#0a111f",
+        background: t.bg.s1,
         borderBottom: "1px solid #1e293b",
       }}>
         ИСХОДНЫЙ КОД
       </div>
       <pre style={{
         margin: 0, padding: "10px 12px",
-        fontSize: 11, color: "#94a3b8",
+        fontSize: 11, color: t.text.secondary,
         fontFamily: "monospace", whiteSpace: "pre-wrap",
         overflowX: "auto", maxHeight: 300,
       }}>
@@ -129,7 +130,7 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
     const kind = detectOtherType(meta);
     switch (kind) {
       case "SEQUENCE":
-        return <span style={S.badge("#d97706222", "#d97706")}>SEQUENCE</span>;
+        return <span style={S.badge("#d97706222", t.amber.dim)}>SEQUENCE</span>;
       case "SYNONYM":
         return <span style={S.badge("#0891b222", "#0891b2")}>SYNONYM</span>;
       case "TYPE":
@@ -148,13 +149,13 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
           placeholder="Поиск объектов..."
           style={{ ...S.input, width: 220 }}
         />
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#475569" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: t.text.disabled }}>
           {filtered.length} / {objects.length}
         </span>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "#0a111f" }}>
+          <tr style={{ background: t.bg.s1 }}>
             <th style={S.th}>Имя</th>
             <th style={S.th}>Тип</th>
             <th style={S.th}>Совпадение</th>
@@ -172,13 +173,13 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
                       <button
                         onClick={() => setExpandedObj(expanded ? null : obj.object_name)}
                         style={{
-                          background: "none", border: "none", color: "#475569",
+                          background: "none", border: "none", color: t.text.disabled,
                           cursor: "pointer", fontSize: 12, padding: "0 2px",
                         }}
                       >
                         {expanded ? "▼" : "▶"}
                       </button>
-                      <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                      <span style={{ color: t.text.primary, fontFamily: "monospace" }}>
                         {obj.object_name}
                       </span>
                     </div>

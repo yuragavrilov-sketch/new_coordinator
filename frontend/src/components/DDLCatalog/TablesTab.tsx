@@ -3,6 +3,7 @@ import { S } from "./styles";
 import { MatchBadge, MigrationBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
 import { Pagination, usePagination } from "./Pagination";
+import { t } from "../../theme";
 
 export interface CatalogObject {
   object_name: string;
@@ -57,15 +58,15 @@ function ColsTable({ cols }: { cols: Record<string, unknown>[] }) {
       <tbody>
         {cols.map((c, i) => (
           <tr key={i} style={S.trBorder}>
-            <td style={{ ...S.td, color: "#475569" }}>{(c.column_id as number) ?? i + 1}</td>
-            <td style={{ ...S.td, color: "#e2e8f0" }}>{(c.name ?? c.column_name) as string}</td>
-            <td style={{ ...S.td, color: "#94a3b8" }}>{fmtType(c)}</td>
+            <td style={{ ...S.td, color: t.text.disabled }}>{(c.column_id as number) ?? i + 1}</td>
+            <td style={{ ...S.td, color: t.text.primary }}>{(c.name ?? c.column_name) as string}</td>
+            <td style={{ ...S.td, color: t.text.secondary }}>{fmtType(c)}</td>
             <td style={S.td}>
               {(c.nullable === true || c.nullable === "Y")
-                ? <span style={S.badge("#22c55e22", "#22c55e")}>YES</span>
-                : <span style={S.badge("#ef444422", "#ef4444")}>NO</span>}
+                ? <span style={S.badge("#22c55e22", t.green.base)}>YES</span>
+                : <span style={S.badge("#ef444422", t.red.base)}>NO</span>}
             </td>
-            <td style={{ ...S.td, color: "#64748b", fontFamily: "monospace" }}>
+            <td style={{ ...S.td, color: t.text.muted, fontFamily: "monospace" }}>
               {(c.data_default as string) ?? "—"}
             </td>
           </tr>
@@ -92,18 +93,18 @@ function IdxTable({ idxs }: { idxs: Record<string, unknown>[] }) {
           const colStr = rawCols.map((c: unknown) => typeof c === "string" ? c : (c as Record<string, unknown>).column_name as string).join(", ");
           return (
             <tr key={i} style={S.trBorder}>
-              <td style={{ ...S.td, color: "#e2e8f0" }}>{(idx.name ?? idx.index_name) as string}</td>
+              <td style={{ ...S.td, color: t.text.primary }}>{(idx.name ?? idx.index_name) as string}</td>
               <td style={S.td}>
-                <span style={S.badge("#3b82f622", "#3b82f6")}>{idx.index_type as string}</span>
+                <span style={S.badge("#3b82f622", t.blue.base)}>{idx.index_type as string}</span>
                 {(idx.unique === true || idx.uniqueness === "UNIQUE") && (
                   <span style={{ ...S.badge("#8b5cf622", "#8b5cf6"), marginLeft: 4 }}>UNIQUE</span>
                 )}
               </td>
-              <td style={{ ...S.td, color: "#94a3b8" }}>{colStr}</td>
+              <td style={{ ...S.td, color: t.text.secondary }}>{colStr}</td>
               <td style={S.td}>
                 <span style={S.badge(
                   idx.status === "VALID" ? "#22c55e22" : "#ef444422",
-                  idx.status === "VALID" ? "#22c55e" : "#ef4444"
+                  idx.status === "VALID" ? t.green.base : t.red.base
                 )}>{idx.status as string}</span>
               </td>
             </tr>
@@ -116,9 +117,9 @@ function IdxTable({ idxs }: { idxs: Record<string, unknown>[] }) {
 
 function ConstrTable({ constrs }: { constrs: Record<string, unknown>[] }) {
   const typeColor: Record<string, [string, string]> = {
-    P: ["#3b82f622", "#3b82f6"], "PRIMARY KEY": ["#3b82f622", "#3b82f6"],
+    P: ["#3b82f622", t.blue.base], "PRIMARY KEY": ["#3b82f622", t.blue.base],
     U: ["#8b5cf622", "#8b5cf6"], "UNIQUE": ["#8b5cf622", "#8b5cf6"],
-    R: ["#eab30822", "#eab308"], "FOREIGN KEY": ["#eab30822", "#eab308"],
+    R: ["#eab30822", t.amber.base], "FOREIGN KEY": ["#eab30822", t.amber.base],
     C: ["#0ea5e922", "#0ea5e9"], "CHECK": ["#0ea5e922", "#0ea5e9"],
   };
   return (
@@ -137,16 +138,16 @@ function ConstrTable({ constrs }: { constrs: Record<string, unknown>[] }) {
           const colStr = rawCols.map((x: unknown) => typeof x === "string" ? x : (x as Record<string, unknown>).column_name as string).join(", ");
           const ct = (c.type_code ?? c.type ?? c.constraint_type ?? "") as string;
           const label = (c.type ?? ct) as string;
-          const [bg, fg] = typeColor[ct] ?? typeColor[label] ?? ["#33415522", "#475569"];
+          const [bg, fg] = typeColor[ct] ?? typeColor[label] ?? ["#33415522", t.text.disabled];
           return (
             <tr key={i} style={S.trBorder}>
-              <td style={{ ...S.td, color: "#e2e8f0" }}>{(c.name ?? c.constraint_name) as string}</td>
+              <td style={{ ...S.td, color: t.text.primary }}>{(c.name ?? c.constraint_name) as string}</td>
               <td style={S.td}><span style={S.badge(bg, fg)}>{label}</span></td>
-              <td style={{ ...S.td, color: "#94a3b8" }}>{colStr}</td>
+              <td style={{ ...S.td, color: t.text.secondary }}>{colStr}</td>
               <td style={S.td}>
                 <span style={S.badge(
                   c.status === "ENABLED" ? "#22c55e22" : "#ef444422",
-                  c.status === "ENABLED" ? "#22c55e" : "#ef4444"
+                  c.status === "ENABLED" ? t.green.base : t.red.base
                 )}>{c.status as string}</span>
               </td>
             </tr>
@@ -168,16 +169,16 @@ function TrigTable({ trigs }: { trigs: Record<string, unknown>[] }) {
         </tr>
       </thead>
       <tbody>
-        {trigs.map((t, i) => (
+        {trigs.map((trg, i) => (
           <tr key={i} style={S.trBorder}>
-            <td style={{ ...S.td, color: "#e2e8f0" }}>{(t.name ?? t.trigger_name) as string}</td>
-            <td style={{ ...S.td, color: "#94a3b8" }}>{t.trigger_type as string}</td>
-            <td style={{ ...S.td, color: "#94a3b8" }}>{(t.event ?? t.triggering_event) as string}</td>
+            <td style={{ ...S.td, color: t.text.primary }}>{(trg.name ?? trg.trigger_name) as string}</td>
+            <td style={{ ...S.td, color: t.text.secondary }}>{trg.trigger_type as string}</td>
+            <td style={{ ...S.td, color: t.text.secondary }}>{(trg.event ?? trg.triggering_event) as string}</td>
             <td style={S.td}>
               <span style={S.badge(
-                t.status === "ENABLED" ? "#22c55e22" : "#ef444422",
-                t.status === "ENABLED" ? "#22c55e" : "#ef4444"
-              )}>{t.status as string}</span>
+                trg.status === "ENABLED" ? "#22c55e22" : "#ef444422",
+                trg.status === "ENABLED" ? t.green.base : t.red.base
+              )}>{trg.status as string}</span>
             </td>
           </tr>
         ))}
@@ -215,7 +216,7 @@ function DiffSummary({ diff }: { diff: Record<string, unknown> }) {
       background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
       padding: "10px 14px", marginBottom: 6,
     }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 6 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: t.amber.base, marginBottom: 6 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
       {items.map((item, i) => (
         <div key={i} style={{ marginBottom: 4 }}>
           <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 600 }}>{item.label}: </span>
@@ -249,12 +250,12 @@ function TargetCompare({ srcCols, tgtCols }: { srcCols: Record<string, unknown>[
   const diffs = rows.filter(r => r.status !== "ok");
   if (diffs.length === 0) return null;
 
-  const colors: Record<string, string> = { missing: "#ef4444", extra: "#8b5cf6", type: "#eab308", ok: "#22c55e" };
+  const colors: Record<string, string> = { missing: t.red.base, extra: "#8b5cf6", type: t.amber.base, ok: t.green.base };
   const labels: Record<string, string> = { missing: "Нет на тгт", extra: "Лишняя", type: "Тип отлич.", ok: "OK" };
 
   return (
     <div style={{ border: "1px solid #854d0e44", borderRadius: 6, overflow: "hidden", marginBottom: 6 }}>
-      <div style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, color: "#eab308", background: "#1c1007", borderBottom: "1px solid #854d0e44" }}>
+      <div style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, color: t.amber.base, background: "#1c1007", borderBottom: "1px solid #854d0e44" }}>
         СРАВНЕНИЕ КОЛОНОК (только различия: {diffs.length})
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -266,8 +267,8 @@ function TargetCompare({ srcCols, tgtCols }: { srcCols: Record<string, unknown>[
         <tbody>
           {diffs.map(r => (
             <tr key={r.name} style={S.trBorder}>
-              <td style={{ ...S.td, color: "#e2e8f0", fontFamily: "monospace" }}>{r.name}</td>
-              <td style={{ ...S.td, color: "#94a3b8", fontFamily: "monospace" }}>{r.srcType}</td>
+              <td style={{ ...S.td, color: t.text.primary, fontFamily: "monospace" }}>{r.name}</td>
+              <td style={{ ...S.td, color: t.text.secondary, fontFamily: "monospace" }}>{r.srcType}</td>
               <td style={{ ...S.td, color: colors[r.status], fontFamily: "monospace" }}>{r.tgtType}</td>
               <td style={S.td}><span style={S.badge(colors[r.status] + "22", colors[r.status])}>{labels[r.status]}</span></td>
             </tr>
@@ -306,9 +307,9 @@ function TableDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numb
     padding: "5px 12px",
     fontSize: 11,
     fontWeight: 700,
-    color: "#64748b",
+    color: t.text.muted,
     letterSpacing: 0.5,
-    background: "#0a111f",
+    background: t.bg.s1,
     borderBottom: "1px solid #1e293b",
   };
 
@@ -400,13 +401,13 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
             </button>
           ))}
         </div>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#475569" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: t.text.disabled }}>
           {filtered.length} / {objects.length}
         </span>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "#0a111f" }}>
+          <tr style={{ background: t.bg.s1 }}>
             <th style={{ ...S.th, width: 32 }}>
               <input
                 type="checkbox"
@@ -438,13 +439,13 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
                       <button
                         onClick={() => setExpandedObj(expanded ? null : obj.object_name)}
                         style={{
-                          background: "none", border: "none", color: "#475569",
+                          background: "none", border: "none", color: t.text.disabled,
                           cursor: "pointer", fontSize: 12, padding: "0 2px",
                         }}
                       >
                         {expanded ? "▼" : "▶"}
                       </button>
-                      <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                      <span style={{ color: t.text.primary, fontFamily: "monospace" }}>
                         {obj.object_name}
                       </span>
                     </div>

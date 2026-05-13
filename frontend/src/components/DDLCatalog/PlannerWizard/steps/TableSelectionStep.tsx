@@ -3,6 +3,7 @@ import { S } from "../../styles";
 import { SearchSelect } from "../../../TargetPrep/SearchSelect";
 import { TableKeyConfig } from "../TableKeyConfig";
 import type { BatchItem, ConnectorGroup, PlanDefaults, TableKeyEntry } from "../types";
+import { t } from "../../../../theme";
 
 interface Props {
   selected:        string[];
@@ -49,7 +50,7 @@ export function TableSelectionStep({
       {/* Global defaults */}
       <div style={S.card}>
         <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Глобальные настройки</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Глобальные настройки</span>
         </div>
         <div style={S.cardBody}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
@@ -98,7 +99,7 @@ export function TableSelectionStep({
       {/* Connector group */}
       <div style={S.card}>
         <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Группа коннекторов</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Группа коннекторов</span>
         </div>
         <div style={S.cardBody}>
           <div style={S.field}>
@@ -111,11 +112,11 @@ export function TableSelectionStep({
             />
           </div>
           {selectedGroup && (
-            <div style={{ fontSize: 11, color: "#64748b" }}>
-              Группа: <span style={{ color: "#93c5fd" }}>{selectedGroup}</span>
+            <div style={{ fontSize: 11, color: t.text.muted }}>
+              Группа: <span style={{ color: t.blue.fg }}>{selectedGroup}</span>
               {(() => {
                 const g = groups.find(gg => gg.group_name === selectedGroup);
-                return g ? <> | Статус: <span style={{ color: g.status === "RUNNING" ? "#22c55e" : "#eab308" }}>{g.status}</span></> : null;
+                return g ? <> | Статус: <span style={{ color: g.status === "RUNNING" ? t.green.base : t.amber.base }}>{g.status}</span></> : null;
               })()}
             </div>
           )}
@@ -125,10 +126,10 @@ export function TableSelectionStep({
       {/* Per-table settings */}
       <div style={S.card}>
         <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>
             Настройки таблиц ({selected.length})
           </span>
-          <span style={{ fontSize: 11, color: "#475569", marginLeft: "auto" }}>
+          <span style={{ fontSize: 11, color: t.text.disabled, marginLeft: "auto" }}>
             Индивидуальных: {customTables.size}
           </span>
         </div>
@@ -150,11 +151,11 @@ export function TableSelectionStep({
                 const keyLabel  = keyEntry?.effective_key_type
                   ? keyEntry.effective_key_type.replace("_", " ")
                   : keyEntry?.loadingInfo ? "..." : "—";
-                const keyColor = keyEntry?.effective_key_type === "PRIMARY_KEY"  ? "#86efac"
-                  : keyEntry?.effective_key_type === "UNIQUE_KEY"   ? "#c4b5fd"
+                const keyColor = keyEntry?.effective_key_type === "PRIMARY_KEY"  ? t.green.fg
+                  : keyEntry?.effective_key_type === "UNIQUE_KEY"   ? t.purple.fg
                   : keyEntry?.effective_key_type === "USER_DEFINED" ? "#fbbf24"
-                  : keyEntry?.effective_key_type === "NONE"         ? "#fca5a5"
-                  :                                                   "#475569";
+                  : keyEntry?.effective_key_type === "NONE"         ? t.red.fg
+                  :                                                   t.text.disabled;
                 return (
                   <React.Fragment key={table}>
                     <tr style={{
@@ -162,7 +163,7 @@ export function TableSelectionStep({
                       background: isCustom ? "rgba(59,130,246,0.04)" : "transparent",
                     }}>
                       <td style={S.td}>
-                        <code style={{ color: "#e2e8f0", fontSize: 12 }}>{table}</code>
+                        <code style={{ color: t.text.primary, fontSize: 12 }}>{table}</code>
                       </td>
                       <td style={S.td}>
                         <button
@@ -189,7 +190,7 @@ export function TableSelectionStep({
                             <option value="BULK_ONLY">BULK_ONLY</option>
                           </select>
                         ) : (
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.mode}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.mode}</span>
                         )}
                       </td>
                       <td style={S.td}>
@@ -203,7 +204,7 @@ export function TableSelectionStep({
                             <option value="DIRECT">DIRECT</option>
                           </select>
                         ) : (
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.strategy}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.strategy}</span>
                         )}
                       </td>
                       <td style={S.td}>
@@ -214,7 +215,7 @@ export function TableSelectionStep({
                             style={{ ...S.input, width: 80, padding: "3px 6px", fontSize: 11 }}
                           />
                         ) : (
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.chunk_size.toLocaleString("ru-RU")}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.chunk_size.toLocaleString("ru-RU")}</span>
                         )}
                       </td>
                       <td style={S.td}>
@@ -225,7 +226,7 @@ export function TableSelectionStep({
                             style={{ ...S.input, width: 60, padding: "3px 6px", fontSize: 11 }}
                           />
                         ) : (
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{ts.workers}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.workers}</span>
                         )}
                       </td>
                       <td style={{ ...S.td, textAlign: "center" }}>
@@ -233,14 +234,14 @@ export function TableSelectionStep({
                           type="checkbox"
                           checked={isCustom}
                           onChange={() => toggleCustom(table)}
-                          style={{ accentColor: "#3b82f6" }}
+                          style={{ accentColor: t.blue.base }}
                         />
                       </td>
                     </tr>
                     {isExpanded && keyEntry && (
                       <tr>
                         <td colSpan={7} style={{
-                          padding: "10px 16px", background: "#0a111f",
+                          padding: "10px 16px", background: t.bg.s1,
                           borderBottom: "1px solid #1e293b",
                         }}>
                           <TableKeyConfig

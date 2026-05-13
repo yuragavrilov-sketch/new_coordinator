@@ -1,6 +1,7 @@
 import React from "react";
 import { S } from "../../styles";
 import type { Batch, FKDep } from "../types";
+import { t } from "../../../../theme";
 
 interface Props {
   batches:     Batch[];
@@ -52,23 +53,23 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
       {/* FK dependencies info */}
       <div style={S.card}>
         <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>FK зависимости</span>
-          {depsLoading && <span style={{ fontSize: 11, color: "#64748b" }}>Загрузка...</span>}
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>FK зависимости</span>
+          {depsLoading && <span style={{ fontSize: 11, color: t.text.muted }}>Загрузка...</span>}
         </div>
         <div style={S.cardBody}>
           {deps.length === 0 && !depsLoading && (
-            <span style={{ fontSize: 12, color: "#475569" }}>Нет FK зависимостей между выбранными таблицами</span>
+            <span style={{ fontSize: 12, color: t.text.disabled }}>Нет FK зависимостей между выбранными таблицами</span>
           )}
           {deps.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {deps.map(d => (
-                <div key={d.table} style={{ fontSize: 12, color: "#94a3b8" }}>
-                  <code style={{ color: "#e2e8f0" }}>{d.table}</code>
-                  <span style={{ color: "#475569", margin: "0 6px" }}>→</span>
+                <div key={d.table} style={{ fontSize: 12, color: t.text.secondary }}>
+                  <code style={{ color: t.text.primary }}>{d.table}</code>
+                  <span style={{ color: t.text.disabled, margin: "0 6px" }}>→</span>
                   {d.depends_on.map((dep, i) => (
                     <React.Fragment key={dep}>
-                      {i > 0 && <span style={{ color: "#475569" }}>, </span>}
-                      <code style={{ color: "#93c5fd" }}>{dep}</code>
+                      {i > 0 && <span style={{ color: t.text.disabled }}>, </span>}
+                      <code style={{ color: t.blue.fg }}>{dep}</code>
                     </React.Fragment>
                   ))}
                 </div>
@@ -80,7 +81,7 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
 
       {/* Batches */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Батчи ({batches.length})</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Батчи ({batches.length})</span>
         <button onClick={addBatch} style={{ ...S.btnSecondary, fontSize: 11, padding: "3px 10px" }}>
           + Добавить батч
         </button>
@@ -90,16 +91,16 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
         <div key={batch.id} style={S.card}>
           <div style={{ ...S.cardHeader, justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>
                 Батч #{batch.id}
               </span>
-              <span style={S.badge("#1e3a5f", "#93c5fd")}>
+              <span style={S.badge(t.bg.s3, t.blue.fg)}>
                 {batch.items.length} таблиц
               </span>
             </div>
           </div>
           {batch.items.length === 0 ? (
-            <div style={{ padding: "16px", textAlign: "center", color: "#475569", fontSize: 12 }}>
+            <div style={{ padding: "16px", textAlign: "center", color: t.text.disabled, fontSize: 12 }}>
               Пустой батч — перетащите сюда таблицы
             </div>
           ) : (
@@ -117,18 +118,18 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
                     const hasDep = deps.some(d => d.table === item.table);
                     return (
                       <tr key={item.table} style={S.trBorder}>
-                        <td style={{ ...S.td, color: "#475569" }}>{idx + 1}</td>
+                        <td style={{ ...S.td, color: t.text.disabled }}>{idx + 1}</td>
                         <td style={S.td}>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <code style={{ color: "#e2e8f0", fontSize: 12 }}>{item.table}</code>
-                            {hasDep && <span style={S.badge("#eab30822", "#eab308")}>FK</span>}
+                            <code style={{ color: t.text.primary, fontSize: 12 }}>{item.table}</code>
+                            {hasDep && <span style={S.badge("#eab30822", t.amber.base)}>FK</span>}
                           </div>
                         </td>
                         <td style={S.td}>
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{item.mode}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{item.mode}</span>
                         </td>
                         <td style={S.td}>
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>{item.strategy}</span>
+                          <span style={{ fontSize: 11, color: t.text.secondary }}>{item.strategy}</span>
                         </td>
                         <td style={S.td}>
                           <div style={{ display: "flex", gap: 4 }}>

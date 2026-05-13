@@ -1,6 +1,7 @@
 import { S } from "../styles";
 import { Chip, KeyTypeBtn } from "../../CreateMigrationModal/ui";
 import type { TableKeyEntry } from "./types";
+import { t } from "../../../theme";
 
 interface Props {
   entry:    TableKeyEntry;
@@ -25,10 +26,10 @@ export function TableKeyConfig({ entry, onChange }: Props) {
   }
 
   if (entry.loadingInfo) {
-    return <div style={{ fontSize: 11, color: "#475569", padding: "4px 0" }}>Загрузка информации...</div>;
+    return <div style={{ fontSize: 11, color: t.text.disabled, padding: "4px 0" }}>Загрузка информации...</div>;
   }
   if (entry.infoError) {
-    return <div style={{ fontSize: 10, color: "#fca5a5" }}>{entry.infoError}</div>;
+    return <div style={{ fontSize: 10, color: t.red.fg }}>{entry.infoError}</div>;
   }
   if (!info) return null;
 
@@ -36,12 +37,12 @@ export function TableKeyConfig({ entry, onChange }: Props) {
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* chips */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Chip label={`${info.columns.length} кол.`} color="#94a3b8" bg="#1e293b" />
+        <Chip label={`${info.columns.length} кол.`} color={t.text.secondary} bg={t.bg.s2} />
         {info.pk_columns.length > 0
-          ? <Chip label={`PK: ${info.pk_columns.join(", ")}`} color="#86efac" bg="#052e16" />
-          : <Chip label="Нет PK" color="#fca5a5" bg="#450a0a" />}
+          ? <Chip label={`PK: ${info.pk_columns.join(", ")}`} color={t.green.fg} bg={t.green.bg} />
+          : <Chip label="Нет PK" color={t.red.fg} bg={t.red.bg} />}
         {info.uk_constraints.length > 0 && (
-          <Chip label={`UK: ${info.uk_constraints.length}`} color="#c4b5fd" bg="#2e1065" />
+          <Chip label={`UK: ${info.uk_constraints.length}`} color={t.purple.fg} bg={t.purple.bg} />
         )}
       </div>
 
@@ -64,7 +65,7 @@ export function TableKeyConfig({ entry, onChange }: Props) {
       </div>
 
       {entry.effective_key_type === "PRIMARY_KEY" && (
-        <div style={{ fontSize: 11, color: "#86efac" }}>
+        <div style={{ fontSize: 11, color: t.green.fg }}>
           Ключ: <strong>{info.pk_columns.join(", ")}</strong>
         </div>
       )}
@@ -88,7 +89,7 @@ export function TableKeyConfig({ entry, onChange }: Props) {
               ))}
             </select>
           )}
-          <div style={{ fontSize: 11, color: "#c4b5fd" }}>
+          <div style={{ fontSize: 11, color: t.purple.fg }}>
             Ключ: <strong>{info.uk_constraints[entry.selected_uk_index]?.columns.join(", ")}</strong>
           </div>
         </>
@@ -98,7 +99,7 @@ export function TableKeyConfig({ entry, onChange }: Props) {
         <div>
           <div style={{
             maxHeight: 140, overflowY: "auto",
-            border: "1px solid #334155", borderRadius: 5, background: "#1e293b",
+            border: "1px solid #334155", borderRadius: 5, background: t.bg.s2,
           }}>
             {info.columns.map(col => (
               <label key={col.name} style={{
@@ -110,19 +111,19 @@ export function TableKeyConfig({ entry, onChange }: Props) {
                   checked={entry.effective_key_columns.includes(col.name)}
                   onChange={e => toggleKeyCol(col.name, e.target.checked)}
                 />
-                <span style={{ fontSize: 11, color: "#e2e8f0", fontFamily: "monospace" }}>{col.name}</span>
-                <span style={{ fontSize: 9, color: "#475569" }}>{col.type}</span>
+                <span style={{ fontSize: 11, color: t.text.primary, fontFamily: "monospace" }}>{col.name}</span>
+                <span style={{ fontSize: 9, color: t.text.disabled }}>{col.type}</span>
                 {!col.nullable && (
-                  <span style={{ fontSize: 9, color: "#ef4444", marginLeft: "auto" }}>NOT NULL</span>
+                  <span style={{ fontSize: 9, color: t.red.base, marginLeft: "auto" }}>NOT NULL</span>
                 )}
               </label>
             ))}
           </div>
           {entry.effective_key_columns.length > 0 && (
-            <div style={{ fontSize: 10, color: "#475569" }}>Выбрано: {entry.effective_key_columns.join(", ")}</div>
+            <div style={{ fontSize: 10, color: t.text.disabled }}>Выбрано: {entry.effective_key_columns.join(", ")}</div>
           )}
           {entry.effective_key_columns.length === 0 && (
-            <div style={{ fontSize: 10, color: "#fca5a5" }}>Выберите хотя бы один столбец</div>
+            <div style={{ fontSize: 10, color: t.red.fg }}>Выберите хотя бы один столбец</div>
           )}
         </div>
       )}

@@ -4,6 +4,7 @@ import { MatchBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
 import { Pagination, usePagination } from "./Pagination";
 import { CatalogObject } from "./TablesTab";
+import { t } from "../../theme";
 
 interface Props {
   objects: CatalogObject[];
@@ -26,7 +27,7 @@ function ViewDiffSummary({ diff, srcSql, tgtSql }: { diff: Record<string, unknow
   if (items.length === 0) return null;
 
   const diffStyle: React.CSSProperties = {
-    margin: 0, padding: "8px 10px", fontSize: 10, color: "#94a3b8",
+    margin: 0, padding: "8px 10px", fontSize: 10, color: t.text.secondary,
     fontFamily: "monospace", whiteSpace: "pre-wrap", overflowX: "auto",
     maxHeight: 250, background: "#0a0f1a", borderTop: "1px solid #1e293b",
   };
@@ -36,18 +37,18 @@ function ViewDiffSummary({ diff, srcSql, tgtSql }: { diff: Record<string, unknow
       background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
       padding: "10px 14px", marginBottom: 6,
     }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: t.amber.base, marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
       {items.map((item, i) => (
         <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
       ))}
       {diff.sql_match === false && srcSql && tgtSql && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
           <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#3b82f6", background: "#0a111f" }}>SOURCE</div>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: t.blue.base, background: t.bg.s1 }}>SOURCE</div>
             <pre style={diffStyle}>{srcSql}</pre>
           </div>
           <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: "#0a111f" }}>TARGET</div>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: t.bg.s1 }}>TARGET</div>
             <pre style={diffStyle}>{tgtSql}</pre>
           </div>
         </div>
@@ -85,9 +86,9 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
     padding: "5px 12px",
     fontSize: 11,
     fontWeight: 700,
-    color: "#64748b",
+    color: t.text.muted,
     letterSpacing: 0.5,
-    background: "#0a111f",
+    background: t.bg.s1,
     borderBottom: "1px solid #1e293b",
   };
 
@@ -95,9 +96,9 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
     <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
       {obj.match_status === "DIFF" && <ViewDiffSummary diff={obj.diff} srcSql={sql} tgtSql={tgtSql} />}
       {mview && (
-        <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-          Refresh: <span style={{ color: "#94a3b8" }}>{(meta.refresh_type as string) ?? "—"}</span>
-          {meta.last_refresh ? <span style={{ marginLeft: 12 }}>Last: <span style={{ color: "#94a3b8" }}>{String(meta.last_refresh)}</span></span> : null}
+        <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 6 }}>
+          Refresh: <span style={{ color: t.text.secondary }}>{(meta.refresh_type as string) ?? "—"}</span>
+          {meta.last_refresh ? <span style={{ marginLeft: 12 }}>Last: <span style={{ color: t.text.secondary }}>{String(meta.last_refresh)}</span></span> : null}
         </div>
       )}
       {cols.length > 0 && (
@@ -114,15 +115,15 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
             <tbody>
               {cols.map((c, i) => (
                 <tr key={i} style={S.trBorder}>
-                  <td style={{ ...S.td, color: "#475569" }}>{i + 1}</td>
-                  <td style={{ ...S.td, color: "#e2e8f0" }}>{(c.name ?? c.column_name) as string}</td>
-                  <td style={{ ...S.td, color: "#94a3b8" }}>
+                  <td style={{ ...S.td, color: t.text.disabled }}>{i + 1}</td>
+                  <td style={{ ...S.td, color: t.text.primary }}>{(c.name ?? c.column_name) as string}</td>
+                  <td style={{ ...S.td, color: t.text.secondary }}>
                     {c.data_type as string}{c.data_length ? `(${c.data_length})` : ""}
                   </td>
                   <td style={S.td}>
                     {(c.nullable === true || c.nullable === "Y")
-                      ? <span style={{ color: "#22c55e", fontSize: 11 }}>Y</span>
-                      : <span style={{ color: "#ef4444", fontSize: 11 }}>N</span>}
+                      ? <span style={{ color: t.green.base, fontSize: 11 }}>Y</span>
+                      : <span style={{ color: t.red.base, fontSize: 11 }}>N</span>}
                   </td>
                 </tr>
               ))}
@@ -135,7 +136,7 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
           <div style={sectionHeader}>SQL</div>
           <pre style={{
             margin: 0, padding: "10px 12px",
-            fontSize: 11, color: "#94a3b8",
+            fontSize: 11, color: t.text.secondary,
             fontFamily: "monospace", whiteSpace: "pre-wrap",
             overflowX: "auto", maxHeight: 300,
           }}>
@@ -172,13 +173,13 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
           placeholder="Поиск views..."
           style={{ ...S.input, width: 220 }}
         />
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#475569" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: t.text.disabled }}>
           {filtered.length} / {objects.length}
         </span>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ background: "#0a111f" }}>
+          <tr style={{ background: t.bg.s1 }}>
             <th style={S.th}>Имя</th>
             <th style={S.th}>Тип</th>
             <th style={S.th}>Oracle статус</th>
@@ -199,13 +200,13 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
                       <button
                         onClick={() => setExpandedObj(expanded ? null : obj.object_name)}
                         style={{
-                          background: "none", border: "none", color: "#475569",
+                          background: "none", border: "none", color: t.text.disabled,
                           cursor: "pointer", fontSize: 12, padding: "0 2px",
                         }}
                       >
                         {expanded ? "▼" : "▶"}
                       </button>
-                      <span style={{ color: "#e2e8f0", fontFamily: "monospace" }}>
+                      <span style={{ color: t.text.primary, fontFamily: "monospace" }}>
                         {obj.object_name}
                       </span>
                     </div>
@@ -213,10 +214,10 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
                   <td style={S.td}>
                     {mview
                       ? <span style={S.badge("#0ea5e922", "#0ea5e9")}>MVIEW</span>
-                      : <span style={S.badge("#3b82f622", "#3b82f6")}>VIEW</span>
+                      : <span style={S.badge("#3b82f622", t.blue.base)}>VIEW</span>
                     }
                   </td>
-                  <td style={{ ...S.td, color: "#94a3b8" }}>{obj.oracle_status}</td>
+                  <td style={{ ...S.td, color: t.text.secondary }}>{obj.oracle_status}</td>
                   <td style={S.td}><MatchBadge status={obj.match_status} /></td>
                   <td style={S.td}>
                     <ObjectActions
