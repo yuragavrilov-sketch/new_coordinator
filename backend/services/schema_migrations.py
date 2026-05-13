@@ -132,6 +132,74 @@ def _aggregate_status(children_phases: list[str], any_failed: bool, paused: bool
 
 # ── Object table: TABLE migrations from `migrations` table ──────────────────
 
+# Oracle object_type (as stored in ddl_objects) → frontend ObjectType enum
+_DDL_TYPE_MAP = {
+    "MATERIALIZED VIEW": "MVIEW",
+    "PACKAGE":           "PACKAGE",
+    "PROCEDURE":         "PROCEDURE",
+    "FUNCTION":          "FUNCTION",
+    "VIEW":              "VIEW",
+    "TRIGGER":           "TRIGGER",
+    "SEQUENCE":          "SEQUENCE",
+    "SYNONYM":           "SYNONYM",
+    "TYPE":              "TYPE",
+}
+
+# match_status → (ObjectStatus, compat%, warn_count, err_count, note_prefix)
+_MATCH_MAP = {
+    "MATCH":   ("done",   100, 0, 0, ""),
+    "DIFF":    ("warn",    85, 1, 0, "DDL отличается"),
+    "MISSING": ("queued", 100, 0, 0, "ещё нет в target"),
+    "EXTRA":   ("skipped",100, 0, 0, "только в target"),
+    "ERROR":   ("error",   70, 0, 1, ""),
+    "UNKNOWN": ("queued", 100, 0, 0, ""),
+}
+
+
+def _build_ddl_object(
+    object_type: str, object_name: str, oracle_status: str | None,
+    match_status: str, diff_json,
+) -> dict:
+    """Convert a (ddl_objects + ddl_compare_results) row → SchemaObject."""
+    fe_type = _DDL_TYPE_MAP.get(object_type, object_type)
+    status, compat, warn, err, note = _MATCH_MAP.get(match_status, _MATCH_MAP["UNKNOWN"])
+
+    # INVALID oracle objects → warn even if DDL matches
+    if oracle_status and oracle_status.upper() == "INVALID" and status == "done":
+        status = "warn"
+        warn = 1
+        note = note or "INVALID в Oracle"
+
+    # Light note from diff (first failing field)
+    if not note and isinstance(diff_json, dict):
+        if not diff_json.get("ok", True):
+            for k, v in diff_json.items():
+                if k == "ok" or not v:
+                    continue
+                if isinstance(v, bool) and v is False:
+                    note = f"{k.replace('_match', '').replace('_', ' ')} mismatch"
+                    break
+
+    return {
+        "id":         f"ddl-{object_type}-{object_name}",
+        "type":       fe_type,
+        "name":       object_name,
+        "rows":       None,
+        "rowsDone":   None,
+        "sizeMb":     0,
+        "status":     status,
+        "progress":   100 if status == "done" else 0,
+        "rowsPerSec": 0,
+        "mbPerSec":   0,
+        "compat":     compat,
+        "warn":       warn,
+        "err":        err,
+        "eta":        "—",
+        "dur":        "<1s",
+        "note":       note,
+    }
+
+
 def _build_object(row: dict) -> dict:
     """Convert a `migrations` row into a dashboard SchemaObject."""
     has_error = bool(row.get("error_text"))
@@ -212,7 +280,20 @@ def get_schema_migration(conn, sm_id: str) -> dict | None:
 
 
 def get_objects(conn, sm_id: str) -> list[dict]:
-    """Return SchemaObject[] (TABLE rows for now; PL/SQL/views extensible later)."""
+    """Return SchemaObject[]: TABLE rows from migrations + DDL objects from the
+    latest ddl_snapshot for this schema_migration's src/tgt schemas (if any)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT src_schema, tgt_schema FROM schema_migrations WHERE schema_migration_id = %s",
+            (sm_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return []
+        src_schema, tgt_schema = row
+
+    # TABLE objects — driven by `migrations` (state machine, progress, errors)
+    tables: list[dict] = []
     with conn.cursor() as cur:
         cur.execute("""
             SELECT m.*
@@ -223,7 +304,40 @@ def get_objects(conn, sm_id: str) -> list[dict]:
             ORDER BY m.created_at
         """, (sm_id,))
         cols = [d[0] for d in cur.description]
-        return [_build_object(dict(zip(cols, r))) for r in cur.fetchall()]
+        tables = [_build_object(dict(zip(cols, r))) for r in cur.fetchall()]
+
+    # DDL objects (PACKAGE/VIEW/MVIEW/etc) from the most recent snapshot
+    ddl_objects: list[dict] = []
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT snapshot_id FROM ddl_snapshots
+            WHERE src_schema = %s AND tgt_schema = %s
+            ORDER BY loaded_at DESC
+            FETCH FIRST 1 ROWS ONLY
+        """, (src_schema, tgt_schema))
+        snap = cur.fetchone()
+        if snap:
+            snapshot_id = snap[0]
+            cur.execute("""
+                SELECT o.object_type, o.object_name, o.oracle_status,
+                       COALESCE(c.match_status, 'UNKNOWN') AS match_status,
+                       c.diff
+                FROM   ddl_objects o
+                LEFT   JOIN ddl_compare_results c
+                       ON c.snapshot_id = o.snapshot_id
+                       AND c.object_type = o.object_type
+                       AND c.object_name = o.object_name
+                WHERE  o.snapshot_id = %s
+                  AND  o.db_side = 'source'
+                  AND  o.object_type <> 'TABLE'
+                ORDER BY o.object_type, o.object_name
+            """, (snapshot_id,))
+            for r in cur.fetchall():
+                ddl_objects.append(_build_ddl_object(*r))
+
+    # Stable ID space: TABLE migrations use UUID strings; DDL objects get
+    # synthetic "ddl-<TYPE>-<NAME>" IDs to avoid collisions.
+    return tables + ddl_objects
 
 
 def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
