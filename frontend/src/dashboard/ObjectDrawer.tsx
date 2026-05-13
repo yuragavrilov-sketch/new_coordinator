@@ -18,13 +18,65 @@ interface Props {
   onApplied?:        () => void;
 }
 
-/** Pick the most reasonable DDL apply action for this object's problem. */
-function detectApplyAction(o: SchemaObject): { action: DdlApplyAction; label: string } | null {
+/** Types that can take CREATE OR REPLACE — sync_diff is offered for these. */
+const REPLACEABLE_TYPES = new Set([
+  "VIEW", "PROCEDURE", "FUNCTION", "PACKAGE", "PACKAGE BODY",
+  "TRIGGER", "TYPE", "TYPE BODY", "SYNONYM",
+]);
+
+interface ApplyOpt {
+  action: DdlApplyAction;
+  label:  string;
+  type:   string;   // Oracle canonical or frontend alias — backend accepts both
+  name:   string;
+}
+
+/** Decide which apply action makes sense, prefer the loaded detail (most
+ *  accurate). Falls back to SchemaObject.note when detail isn't loaded yet. */
+function detectApplyAction(
+  o: SchemaObject,
+  detail: ObjectDetailResp | null,
+): ApplyOpt | null {
+  // 1) DDL-kind detail — has direct match_status + statuses
+  if (detail && detail.kind === "ddl" && detail.found) {
+    const ms = detail.match_status || "UNKNOWN";
+    const otype = detail.object_type;
+    const oname = detail.object_name;
+    const srcInvalid = (detail.source?.oracle_status || "").toUpperCase() === "INVALID";
+    const tgtInvalid = (detail.target?.oracle_status || "").toUpperCase() === "INVALID";
+    if (ms === "MISSING")
+      return { action: "create_missing", label: "Создать на target", type: otype, name: oname };
+    if (ms === "DIFF" && REPLACEABLE_TYPES.has(otype))
+      return { action: "sync_diff", label: "Засинкать DDL", type: otype, name: oname };
+    if (ms === "DIFF")
+      return { action: "recreate", label: "Пересоздать", type: otype, name: oname };
+    if (tgtInvalid && !srcInvalid)
+      return { action: "recreate", label: "Пересоздать", type: otype, name: oname };
+    return null;
+  }
+
+  // 2) Migration-kind — only act if its ddl_diff says MISSING (recreate on TABLE
+  //    would drop data — refused).
+  if (detail && detail.kind === "migration" && detail.found) {
+    const d = detail.ddl_diff;
+    if (d && d.found && d.match_status === "MISSING") {
+      return { action: "create_missing", label: "Создать на target",
+               type: d.object_type, name: d.object_name };
+    }
+    return null;
+  }
+
+  // 3) Fallback before detail loads — use SchemaObject note (DDL-only)
   if (!o.id.startsWith("ddl-")) return null;
   const note = (o.note || "").toLowerCase();
-  if (note.startsWith("нет в target")) return { action: "create_missing", label: "Создать на target" };
-  if (note.startsWith("ddl отличается")) return { action: "sync_diff", label: "Засинкать DDL" };
-  if (note.includes("invalid в target")) return { action: "recreate", label: "Пересоздать" };
+  if (note.startsWith("нет в target"))
+    return { action: "create_missing", label: "Создать на target", type: o.type, name: o.name };
+  if (note.startsWith("ddl отличается"))
+    return { action: REPLACEABLE_TYPES.has(o.type) ? "sync_diff" : "recreate",
+             label: REPLACEABLE_TYPES.has(o.type) ? "Засинкать DDL" : "Пересоздать",
+             type: o.type, name: o.name };
+  if (note.includes("invalid в target"))
+    return { action: "recreate", label: "Пересоздать", type: o.type, name: o.name };
   return null;
 }
 
@@ -34,16 +86,16 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
   );
   const [applyBusy,     setApplyBusy]     = useState(false);
   const [applyFeedback, setApplyFeedback] = useState<string | null>(null);
-  const applyOpt = detectApplyAction(o);
+  const applyOpt = detectApplyAction(o, detail.data);
 
   const runApply = async () => {
     if (!applyOpt) return;
-    if (!window.confirm(`${applyOpt.label}: ${o.type} ${o.name} на target. Продолжить?`)) return;
+    if (!window.confirm(`${applyOpt.label}: ${applyOpt.type} ${applyOpt.name} на target. Продолжить?`)) return;
     setApplyBusy(true);
     setApplyFeedback(null);
     try {
       const r = await applyDdl(schemaMigrationId, applyOpt.action,
-        [{ type: o.type, name: o.name }]);
+        [{ type: applyOpt.type, name: applyOpt.name }]);
       setApplyFeedback(r.skipped.length
         ? `пропущено: ${r.skipped[0].reason}`
         : "поставлено в очередь");
