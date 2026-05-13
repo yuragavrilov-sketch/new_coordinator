@@ -224,16 +224,20 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
                   ? `${applyOpt.label} на target — DROP+CREATE (потеря данных)`
                   : `${applyOpt.label} на target через worker`}
                 style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  padding: "6px 14px",
+                  display: "inline-flex", alignItems: "center", gap: 7,
+                  padding: "8px 16px",
                   borderRadius: t.radius.sm,
-                  fontSize: 12.5, fontWeight: 700,
+                  fontSize: 13, fontWeight: 700,
+                  letterSpacing: "0.01em",
                   cursor: applyBusy ? "default" : "pointer",
-                  background: applyBusy ? t.bg.s2 :
-                              applyOpt.destructive ? t.tone.error : t.tone.accent,
-                  color:      applyBusy ? t.text.muted : "#ffffff",
-                  border:     `1px solid ${applyOpt.destructive ? t.tone.error : t.tone.accent}`,
-                  boxShadow:  applyBusy ? "none" : t.shadow.s1,
+                  background: applyBusy ? "#cfcfcf" :
+                              applyOpt.destructive ? "#dc2626" : "#2563eb",
+                  color:      applyBusy ? "#666" : "#ffffff",
+                  border:     `1px solid ${applyBusy ? "#cfcfcf" : applyOpt.destructive ? "#b91c1c" : "#1d4ed8"}`,
+                  boxShadow:  applyBusy ? "none" :
+                              applyOpt.destructive
+                                ? "0 1px 0 rgba(220,38,38,.15), 0 4px 12px -2px rgba(220,38,38,.35)"
+                                : "0 1px 0 rgba(37,99,235,.15), 0 4px 12px -2px rgba(37,99,235,.35)",
                   opacity:    applyBusy ? 0.7 : 1,
                 }}
               >
