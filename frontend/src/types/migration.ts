@@ -1,15 +1,25 @@
 import { t } from "../theme";
 
+export type Strategy = "CDC_STAGE" | "CDC_DIRECT" | "BULK_STAGE" | "BULK_DIRECT";
+
+export const hasCdc    = (s: Strategy): boolean => s.startsWith("CDC_");
+export const usesStage = (s: Strategy): boolean => s.endsWith("_STAGE");
+
+export const strategyLabel = (s: Strategy): string =>
+  `${hasCdc(s) ? "С CDC" : "Без CDC"} (${usesStage(s) ? "stage" : "direct"})`;
+
+export const composeStrategy = (cdc: boolean, stage: boolean): Strategy =>
+  `${cdc ? "CDC" : "BULK"}_${stage ? "STAGE" : "DIRECT"}` as Strategy;
+
 export type MigrationPhase =
-  | "DRAFT" | "NEW" | "PREPARING" | "SCN_FIXED"
-  | "CONNECTOR_STARTING" | "CDC_BUFFERING"
+  | "DRAFT" | "NEW"
   | "TOPIC_CREATING"
   | "CHUNKING" | "BULK_LOADING" | "BULK_LOADED"
   | "STAGE_VALIDATING" | "STAGE_VALIDATED"
   | "BASELINE_PUBLISHING" | "BASELINE_LOADING" | "BASELINE_PUBLISHED"
   | "STAGE_DROPPING" | "INDEXES_ENABLING"
   | "DATA_VERIFYING" | "DATA_MISMATCH"
-  | "CDC_APPLY_STARTING" | "CDC_APPLYING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
+  | "CDC_APPLYING" | "CDC_CATCHING_UP" | "CDC_CAUGHT_UP"
   | "STEADY_STATE" | "PAUSED"
   | "CANCELLING" | "CANCELLED"
   | "COMPLETED" | "FAILED";
@@ -67,8 +77,7 @@ export interface Migration {
   max_parallel_workers: number;
   baseline_parallel_degree: number;
   baseline_batch_size: number;
-  migration_strategy: string;
-  migration_mode: string;
+  strategy: Strategy;
   baseline_chunks_total: number | null;
   baseline_chunks_done: number;
   queue_position: number | null;
@@ -116,7 +125,7 @@ export interface MigrationSummary {
   chunks_done: number;
   chunks_failed: number;
   rows_loaded: number;
-  migration_mode: string;
+  strategy: Strategy;
   queue_position: number | null;
 }
 
@@ -145,10 +154,6 @@ interface PhaseColor { bg: string; text: string; border: string }
 const PHASE_COLORS: Record<string, PhaseColor> = {
   DRAFT:               { bg: t.border.subtle, text: t.text.secondary, border: t.border.base },
   NEW:                 { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
-  PREPARING:           { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
-  SCN_FIXED:           { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
-  CONNECTOR_STARTING:  { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
-  CDC_BUFFERING:       { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
   TOPIC_CREATING:      { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
   CHUNKING:            { bg: t.amber.bg, text: t.amber.fg, border: t.amber.dim },
   BULK_LOADING:        { bg: t.amber.bg, text: t.amber.fg, border: t.amber.dim },
@@ -162,7 +167,6 @@ const PHASE_COLORS: Record<string, PhaseColor> = {
   INDEXES_ENABLING:    { bg: t.bg.s2, text: t.green.fg, border: t.green.base },
   DATA_VERIFYING:      { bg: t.blue.bg, text: t.blue.fg, border: t.blue.dim },
   DATA_MISMATCH:       { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
-  CDC_APPLY_STARTING:  { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
   CDC_APPLYING:        { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
   CDC_CATCHING_UP:     { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
   CDC_CAUGHT_UP:       { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
@@ -181,14 +185,13 @@ export function phaseColor(phase: string): PhaseColor {
 }
 
 export const ORDERED_PHASES: MigrationPhase[] = [
-  "DRAFT", "NEW", "PREPARING", "SCN_FIXED",
-  "CONNECTOR_STARTING", "CDC_BUFFERING",
+  "DRAFT", "NEW",
   "TOPIC_CREATING",
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
   "STAGE_VALIDATING", "STAGE_VALIDATED",
   "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
   "STAGE_DROPPING", "INDEXES_ENABLING",
   "DATA_VERIFYING", "DATA_MISMATCH",
-  "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+  "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
   "STEADY_STATE",
 ];
