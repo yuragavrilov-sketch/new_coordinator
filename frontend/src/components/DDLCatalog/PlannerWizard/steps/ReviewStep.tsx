@@ -57,7 +57,6 @@ export function ReviewStep({
         </div>
         <div style={{ ...S.cardBody, flexDirection: "row", gap: 20, flexWrap: "wrap" }}>
           {([
-            ["Режим",       defaults.mode],
             ["Стратегия",   defaults.strategy],
             ["Chunk size",  defaults.chunk_size.toLocaleString("ru-RU")],
             ["Workers",     String(defaults.workers)],
@@ -81,7 +80,7 @@ export function ReviewStep({
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${t.border.subtle}` }}>
-                  {["#", "Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers"].map(h => (
+                  {["#", "Таблица", "Ключ", "Стратегия", "Chunk", "Workers"].map(h => (
                     <th key={h} style={S.th}>{h}</th>
                   ))}
                 </tr>
@@ -109,7 +108,6 @@ export function ReviewStep({
                           )}
                         </div>
                       </td>
-                      <td style={S.td}><span style={{ fontSize: 11, color: t.text.secondary }}>{item.mode}</span></td>
                       <td style={S.td}><span style={{ fontSize: 11, color: t.text.secondary }}>{item.strategy}</span></td>
                       <td style={S.td}><span style={{ fontSize: 11, color: t.text.secondary }}>{item.chunk_size.toLocaleString("ru-RU")}</span></td>
                       <td style={S.td}><span style={{ fontSize: 11, color: t.text.secondary }}>{item.workers}</span></td>

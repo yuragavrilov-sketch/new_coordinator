@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { S } from "../../styles";
 import { SearchSelect } from "../../../TargetPrep/SearchSelect";
+import { StrategyPicker } from "../../../StrategyPicker";
 import { TableKeyConfig } from "../TableKeyConfig";
 import type { BatchItem, ConnectorGroup, PlanDefaults, TableKeyEntry } from "../types";
 import { t } from "../../../../theme";
@@ -33,7 +34,6 @@ export function TableSelectionStep({
       if (next.has(table)) {
         next.delete(table);
         onTableSetting(table, {
-          mode:       defaults.mode,
           strategy:   defaults.strategy,
           chunk_size: defaults.chunk_size,
           workers:    defaults.workers,
@@ -53,7 +53,7 @@ export function TableSelectionStep({
           <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Глобальные настройки</span>
         </div>
         <div style={S.cardBody}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 10 }}>
             <div style={S.field}>
               <label style={S.label}>Chunk size</label>
               <input
@@ -70,28 +70,10 @@ export function TableSelectionStep({
                 style={S.input}
               />
             </div>
-            <div style={S.field}>
-              <label style={S.label}>Стратегия</label>
-              <select
-                value={defaults.strategy}
-                onChange={e => onDefaults({ ...defaults, strategy: e.target.value as "STAGE" | "DIRECT" })}
-                style={S.select}
-              >
-                <option value="STAGE">STAGE</option>
-                <option value="DIRECT">DIRECT</option>
-              </select>
-            </div>
-            <div style={S.field}>
-              <label style={S.label}>Режим</label>
-              <select
-                value={defaults.mode}
-                onChange={e => onDefaults({ ...defaults, mode: e.target.value as "CDC" | "BULK_ONLY" })}
-                style={S.select}
-              >
-                <option value="CDC">CDC</option>
-                <option value="BULK_ONLY">BULK_ONLY</option>
-              </select>
-            </div>
+            <StrategyPicker
+              value={defaults.strategy}
+              onChange={(s) => onDefaults({ ...defaults, strategy: s })}
+            />
           </div>
         </div>
       </div>
@@ -137,7 +119,7 @@ export function TableSelectionStep({
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${t.border.subtle}` }}>
-                {["Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers", "Индивидуально"].map(h => (
+                {["Таблица", "Ключ", "Стратегия", "Chunk", "Workers", "Индивидуально"].map(h => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
               </tr>
@@ -181,28 +163,10 @@ export function TableSelectionStep({
                       </td>
                       <td style={S.td}>
                         {isCustom ? (
-                          <select
-                            value={ts.mode}
-                            onChange={e => onTableSetting(table, { mode: e.target.value as "CDC" | "BULK_ONLY" })}
-                            style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
-                          >
-                            <option value="CDC">CDC</option>
-                            <option value="BULK_ONLY">BULK_ONLY</option>
-                          </select>
-                        ) : (
-                          <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.mode}</span>
-                        )}
-                      </td>
-                      <td style={S.td}>
-                        {isCustom ? (
-                          <select
+                          <StrategyPicker
                             value={ts.strategy}
-                            onChange={e => onTableSetting(table, { strategy: e.target.value as "STAGE" | "DIRECT" })}
-                            style={{ ...S.select, padding: "3px 6px", fontSize: 11 }}
-                          >
-                            <option value="STAGE">STAGE</option>
-                            <option value="DIRECT">DIRECT</option>
-                          </select>
+                            onChange={(s) => onTableSetting(table, { strategy: s })}
+                          />
                         ) : (
                           <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.strategy}</span>
                         )}
@@ -240,7 +204,7 @@ export function TableSelectionStep({
                     </tr>
                     {isExpanded && keyEntry && (
                       <tr>
-                        <td colSpan={7} style={{
+                        <td colSpan={6} style={{
                           padding: "10px 16px", background: t.bg.s1,
                           borderBottom: `1px solid ${t.border.subtle}`,
                         }}>

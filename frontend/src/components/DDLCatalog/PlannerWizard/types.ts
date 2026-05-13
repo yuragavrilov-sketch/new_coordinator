@@ -1,3 +1,5 @@
+import { Strategy } from "../../../types/migration";
+
 export interface Column   { name: string; type: string; nullable: boolean }
 export interface UkConstraint { name: string; columns: string[] }
 export interface TableInfo {
@@ -17,8 +19,7 @@ export interface TableKeyEntry {
 
 export interface BatchItem {
   table:      string;
-  mode:       "CDC" | "BULK_ONLY";
-  strategy:   "STAGE" | "DIRECT";
+  strategy:   Strategy;
   chunk_size: number;
   workers:    number;
 }
@@ -31,8 +32,7 @@ export interface Batch {
 export interface PlanDefaults {
   chunk_size: number;
   workers:    number;
-  strategy:   "STAGE" | "DIRECT";
-  mode:       "CDC" | "BULK_ONLY";
+  strategy:   Strategy;
 }
 
 export interface FKDep {

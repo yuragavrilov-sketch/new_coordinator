@@ -108,7 +108,7 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${t.border.subtle}` }}>
-                    {["#", "Таблица", "Режим", "Стратегия", "Порядок", "Переместить"].map(h => (
+                    {["#", "Таблица", "Стратегия", "Порядок", "Переместить"].map(h => (
                       <th key={h} style={S.th}>{h}</th>
                     ))}
                   </tr>
@@ -124,9 +124,6 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
                             <code style={{ color: t.text.primary, fontSize: 12 }}>{item.table}</code>
                             {hasDep && <span style={S.badge(`${t.amber.base}22`, t.amber.base)}>FK</span>}
                           </div>
-                        </td>
-                        <td style={S.td}>
-                          <span style={{ fontSize: 11, color: t.text.secondary }}>{item.mode}</span>
                         </td>
                         <td style={S.td}>
                           <span style={{ fontSize: 11, color: t.text.secondary }}>{item.strategy}</span>
