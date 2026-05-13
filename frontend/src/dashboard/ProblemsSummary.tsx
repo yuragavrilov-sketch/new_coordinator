@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { t } from "../theme";
 import { Icon } from "../components/ui";
 import { OBJECT_TYPES, type SchemaObject } from "./types";
+import { applyDdl, type DdlApplyAction } from "./api";
 
 interface Props {
   missing:      SchemaObject[];
@@ -9,7 +10,9 @@ interface Props {
   srcInvalid:   SchemaObject[];
   tgtInvalid:   SchemaObject[];
   bothInvalid:  SchemaObject[];
+  schemaMigrationId: string;
   onOpen:       (o: SchemaObject) => void;
+  onApplied?:   () => void;          // called after a successful submit
 }
 
 /** Card above the object table summarising decision-required objects:
@@ -19,7 +22,10 @@ interface Props {
  *  - INVALID in target only (post-migration breakage)
  *  - INVALID in both (pre-existing — verify, don't auto-fail)
  */
-export function ProblemsSummary({ missing, diff, srcInvalid, tgtInvalid, bothInvalid, onOpen }: Props) {
+export function ProblemsSummary({
+  missing, diff, srcInvalid, tgtInvalid, bothInvalid,
+  schemaMigrationId, onOpen, onApplied,
+}: Props) {
   const total = missing.length + diff.length + srcInvalid.length + tgtInvalid.length + bothInvalid.length;
   if (total === 0) return null;
 
@@ -53,12 +59,20 @@ export function ProblemsSummary({ missing, diff, srcInvalid, tgtInvalid, bothInv
           tone="warn"
           items={missing}
           onOpen={onOpen}
+          smId={schemaMigrationId}
+          action="create_missing"
+          actionLabel="Создать все"
+          onApplied={onApplied}
         />
         <Bucket
           label="DDL отличается — проверить и засинкать"
           tone="warn"
           items={diff}
           onOpen={onOpen}
+          smId={schemaMigrationId}
+          action="sync_diff"
+          actionLabel="Засинкать все"
+          onApplied={onApplied}
         />
         <Bucket
           label="INVALID в source — миграция перенесёт ошибку"
@@ -71,6 +85,10 @@ export function ProblemsSummary({ missing, diff, srcInvalid, tgtInvalid, bothInv
           tone="warn"
           items={tgtInvalid}
           onOpen={onOpen}
+          smId={schemaMigrationId}
+          action="recreate"
+          actionLabel="Пересоздать"
+          onApplied={onApplied}
         />
         <Bucket
           label="INVALID в обоих — pre-existing, проверить"
@@ -83,19 +101,53 @@ export function ProblemsSummary({ missing, diff, srcInvalid, tgtInvalid, bothInv
   );
 }
 
-function Bucket({ label, tone, items, onOpen }: {
+function Bucket({
+  label, tone, items, onOpen,
+  smId, action, actionLabel, onApplied,
+}: {
   label:   string;
   tone:    "info" | "warn" | "error";
   items:   SchemaObject[];
   onOpen:  (o: SchemaObject) => void;
+  smId?:        string;
+  action?:      DdlApplyAction;
+  actionLabel?: string;
+  onApplied?:   () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [busy,     setBusy]     = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
   if (items.length === 0) return null;
   const dotColor =
     tone === "error" ? t.tone.error :
     tone === "warn"  ? t.tone.warn  :
                        t.tone.info;
   const visible = expanded ? items : items.slice(0, 6);
+  const canApply = !!(smId && action && actionLabel);
+
+  const runApply = async () => {
+    if (!smId || !action) return;
+    if (!window.confirm(
+      `${actionLabel}: будут отправлены ${items.length} объект(ов) в worker. Продолжить?`,
+    )) return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const r = await applyDdl(
+        smId, action,
+        items.map(o => ({ type: o.type, name: o.name })),
+      );
+      const msg = r.skipped.length
+        ? `Очередь: ${r.queued}, пропущено: ${r.skipped.length}`
+        : `Очередь: ${r.queued}`;
+      setFeedback(msg);
+      onApplied?.();
+    } catch (e) {
+      setFeedback(`Ошибка: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -106,6 +158,7 @@ function Bucket({ label, tone, items, onOpen }: {
           background: "none", border: "none",
           padding: "4px 0", cursor: "pointer",
           textAlign: "left", color: t.text.primary,
+          width: "100%",
         }}
       >
         <span aria-hidden style={{
@@ -116,11 +169,42 @@ function Bucket({ label, tone, items, onOpen }: {
         <span style={{ fontFamily: t.font.mono, fontSize: 11, color: t.text.muted }}>
           {items.length}
         </span>
-        {items.length > 6 && (
-          <span style={{ color: t.text.muted, fontSize: 11, marginLeft: "auto" }}>
-            {expanded ? "свернуть" : `показать все`}
-          </span>
-        )}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          {feedback && (
+            <span style={{ fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+              {feedback}
+            </span>
+          )}
+          {canApply && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={e => { e.stopPropagation(); if (!busy) runApply(); }}
+              onKeyDown={e => {
+                if ((e.key === "Enter" || e.key === " ") && !busy) {
+                  e.preventDefault(); e.stopPropagation(); runApply();
+                }
+              }}
+              aria-disabled={busy}
+              style={{
+                fontSize: 11, padding: "3px 9px",
+                borderRadius: t.radius.pill,
+                background:  busy ? t.bg.s2 : t.tone.accentSoft,
+                color:       busy ? t.text.muted : t.tone.accent,
+                border:      `1px solid ${t.border.subtle}`,
+                cursor:      busy ? "default" : "pointer",
+                userSelect:  "none",
+              }}
+            >
+              {busy ? "…" : actionLabel}
+            </span>
+          )}
+          {items.length > 6 && (
+            <span style={{ color: t.text.muted, fontSize: 11 }}>
+              {expanded ? "свернуть" : `показать все`}
+            </span>
+          )}
+        </span>
       </button>
       <div style={{
         display: "flex", flexWrap: "wrap", gap: 4,

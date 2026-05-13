@@ -224,14 +224,18 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         onLoaded={() => objectsApi.reload()}
       />
 
-      <ProblemsSummary
-        missing={problems.missing}
-        diff={problems.diff}
-        srcInvalid={problems.srcInvalid}
-        tgtInvalid={problems.tgtInvalid}
-        bothInvalid={problems.bothInvalid}
-        onOpen={o => setOpenObject(o)}
-      />
+      {selectedId && (
+        <ProblemsSummary
+          missing={problems.missing}
+          diff={problems.diff}
+          srcInvalid={problems.srcInvalid}
+          tgtInvalid={problems.tgtInvalid}
+          bothInvalid={problems.bothInvalid}
+          schemaMigrationId={selectedId}
+          onOpen={o => setOpenObject(o)}
+          onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
+        />
+      )}
 
 
       <ObjectTable
@@ -247,6 +251,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           events={events}
           onClose={() => setOpenObject(null)}
           onAction={(o, a) => console.log("drawer action", a, o.name)}
+          onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
         />
       )}
       {wizardOpen && (

@@ -512,7 +512,10 @@ def _load_migration_detail(conn, src_schema: str, tgt_schema: str, migration_id:
 
 
 def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
-    """Return recent migration_state_history entries across all child migrations."""
+    """Merge two event streams (per-migration phase history + schema-level
+    events such as DDL apply jobs), ordered by time, newest first."""
+    events: list[tuple] = []  # (created_at, obj, level, msg)
+
     with conn.cursor() as cur:
         cur.execute("""
             SELECT
@@ -528,19 +531,35 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
             ORDER BY msh.created_at DESC
             LIMIT %s
         """, (sm_id, limit))
-        events = []
         for r in cur.fetchall():
-            obj, created_at, from_phase, to_phase, status, reason, message = r
+            obj, created_at, from_phase, to_phase, status, _reason, message = r
             level = "error" if status == "FAILED" else "warn" if to_phase == "DATA_MISMATCH" else "info"
-            time_str = created_at.strftime("%H:%M:%S") if created_at else ""
             msg = message or f"{from_phase or '—'} → {to_phase}"
-            events.append({
-                "t": time_str,
-                "obj": obj or "—",
-                "level": level,
-                "msg": msg,
-            })
-        return events
+            events.append((created_at, obj or "—", level, msg))
+
+        cur.execute("""
+            SELECT created_at, object_type, object_name, event_type, level, message
+            FROM   schema_migration_events
+            WHERE  schema_migration_id = %s
+            ORDER BY created_at DESC
+            LIMIT  %s
+        """, (sm_id, limit))
+        for r in cur.fetchall():
+            created_at, otype, oname, event_type, lvl, message = r
+            obj = oname or otype or "—"
+            msg = message or event_type
+            events.append((created_at, obj, lvl or "info", msg))
+
+    events.sort(key=lambda e: e[0] or 0, reverse=True)
+    out = []
+    for created_at, obj, level, msg in events[:limit]:
+        out.append({
+            "t":     created_at.strftime("%H:%M:%S") if created_at else "",
+            "obj":   obj,
+            "level": level,
+            "msg":   msg,
+        })
+    return out
 
 
 def get_metrics(conn, sm_id: str) -> dict:

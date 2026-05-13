@@ -14,6 +14,7 @@ POST   /api/schema-migrations/:id/rollback → cancel (mark child migrations)
 from flask import Blueprint, jsonify, request
 
 import services.schema_migrations as svc
+import services.ddl_apply_jobs as ddl_jobs
 
 bp = Blueprint("schema_migrations", __name__)
 
@@ -156,6 +157,54 @@ def _set_paused(sm_id: str, paused: bool):
             "id": sm_id,
         })
         return jsonify({"ok": True, "paused": paused})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
+@bp.post("/api/schema-migrations/<sm_id>/ddl-apply")
+def ddl_apply(sm_id: str):
+    """Queue DDL apply jobs.
+
+    Body: {"action": "create_missing"|"sync_diff"|"recreate",
+           "objects": [{"type": "TABLE"|"MVIEW"|..., "name": "FOO"}]}
+    """
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    payload = request.get_json(silent=True) or {}
+    action  = payload.get("action") or ""
+    objects = payload.get("objects") or []
+    if not action:
+        return jsonify({"error": "action required"}), 400
+    if not isinstance(objects, list) or not objects:
+        return jsonify({"error": "objects required"}), 400
+    conn = _state["get_conn"]()
+    try:
+        result = ddl_jobs.submit_jobs(conn, sm_id, action, objects)
+        _state["broadcast"]({
+            "type":   "ddl_apply.queued",
+            "sm_id":  sm_id,
+            "action": action,
+            "queued": result["queued"],
+        })
+        return jsonify(result), 202
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
+@bp.get("/api/schema-migrations/<sm_id>/ddl-jobs")
+def list_ddl_jobs(sm_id: str):
+    if not _db_ok():
+        return jsonify([])
+    limit = int(request.args.get("limit", 100))
+    conn = _state["get_conn"]()
+    try:
+        return jsonify(ddl_jobs.list_jobs(conn, sm_id, limit=limit))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     finally:

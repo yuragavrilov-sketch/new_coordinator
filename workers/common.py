@@ -563,6 +563,108 @@ def fail_compare_chunk(conn, chunk_id: str, error_text: str) -> Optional[str]:
     return str(task_id)
 
 
+# ---------------------------------------------------------------------------
+# DDL apply jobs
+# ---------------------------------------------------------------------------
+
+def claim_ddl_apply_job(conn) -> Optional[dict]:
+    """Atomically claim one PENDING ddl_apply_jobs row for this worker.
+
+    Returns dict with job + schema-migration context (src/tgt schemas), or None.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH candidate AS (
+                SELECT j.job_id
+                FROM   ddl_apply_jobs j
+                WHERE  j.state = 'PENDING'
+                ORDER BY j.created_at
+                FOR UPDATE OF j SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE ddl_apply_jobs
+            SET    state      = 'CLAIMED',
+                   worker_id  = %s,
+                   claimed_at = NOW(),
+                   started_at = NOW()
+            WHERE  job_id = (SELECT job_id FROM candidate)
+            RETURNING job_id, schema_migration_id, action,
+                      object_type, object_name
+        """, (WORKER_ID,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        job_id, sm_id, action, object_type, object_name = row
+
+        cur.execute("""
+            SELECT src_schema, tgt_schema
+            FROM   schema_migrations
+            WHERE  schema_migration_id = %s
+        """, (sm_id,))
+        srow = cur.fetchone()
+        if not srow:
+            conn.rollback()
+            return None
+        src_schema, tgt_schema = srow
+    conn.commit()
+    return {
+        "job_id":              str(job_id),
+        "schema_migration_id": str(sm_id),
+        "action":              action,
+        "object_type":         object_type,
+        "object_name":         object_name,
+        "src_schema":          src_schema,
+        "tgt_schema":          tgt_schema,
+    }
+
+
+def complete_ddl_apply_job(conn, job_id: str, applied_ddl: str | None) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE ddl_apply_jobs
+            SET    state        = 'DONE',
+                   applied_ddl  = %s,
+                   completed_at = NOW()
+            WHERE  job_id       = %s
+        """, (applied_ddl, job_id))
+    conn.commit()
+
+
+def fail_ddl_apply_job(conn, job_id: str, error_text: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE ddl_apply_jobs
+            SET    state        = 'FAILED',
+                   error_text   = %s,
+                   completed_at = NOW()
+            WHERE  job_id       = %s
+        """, (error_text[:4000], job_id))
+    conn.commit()
+
+
+def log_sm_event(
+    conn, sm_id: str, event_type: str,
+    *,
+    object_type: str | None = None,
+    object_name: str | None = None,
+    level: str = "info",
+    message: str = "",
+    job_id: str | None = None,
+) -> None:
+    """Persist a schema-migration-scope event. Read by the dashboard via
+    /api/schema-migrations/:id/events."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO schema_migration_events
+                (schema_migration_id, event_type, object_type, object_name,
+                 level, message, job_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (sm_id, event_type, object_type, object_name,
+              level, message[:4000], job_id))
+    conn.commit()
+
+
 def trigger_lag_zero(conn, migration_id: str) -> None:
     """
     Transition migration CDC_CATCHING_UP → CDC_CAUGHT_UP when lag reaches 0.

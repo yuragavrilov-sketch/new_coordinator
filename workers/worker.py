@@ -841,6 +841,13 @@ def main() -> None:
     )
     cmp.start()
 
+    from ddl_apply_worker import ddl_apply_loop
+    ddl = threading.Thread(
+        target=ddl_apply_loop, args=(main_stop,),
+        name="ddl-apply", daemon=True,
+    )
+    ddl.start()
+
     try:
         bulk_loop()
     except KeyboardInterrupt:
@@ -848,6 +855,7 @@ def main() -> None:
         main_stop.set()
         mgr.join(timeout=15)
         cmp.join(timeout=10)
+        ddl.join(timeout=10)
         print("[worker] stopped")
 
 

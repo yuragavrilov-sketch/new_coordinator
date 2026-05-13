@@ -631,6 +631,61 @@ def init_db() -> None:
                     ON schema_migrations(created_at DESC)
             """)
 
+            # ── ddl_apply_jobs ───────────────────────────────────────────
+            # Async DDL apply queue. Workers claim jobs via SELECT … FOR UPDATE
+            # SKIP LOCKED (same pattern as migration_chunks). Three actions:
+            #   create_missing — create object on target (idempotent: ORA-00955 = ok)
+            #   sync_diff      — CREATE OR REPLACE (only for replaceable types)
+            #   recreate       — DROP + CREATE (dangerous; refuses TABLE w/o force)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ddl_apply_jobs (
+                    job_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    schema_migration_id UUID NOT NULL REFERENCES schema_migrations(schema_migration_id) ON DELETE CASCADE,
+                    action              VARCHAR(32)  NOT NULL,
+                    object_type         VARCHAR(64)  NOT NULL,
+                    object_name         VARCHAR(128) NOT NULL,
+                    state               VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+                    worker_id           VARCHAR(200),
+                    source_ddl          TEXT,
+                    applied_ddl         TEXT,
+                    error_text          TEXT,
+                    claimed_at          TIMESTAMPTZ,
+                    started_at          TIMESTAMPTZ,
+                    completed_at        TIMESTAMPTZ,
+                    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ddl_apply_jobs_pending
+                    ON ddl_apply_jobs(state, created_at)
+                    WHERE state = 'PENDING'
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ddl_apply_jobs_sm
+                    ON ddl_apply_jobs(schema_migration_id, created_at DESC)
+            """)
+
+            # ── schema_migration_events ──────────────────────────────────
+            # Top-level events at the schema-migration scope (not tied to one
+            # child migration). Used for DDL-apply progress + future actions.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS schema_migration_events (
+                    id                  BIGSERIAL PRIMARY KEY,
+                    schema_migration_id UUID NOT NULL REFERENCES schema_migrations(schema_migration_id) ON DELETE CASCADE,
+                    event_type          VARCHAR(64)  NOT NULL,
+                    object_type         VARCHAR(64),
+                    object_name         VARCHAR(128),
+                    level               VARCHAR(16)  NOT NULL DEFAULT 'info',
+                    message             TEXT,
+                    job_id              UUID,
+                    created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_sm_events_sm_created
+                    ON schema_migration_events(schema_migration_id, created_at DESC)
+            """)
+
         conn.commit()
         print("[state_db] schema init complete")
     finally:

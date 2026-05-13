@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { t } from "../theme";
 import {
   Icon, ObjStatusBadge, ProgressBar,
@@ -6,7 +6,7 @@ import {
 import { useApi } from "../hooks/useApi";
 import { fmtCompactNum, fmtMb } from "../utils/format";
 import { STATUS_MAP, OBJECT_TYPES, type SchemaObject, type MigrationEvent } from "./types";
-import type { ObjectDetailResp, DdlDetailResp, MigrationDetailResp } from "./api";
+import { applyDdl, type DdlApplyAction, type ObjectDetailResp, type DdlDetailResp, type MigrationDetailResp } from "./api";
 import { DiffSections } from "./DiffSections";
 
 interface Props {
@@ -15,12 +15,45 @@ interface Props {
   events:            MigrationEvent[];
   onClose:           () => void;
   onAction:          (o: SchemaObject, action: "pause" | "retry" | "rollback") => void;
+  onApplied?:        () => void;
 }
 
-export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, onAction }: Props) {
+/** Pick the most reasonable DDL apply action for this object's problem. */
+function detectApplyAction(o: SchemaObject): { action: DdlApplyAction; label: string } | null {
+  if (!o.id.startsWith("ddl-")) return null;
+  const note = (o.note || "").toLowerCase();
+  if (note.startsWith("нет в target")) return { action: "create_missing", label: "Создать на target" };
+  if (note.startsWith("ddl отличается")) return { action: "sync_diff", label: "Засинкать DDL" };
+  if (note.includes("invalid в target")) return { action: "recreate", label: "Пересоздать" };
+  return null;
+}
+
+export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, onAction, onApplied }: Props) {
   const detail = useApi<ObjectDetailResp>(
     `/api/schema-migrations/${schemaMigrationId}/objects/${encodeURIComponent(o.id)}/detail`,
   );
+  const [applyBusy,     setApplyBusy]     = useState(false);
+  const [applyFeedback, setApplyFeedback] = useState<string | null>(null);
+  const applyOpt = detectApplyAction(o);
+
+  const runApply = async () => {
+    if (!applyOpt) return;
+    if (!window.confirm(`${applyOpt.label}: ${o.type} ${o.name} на target. Продолжить?`)) return;
+    setApplyBusy(true);
+    setApplyFeedback(null);
+    try {
+      const r = await applyDdl(schemaMigrationId, applyOpt.action,
+        [{ type: o.type, name: o.name }]);
+      setApplyFeedback(r.skipped.length
+        ? `пропущено: ${r.skipped[0].reason}`
+        : "поставлено в очередь");
+      onApplied?.();
+    } catch (e) {
+      setApplyFeedback(`ошибка: ${(e as Error).message}`);
+    } finally {
+      setApplyBusy(false);
+    }
+  };
   const status = o.status;
   const tone =
     status === "error" ? "error" :
@@ -188,7 +221,32 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
                   {o.note}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                {applyOpt && (
+                  <button
+                    onClick={runApply}
+                    disabled={applyBusy}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      padding: "5px 10px",
+                      borderRadius: t.radius.sm,
+                      fontSize: 12, fontWeight: 600,
+                      cursor: applyBusy ? "default" : "pointer",
+                      background: applyBusy ? t.bg.s2 : t.tone.accent,
+                      color:      applyBusy ? t.text.muted : t.text.inverse,
+                      border:     `1px solid ${t.tone.accent}`,
+                      opacity:    applyBusy ? 0.7 : 1,
+                    }}
+                  >
+                    <Icon name="rotate" size={13}/>
+                    {applyBusy ? "…" : applyOpt.label}
+                  </button>
+                )}
+                {applyFeedback && (
+                  <span style={{ fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+                    {applyFeedback}
+                  </span>
+                )}
                 {status === "error" && (
                   <ActionBtn icon="rotate" label="Повторить" primary onClick={() => onAction(o, "retry")}/>
                 )}

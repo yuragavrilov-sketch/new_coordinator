@@ -111,3 +111,46 @@ export async function rollback(id: string): Promise<number> {
   const j = await r.json();
   return j.affected as number;
 }
+
+export type DdlApplyAction = "create_missing" | "sync_diff" | "recreate";
+
+export interface DdlApplyResp {
+  queued:   number;
+  job_ids:  string[];
+  skipped:  Array<{ type: string; name: string; reason: string }>;
+}
+
+export async function applyDdl(
+  smId:    string,
+  action:  DdlApplyAction,
+  objects: Array<{ type: string; name: string }>,
+): Promise<DdlApplyResp> {
+  const r = await fetch(`/api/schema-migrations/${smId}/ddl-apply`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ action, objects }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(t || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+export interface DdlJob {
+  job_id:       string;
+  action:       DdlApplyAction;
+  object_type:  string;
+  object_name:  string;
+  state:        "PENDING" | "CLAIMED" | "RUNNING" | "DONE" | "FAILED" | "CANCELLED";
+  error_text:   string | null;
+  created_at:   string | null;
+  started_at:   string | null;
+  completed_at: string | null;
+}
+
+export async function listDdlJobs(smId: string, limit = 100): Promise<DdlJob[]> {
+  const r = await fetch(`/api/schema-migrations/${smId}/ddl-jobs?limit=${limit}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
