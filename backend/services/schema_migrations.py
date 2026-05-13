@@ -135,6 +135,7 @@ def _aggregate_status(children_phases: list[str], any_failed: bool, paused: bool
 # Oracle object_type (as stored in ddl_objects) → frontend ObjectType enum
 _DDL_TYPE_MAP = {
     "TABLE":             "TABLE",
+    "INDEX":             "INDEX",
     "MATERIALIZED VIEW": "MVIEW",
     "PACKAGE":           "PACKAGE",
     "PROCEDURE":         "PROCEDURE",
@@ -144,13 +145,15 @@ _DDL_TYPE_MAP = {
     "SEQUENCE":          "SEQUENCE",
     "SYNONYM":           "SYNONYM",
     "TYPE":              "TYPE",
+    "DATABASE LINK":     "DBLINK",
+    "JOB":               "JOB",
 }
 
 # match_status → (ObjectStatus, compat%, warn_count, err_count, note_prefix)
 _MATCH_MAP = {
     "MATCH":   ("done",   100, 0, 0, ""),
     "DIFF":    ("warn",    85, 1, 0, "DDL отличается"),
-    "MISSING": ("queued", 100, 0, 0, "ещё нет в target"),
+    "MISSING": ("warn",    90, 1, 0, "нет в target — нужно создать"),
     "EXTRA":   ("skipped",100, 0, 0, "только в target"),
     "ERROR":   ("error",   70, 0, 1, ""),
     "UNKNOWN": ("queued", 100, 0, 0, ""),
@@ -167,18 +170,34 @@ _FE_TYPE_TO_ORACLE = {v: k for k, v in _DDL_TYPE_MAP.items()}
 
 
 def _build_ddl_object(
-    object_type: str, object_name: str, oracle_status: str | None,
+    object_type: str, object_name: str,
+    src_status: str | None, tgt_status: str | None,
     match_status: str, diff_json,
 ) -> dict:
-    """Convert a (ddl_objects + ddl_compare_results) row → SchemaObject."""
+    """Convert a (ddl_objects + ddl_compare_results) row → SchemaObject.
+
+    src_status / tgt_status: Oracle `oracle_status` для source и target.
+    Когда оба INVALID — pre-existing breakage, переводим в warn (не блокирует
+    миграцию, но требует человеческого решения). Только source INVALID —
+    error: миграция перенесёт сломанный DDL.
+    """
     fe_type = _DDL_TYPE_MAP.get(object_type, object_type)
     status, compat, warn, err, note = _MATCH_MAP.get(match_status, _MATCH_MAP["UNKNOWN"])
 
-    # INVALID oracle objects → warn even if DDL matches
-    if oracle_status and oracle_status.upper() == "INVALID" and status == "done":
-        status = "warn"
-        warn = 1
-        note = note or "INVALID в Oracle"
+    src_invalid = (src_status or "").upper() == "INVALID"
+    tgt_invalid = (tgt_status or "").upper() == "INVALID"
+    if src_invalid and tgt_invalid:
+        status = "warn" if status in ("done", "queued") else status
+        warn = max(warn, 1)
+        note = "INVALID в обоих — проверить" if not note else f"INVALID в обоих; {note}"
+    elif src_invalid:
+        status = "error"
+        err = max(err, 1)
+        note = "INVALID в source — миграция перенесёт ошибку"
+    elif tgt_invalid:
+        status = "warn" if status == "done" else status
+        warn = max(warn, 1)
+        note = "INVALID в target — требуется пересоздать"
 
     # Light note from diff (first failing field)
     if not note and isinstance(diff_json, dict):
@@ -207,6 +226,8 @@ def _build_ddl_object(
         "eta":        "—",
         "dur":        "<1s",
         "note":       note,
+        "srcStatus":  src_status or "",
+        "tgtStatus":  tgt_status or "",
     }
 
 
@@ -335,17 +356,24 @@ def get_objects(conn, sm_id: str) -> list[dict]:
         if snap:
             snapshot_id = snap[0]
             cur.execute("""
-                SELECT o.object_type, o.object_name, o.oracle_status,
+                SELECT s.object_type, s.object_name,
+                       s.oracle_status        AS src_status,
+                       tg.oracle_status       AS tgt_status,
                        COALESCE(c.match_status, 'UNKNOWN') AS match_status,
                        c.diff
-                FROM   ddl_objects o
+                FROM   ddl_objects s
+                LEFT   JOIN ddl_objects tg
+                       ON tg.snapshot_id = s.snapshot_id
+                       AND tg.db_side = 'target'
+                       AND tg.object_type = s.object_type
+                       AND tg.object_name = s.object_name
                 LEFT   JOIN ddl_compare_results c
-                       ON c.snapshot_id = o.snapshot_id
-                       AND c.object_type = o.object_type
-                       AND c.object_name = o.object_name
-                WHERE  o.snapshot_id = %s
-                  AND  o.db_side = 'source'
-                ORDER BY o.object_type, o.object_name
+                       ON c.snapshot_id = s.snapshot_id
+                       AND c.object_type = s.object_type
+                       AND c.object_name = s.object_name
+                WHERE  s.snapshot_id = %s
+                  AND  s.db_side = 'source'
+                ORDER BY s.object_type, s.object_name
             """, (snapshot_id,))
             for r in cur.fetchall():
                 otype, oname = r[0], r[1]

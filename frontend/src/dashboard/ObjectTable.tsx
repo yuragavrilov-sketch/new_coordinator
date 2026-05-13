@@ -27,6 +27,8 @@ const TYPE_COLORS: Record<ObjectType, { bg: string; fg: string }> = {
   TYPE:      { bg: t.bg.s3, fg: t.text.secondary },
   SYNONYM:   { bg: t.bg.s3, fg: t.text.muted     },
   GRANT:     { bg: t.bg.s3, fg: t.text.muted     },
+  DBLINK:    { bg: t.bg.s3, fg: t.text.muted     },
+  JOB:       { bg: "color-mix(in oklab, oklch(0.65 0.11 240) 14%, transparent)", fg: "oklch(0.5 0.13 240)" },
 };
 
 export function ObjectTable({ objects, layout = "flat", onOpen, onAction }: Props) {

@@ -7,7 +7,8 @@ export type ObjectStatus =
 export type ObjectType =
   | "TABLE" | "INDEX" | "MVIEW" | "SEQUENCE"
   | "VIEW" | "PACKAGE" | "PROCEDURE" | "FUNCTION"
-  | "TRIGGER" | "TYPE" | "SYNONYM" | "GRANT";
+  | "TRIGGER" | "TYPE" | "SYNONYM" | "GRANT"
+  | "DBLINK" | "JOB";
 
 export type SchemaStatus =
   | "running" | "cdc" | "paused" | "error"
@@ -53,6 +54,8 @@ export interface SchemaObject {
   eta:        string;
   dur:        string;
   note:       string;
+  srcStatus?: string;        // Oracle VALID/INVALID on source side (DDL objects)
+  tgtStatus?: string;        // Oracle VALID/INVALID on target side
 }
 
 export interface MigrationEvent {
@@ -106,4 +109,6 @@ export const OBJECT_TYPES: Record<ObjectType, { label: string; group: string; or
   TYPE:      { label: "TYPE",      group: "Код",     ord: 10 },
   SYNONYM:   { label: "SYNONYM",   group: "Доступ",  ord: 11 },
   GRANT:     { label: "GRANT",     group: "Доступ",  ord: 12 },
+  DBLINK:    { label: "DBLINK",    group: "Доступ",  ord: 13 },
+  JOB:       { label: "JOB",       group: "Код",     ord: 14 },
 };

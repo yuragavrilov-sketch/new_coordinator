@@ -13,6 +13,7 @@ _CATALOG_TYPES = frozenset([
     "TABLE", "VIEW", "MATERIALIZED VIEW",
     "FUNCTION", "PROCEDURE", "PACKAGE",
     "SEQUENCE", "SYNONYM", "TYPE",
+    "TRIGGER", "INDEX", "DATABASE LINK", "JOB",
 ])
 
 
@@ -244,6 +245,129 @@ def get_sequence_info(conn, schema: str, name: str) -> dict:
         "increment_by": str(row[2]) if row[2] is not None else None,
         "cache_size": row[3],
         "last_number": str(row[4]) if row[4] is not None else None,
+    }
+
+
+def get_trigger_info(conn, schema: str, name: str) -> dict:
+    """Get trigger header + body."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT trigger_type, triggering_event, table_owner, table_name,
+                   status, when_clause, trigger_body, base_object_type,
+                   action_type
+            FROM   all_triggers
+            WHERE  owner = :s AND trigger_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+    if not row:
+        return {}
+    # trigger_body is CLOB
+    body = row[6]
+    if body is not None and not isinstance(body, str):
+        try:
+            body = body.read()
+        except Exception:
+            body = str(body)
+    when_clause = row[5]
+    if when_clause is not None and not isinstance(when_clause, str):
+        try:
+            when_clause = when_clause.read()
+        except Exception:
+            when_clause = str(when_clause)
+    return {
+        "trigger_type":     row[0],
+        "triggering_event": row[1],
+        "table_owner":      row[2],
+        "table_name":       row[3],
+        "status":           row[4],
+        "when_clause":      when_clause,
+        "trigger_body":     body,
+        "base_object_type": row[7],
+        "action_type":      row[8],
+    }
+
+
+def get_index_info(conn, schema: str, name: str) -> dict:
+    """Get index columns + properties."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT table_owner, table_name, uniqueness, index_type,
+                   status, partitioned, tablespace_name
+            FROM   all_indexes
+            WHERE  owner = :s AND index_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+        if not row:
+            return {}
+        cur.execute("""
+            SELECT column_name, column_position, descend
+            FROM   all_ind_columns
+            WHERE  index_owner = :s AND index_name = :n
+            ORDER  BY column_position
+        """, {"s": schema, "n": name})
+        cols = [
+            {"name": c[0], "position": c[1], "descending": c[2] == "DESC"}
+            for c in cur.fetchall()
+        ]
+    return {
+        "table_owner":    row[0],
+        "table_name":     row[1],
+        "uniqueness":     row[2],
+        "index_type":     row[3],
+        "status":         row[4],
+        "partitioned":    row[5] == "YES",
+        "tablespace":     row[6],
+        "columns":        cols,
+    }
+
+
+def get_db_link_info(conn, schema: str, name: str) -> dict:
+    """Get database-link target info. NB: in Oracle, all_db_links is keyed
+    by owner = SCHEMA + 'PUBLIC'. We filter by owner = schema."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT db_link, username, host, created
+            FROM   all_db_links
+            WHERE  owner = :s AND db_link = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+    if not row:
+        return {}
+    return {
+        "db_link":  row[0],
+        "username": row[1],
+        "host":     row[2],
+        "created":  row[3].isoformat() if row[3] else None,
+    }
+
+
+def get_job_info(conn, schema: str, name: str) -> dict:
+    """Get scheduler job parameters (subset)."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT job_name, job_type, job_action, schedule_type,
+                   start_date, repeat_interval, enabled, state
+            FROM   all_scheduler_jobs
+            WHERE  owner = :s AND job_name = :n
+        """, {"s": schema, "n": name})
+        row = cur.fetchone()
+    if not row:
+        return {}
+    action = row[2]
+    if action is not None and not isinstance(action, str):
+        try:
+            action = action.read()
+        except Exception:
+            action = str(action)
+    return {
+        "job_name":        row[0],
+        "job_type":        row[1],
+        "job_action":      action,
+        "schedule_type":   row[3],
+        "start_date":      row[4].isoformat() if row[4] else None,
+        "repeat_interval": row[5],
+        "enabled":         row[6] == "TRUE",
+        "state":           row[7],
     }
 
 

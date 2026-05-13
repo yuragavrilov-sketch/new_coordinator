@@ -127,18 +127,77 @@ def _diff_synonym(src_meta: dict, tgt_meta: dict) -> dict:
     return {"ok": len(diffs) == 0, "field_diffs": diffs}
 
 
+def _diff_trigger(src_meta: dict, tgt_meta: dict) -> dict:
+    header_fields = ["trigger_type", "triggering_event", "status",
+                     "base_object_type", "action_type", "table_name"]
+    field_diffs = {
+        f: (src_meta.get(f), tgt_meta.get(f))
+        for f in header_fields if src_meta.get(f) != tgt_meta.get(f)
+    }
+    when_match = _normalize_code(src_meta.get("when_clause")) == _normalize_code(tgt_meta.get("when_clause"))
+    body_match = _normalize_code(src_meta.get("trigger_body")) == _normalize_code(tgt_meta.get("trigger_body"))
+    return {
+        "ok": not field_diffs and when_match and body_match,
+        "field_diffs": field_diffs,
+        "when_match":  when_match,
+        "body_match":  body_match,
+    }
+
+
+def _diff_index(src_meta: dict, tgt_meta: dict) -> dict:
+    header_fields = ["uniqueness", "index_type", "status", "table_name", "partitioned"]
+    field_diffs = {
+        f: (src_meta.get(f), tgt_meta.get(f))
+        for f in header_fields if src_meta.get(f) != tgt_meta.get(f)
+    }
+    src_cols = [(c.get("name"), c.get("descending")) for c in (src_meta.get("columns") or [])]
+    tgt_cols = [(c.get("name"), c.get("descending")) for c in (tgt_meta.get("columns") or [])]
+    cols_match = src_cols == tgt_cols
+    return {
+        "ok": not field_diffs and cols_match,
+        "field_diffs": field_diffs,
+        "cols_match":  cols_match,
+        "src_cols":    src_cols,
+        "tgt_cols":    tgt_cols,
+    }
+
+
+def _diff_db_link(src_meta: dict, tgt_meta: dict) -> dict:
+    fields = ["username", "host"]
+    diffs = {f: (src_meta.get(f), tgt_meta.get(f)) for f in fields if src_meta.get(f) != tgt_meta.get(f)}
+    return {"ok": len(diffs) == 0, "field_diffs": diffs}
+
+
+def _diff_job(src_meta: dict, tgt_meta: dict) -> dict:
+    header_fields = ["job_type", "schedule_type", "repeat_interval", "enabled", "state"]
+    field_diffs = {
+        f: (src_meta.get(f), tgt_meta.get(f))
+        for f in header_fields if src_meta.get(f) != tgt_meta.get(f)
+    }
+    action_match = _normalize_code(src_meta.get("job_action")) == _normalize_code(tgt_meta.get("job_action"))
+    return {
+        "ok": not field_diffs and action_match,
+        "field_diffs":  field_diffs,
+        "action_match": action_match,
+    }
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 _COMPARATORS = {
-    "TABLE": _diff_table,
-    "VIEW": _diff_view,
+    "TABLE":             _diff_table,
+    "VIEW":              _diff_view,
     "MATERIALIZED VIEW": _diff_mview,
-    "FUNCTION": lambda s, t: _diff_code(s, t, "FUNCTION"),
-    "PROCEDURE": lambda s, t: _diff_code(s, t, "PROCEDURE"),
-    "PACKAGE": lambda s, t: _diff_code(s, t, "PACKAGE"),
-    "TYPE": lambda s, t: _diff_code(s, t, "TYPE"),
-    "SEQUENCE": _diff_sequence,
-    "SYNONYM": _diff_synonym,
+    "FUNCTION":          lambda s, t: _diff_code(s, t, "FUNCTION"),
+    "PROCEDURE":         lambda s, t: _diff_code(s, t, "PROCEDURE"),
+    "PACKAGE":           lambda s, t: _diff_code(s, t, "PACKAGE"),
+    "TYPE":              lambda s, t: _diff_code(s, t, "TYPE"),
+    "SEQUENCE":          _diff_sequence,
+    "SYNONYM":           _diff_synonym,
+    "TRIGGER":           _diff_trigger,
+    "INDEX":             _diff_index,
+    "DATABASE LINK":     _diff_db_link,
+    "JOB":               _diff_job,
 }
 
 

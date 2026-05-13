@@ -7,6 +7,7 @@ import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
 import { DashboardEmptyState } from "./EmptyState";
 import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
+import { ProblemsSummary } from "./ProblemsSummary";
 import { fmtCompactNum } from "../utils/format";
 import { useApi } from "../hooks/useApi";
 import type { SSEEvent } from "../hooks/useSSE";
@@ -67,6 +68,26 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
       else if (o.status === "done") c.done++;
     });
     return c;
+  }, [objects]);
+
+  // Categorize problem objects for the user's "what's broken" view
+  const problems = useMemo(() => {
+    const missing:     SchemaObject[] = [];          // нет в target
+    const diff:        SchemaObject[] = [];          // DDL отличается
+    const srcInvalid:  SchemaObject[] = [];          // INVALID в source
+    const tgtInvalid:  SchemaObject[] = [];          // INVALID в target (но valid в source)
+    const bothInvalid: SchemaObject[] = [];          // INVALID и там и там
+    for (const o of objects) {
+      const note = o.note || "";
+      const si = (o.srcStatus || "").toUpperCase() === "INVALID";
+      const ti = (o.tgtStatus || "").toUpperCase() === "INVALID";
+      if (si && ti) bothInvalid.push(o);
+      else if (si) srcInvalid.push(o);
+      else if (ti) tgtInvalid.push(o);
+      if (note.startsWith("нет в target")) missing.push(o);
+      else if (note.startsWith("DDL отличается")) diff.push(o);
+    }
+    return { missing, diff, srcInvalid, tgtInvalid, bothInvalid };
   }, [objects]);
 
   // Filtered + sorted
@@ -201,6 +222,15 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         tgtSchema={schema.tgt_schema || ""}
         sseEvents={sseEvents}
         onLoaded={() => objectsApi.reload()}
+      />
+
+      <ProblemsSummary
+        missing={problems.missing}
+        diff={problems.diff}
+        srcInvalid={problems.srcInvalid}
+        tgtInvalid={problems.tgtInvalid}
+        bothInvalid={problems.bothInvalid}
+        onOpen={o => setOpenObject(o)}
       />
 
 

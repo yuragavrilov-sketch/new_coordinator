@@ -52,13 +52,95 @@ export function DiffSections({ detail }: { detail: DdlDetailResp }) {
     case "MATERIALIZED VIEW": return <SqlTextDiff diff={diff} src={src} tgt={tgt}/>;
     case "PACKAGE":           return <PackageDiff diff={diff} src={src} tgt={tgt}/>;
     case "PROCEDURE":
-    case "FUNCTION":
-    case "TRIGGER":           return <CodeDiff diff={diff} src={src} tgt={tgt}/>;
+    case "FUNCTION":          return <CodeDiff diff={diff} src={src} tgt={tgt}/>;
+    case "TRIGGER":           return <TriggerDiff diff={diff} src={src} tgt={tgt}/>;
+    case "INDEX":             return <IndexDiff diff={diff} src={src} tgt={tgt}/>;
     case "TYPE":              return <TypeDiff diff={diff} src={src} tgt={tgt}/>;
     case "SEQUENCE":          return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
     case "SYNONYM":           return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
+    case "DATABASE LINK":     return <FieldDiff diff={diff} src={src} tgt={tgt}/>;
+    case "JOB":               return <JobDiff   diff={diff} src={src} tgt={tgt}/>;
     default:                  return <RawDiff diff={diff}/>;
   }
+}
+
+function TriggerDiff({ diff, src, tgt }: {
+  diff: Record<string, unknown>;
+  src:  Record<string, unknown>;
+  tgt:  Record<string, unknown>;
+}) {
+  const whenMatch = diff.when_match !== false;
+  const bodyMatch = diff.body_match !== false;
+  return (
+    <>
+      <FieldDiff diff={diff} src={src} tgt={tgt}/>
+      <Section title="Что отличается">
+        <KeyValueList items={[
+          { k: "When clause", v: whenMatch ? "совпадает" : "отличается", tone: whenMatch ? "ok" : "warn" },
+          { k: "Body",        v: bodyMatch ? "совпадает" : "отличается", tone: bodyMatch ? "ok" : "warn" },
+        ]}/>
+      </Section>
+      {!bodyMatch && (
+        <>
+          <Section title="Body — Source"><CodeBlock code={(src.trigger_body as string) || "—"}/></Section>
+          <Section title="Body — Target"><CodeBlock code={(tgt.trigger_body as string) || "—"}/></Section>
+        </>
+      )}
+    </>
+  );
+}
+
+function IndexDiff({ diff, src, tgt }: {
+  diff: Record<string, unknown>;
+  src:  Record<string, unknown>;
+  tgt:  Record<string, unknown>;
+}) {
+  const srcCols = (diff.src_cols as Array<[string, boolean]> | undefined) || [];
+  const tgtCols = (diff.tgt_cols as Array<[string, boolean]> | undefined) || [];
+  const colsMatch = diff.cols_match !== false;
+  return (
+    <>
+      <FieldDiff diff={diff} src={src} tgt={tgt}/>
+      {!colsMatch && (
+        <Section title="Колонки индекса">
+          <table style={tableStyle}>
+            <thead><tr><Th>Source</Th><Th>Target</Th></tr></thead>
+            <tbody>
+              <Tr>
+                <TdMono>{srcCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
+                <TdMono>{tgtCols.map(c => c[1] ? `${c[0]} DESC` : c[0]).join(", ") || "—"}</TdMono>
+              </Tr>
+            </tbody>
+          </table>
+        </Section>
+      )}
+    </>
+  );
+}
+
+function JobDiff({ diff, src, tgt }: {
+  diff: Record<string, unknown>;
+  src:  Record<string, unknown>;
+  tgt:  Record<string, unknown>;
+}) {
+  const actionMatch = diff.action_match !== false;
+  return (
+    <>
+      <FieldDiff diff={diff} src={src} tgt={tgt}/>
+      <Section title="Job action">
+        <KeyValueList items={[
+          { k: "action", v: actionMatch ? "совпадает" : "отличается", tone: actionMatch ? "ok" : "warn" },
+        ]}/>
+        {!actionMatch && (
+          <>
+            <div style={{ marginTop: 10 }}><CodeBlock code={(src.job_action as string) || "—"}/></div>
+            <div style={{ marginTop: 6,  color: t.text.muted, fontSize: 11 }}>↑ source · ↓ target</div>
+            <div style={{ marginTop: 6 }}><CodeBlock code={(tgt.job_action as string) || "—"}/></div>
+          </>
+        )}
+      </Section>
+    </>
+  );
 }
 
 // ── TABLE diff: missing/extra/wrong-type columns + indexes/constraints/triggers

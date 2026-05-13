@@ -92,6 +92,12 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
                   <Icon name="warn" size={11}/> {o.warn}
                 </span>
               )}
+              {o.srcStatus && (
+                <OracleStatusChip side="src" status={o.srcStatus}/>
+              )}
+              {o.tgtStatus !== undefined && (
+                <OracleStatusChip side="tgt" status={o.tgtStatus}/>
+              )}
             </div>
             <h2 style={{
               margin: 0, fontSize: 20, fontWeight: 600,
@@ -259,6 +265,33 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
         </div>
       </div>
     </div>
+  );
+}
+
+function OracleStatusChip({ side, status }: { side: "src" | "tgt"; status: string }) {
+  const isInvalid = status.toUpperCase() === "INVALID";
+  const isMissing = !status;          // tgt without VALID/INVALID — no row in ddl_objects.target
+  const bg =
+    isMissing ? t.tone.warnSoft :
+    isInvalid ? t.tone.warnSoft :
+                t.bg.s3;
+  const fg =
+    isMissing ? t.tone.warn :
+    isInvalid ? t.tone.warn :
+                t.text.muted;
+  const label = isMissing ? "нет" : status;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: "10px", padding: "1px 6px", borderRadius: 3,
+      fontFamily: t.font.mono,
+      background: bg, color: fg,
+    }}>
+      <span style={{ fontWeight: 500, letterSpacing: "0.04em" }}>
+        {side === "src" ? "SRC" : "TGT"}:
+      </span>
+      <span>{label}</span>
+    </span>
   );
 }
 

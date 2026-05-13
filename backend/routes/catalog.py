@@ -7,6 +7,7 @@ from db.oracle_browser import (
     get_oracle_conn, list_all_objects, get_full_ddl_info,
     get_view_info, get_mview_info, get_code_info,
     get_sequence_info, get_synonym_info,
+    get_trigger_info, get_index_info, get_db_link_info, get_job_info,
 )
 from services.ddl_compare import compare_object
 from services.ddl_sync_extended import sync_to_target
@@ -23,15 +24,19 @@ def init(*, get_conn_fn, row_to_dict_fn, load_configs_fn, broadcast_fn):
 
 
 _META_FETCHERS = {
-    "TABLE": lambda conn, schema, name: get_full_ddl_info(conn, schema, name),
-    "VIEW": lambda conn, schema, name: get_view_info(conn, schema, name),
+    "TABLE":             lambda conn, schema, name: get_full_ddl_info(conn, schema, name),
+    "VIEW":              lambda conn, schema, name: get_view_info(conn, schema, name),
     "MATERIALIZED VIEW": lambda conn, schema, name: get_mview_info(conn, schema, name),
-    "FUNCTION": lambda conn, schema, name: get_code_info(conn, schema, name, "FUNCTION"),
-    "PROCEDURE": lambda conn, schema, name: get_code_info(conn, schema, name, "PROCEDURE"),
-    "PACKAGE": lambda conn, schema, name: get_code_info(conn, schema, name, "PACKAGE"),
-    "TYPE": lambda conn, schema, name: get_code_info(conn, schema, name, "TYPE"),
-    "SEQUENCE": lambda conn, schema, name: get_sequence_info(conn, schema, name),
-    "SYNONYM": lambda conn, schema, name: get_synonym_info(conn, schema, name),
+    "FUNCTION":          lambda conn, schema, name: get_code_info(conn, schema, name, "FUNCTION"),
+    "PROCEDURE":         lambda conn, schema, name: get_code_info(conn, schema, name, "PROCEDURE"),
+    "PACKAGE":           lambda conn, schema, name: get_code_info(conn, schema, name, "PACKAGE"),
+    "TYPE":              lambda conn, schema, name: get_code_info(conn, schema, name, "TYPE"),
+    "SEQUENCE":          lambda conn, schema, name: get_sequence_info(conn, schema, name),
+    "SYNONYM":           lambda conn, schema, name: get_synonym_info(conn, schema, name),
+    "TRIGGER":           lambda conn, schema, name: get_trigger_info(conn, schema, name),
+    "INDEX":             lambda conn, schema, name: get_index_info(conn, schema, name),
+    "DATABASE LINK":     lambda conn, schema, name: get_db_link_info(conn, schema, name),
+    "JOB":               lambda conn, schema, name: get_job_info(conn, schema, name),
 }
 
 
