@@ -39,8 +39,8 @@ import db.oracle_browser        as oracle_browser
 TICK_INTERVAL = 5  # seconds
 
 # Phases that occupy the "loading slot".  Only ONE migration at a time is
-# allowed in these phases; the rest wait in NEW (before SCN fixation so
-# Kafka doesn't accumulate a growing CDC backlog while waiting).
+# allowed in these phases; the rest wait in NEW so Kafka doesn't accumulate
+# a growing CDC backlog while waiting.
 _HEAVY_PHASES = frozenset({
     "TOPIC_CREATING",
     "CHUNKING",
@@ -898,12 +898,8 @@ def _handle_steady_state(mid: str, m: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _handle_new(mid: str, m: dict) -> None:
-    """Group migration: validate keys, queue gate, create stage, → TOPIC_CREATING.
-
-    Unlike legacy NEW:
-    - No SCN fixation
-    - Connector already managed at group level
-    """
+    """Validate keys, queue gate, create stage, → TOPIC_CREATING (CDC)
+    или → CHUNKING (BULK).  Коннектор управляется на уровне группы."""
     mode = (m.get("migration_mode") or "CDC").upper()
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
@@ -968,8 +964,7 @@ def _handle_new(mid: str, m: dict) -> None:
 
     _update(mid, {"queue_position": None})
 
-    # Create stage table (if STAGE strategy) — same as legacy PREPARING
-    # but without SCN fixation
+    # Create stage table (if STAGE strategy)
     if _in_prog(mid):
         return
     _mark_in_prog(mid)
