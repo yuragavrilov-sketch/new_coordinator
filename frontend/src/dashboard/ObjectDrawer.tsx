@@ -248,15 +248,17 @@ export function ObjectDrawer({
             }}>
               {o.name}
             </h2>
-            <div style={{
-              display: "flex", gap: 6, alignItems: "center",
-              fontSize: 12, marginTop: 6,
-              fontFamily: t.font.mono, color: t.text.muted,
-            }}>
-              <span>BILLING</span>
-              <Icon name="arrow" size={14}/>
-              <span>BILL19</span>
-            </div>
+            {(srcSchema || tgtSchema) && (
+              <div style={{
+                display: "flex", gap: 6, alignItems: "center",
+                fontSize: 12, marginTop: 6,
+                fontFamily: t.font.mono, color: t.text.muted,
+              }}>
+                <span>{srcSchema || "—"}</span>
+                <Icon name="arrow" size={14}/>
+                <span>{tgtSchema || "—"}</span>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
             {applyOpt && (
