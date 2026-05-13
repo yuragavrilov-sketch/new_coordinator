@@ -62,6 +62,55 @@ def list_snapshots():
         conn.close()
 
 
+@bp.get("/api/catalog/snapshots/latest")
+def latest_snapshot():
+    """Return the most recent snapshot for a schema pair with object_counts.
+    Used by Dashboard's LoadSnapshotBanner to show 'last loaded X ago · N objects'.
+    Returns 200 with null when no snapshot exists for the pair."""
+    src_schema = (request.args.get("src_schema") or "").upper()
+    tgt_schema = (request.args.get("tgt_schema") or "").upper()
+    if not src_schema or not tgt_schema:
+        return jsonify({"error": "src_schema and tgt_schema required"}), 400
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT snapshot_id, loaded_at
+                FROM   ddl_snapshots
+                WHERE  src_schema = %s AND tgt_schema = %s
+                ORDER  BY loaded_at DESC
+                FETCH  FIRST 1 ROWS ONLY
+            """, (src_schema, tgt_schema))
+            row = cur.fetchone()
+            if not row:
+                return jsonify(None)
+            snapshot_id, loaded_at = row
+            # Per-type counts on source side
+            cur.execute("""
+                SELECT object_type, COUNT(*) FROM ddl_objects
+                WHERE snapshot_id = %s AND db_side = 'source'
+                GROUP BY object_type
+                ORDER BY object_type
+            """, (snapshot_id,))
+            counts = {r[0]: r[1] for r in cur.fetchall()}
+            # Match status summary
+            cur.execute("""
+                SELECT match_status, COUNT(*) FROM ddl_compare_results
+                WHERE snapshot_id = %s
+                GROUP BY match_status
+            """, (snapshot_id,))
+            match_summary = {r[0]: r[1] for r in cur.fetchall()}
+        return jsonify({
+            "snapshot_id":   snapshot_id,
+            "loaded_at":     loaded_at.isoformat() + "Z" if loaded_at and loaded_at.tzinfo is None else (loaded_at.isoformat() if loaded_at else None),
+            "object_counts": counts,
+            "match_summary": match_summary,
+            "total":         sum(counts.values()),
+        })
+    finally:
+        conn.close()
+
+
 @bp.post("/api/catalog/load")
 def load_catalog():
     """Load full DDL catalog for a schema pair into cache."""
@@ -87,18 +136,33 @@ def load_catalog():
             )
             snapshot_id = cur.fetchone()[0]
 
+        broadcast = _state["broadcast"]
+        def _progress(phase: str, done: int, total: int, current: str = ""):
+            broadcast({
+                "type":       "ddl_snapshot.progress",
+                "src_schema": src_schema,
+                "tgt_schema": tgt_schema,
+                "snapshot_id": snapshot_id,
+                "phase":      phase,
+                "done":       done,
+                "total":      total,
+                "current":    current,
+            })
+
+        _progress("listing", 0, 0, "перечисляем объекты источника…")
         src_objects = list_all_objects(src_conn, src_schema)
-        # Debug: log types found
         src_types = {}
         for o in src_objects:
             src_types[o["object_type"]] = src_types.get(o["object_type"], 0) + 1
         print(f"[catalog] source {src_schema}: {src_types}")
 
+        _progress("listing", 0, 0, "перечисляем объекты таргета…")
         tgt_objects = list_all_objects(tgt_conn, tgt_schema)
-        tgt_index = {(o["object_type"], o["object_name"]): o for o in tgt_objects}
 
+        total_objects = len(src_objects) + len(tgt_objects)
         object_counts: dict[str, int] = {}
         src_meta_cache: dict[tuple, dict] = {}
+        done_count = 0
 
         for obj in src_objects:
             otype = obj["object_type"]
@@ -116,6 +180,10 @@ def load_catalog():
                 """, (snapshot_id, otype, oname, obj["status"], obj["last_ddl_time"],
                       json.dumps(meta, default=str)))
 
+            done_count += 1
+            if done_count % 5 == 0 or done_count == len(src_objects):
+                _progress("source", done_count, total_objects, f"{otype} {oname}")
+
         tgt_meta_cache: dict[tuple, dict] = {}
         for obj in tgt_objects:
             otype = obj["object_type"]
@@ -131,6 +199,11 @@ def load_catalog():
                 """, (snapshot_id, otype, oname, obj["status"], obj["last_ddl_time"],
                       json.dumps(meta, default=str)))
 
+            done_count += 1
+            if done_count % 5 == 0 or done_count == total_objects:
+                _progress("target", done_count, total_objects, f"{otype} {oname}")
+
+        _progress("comparing", total_objects, total_objects, "сравниваем…")
         all_keys = set(src_meta_cache.keys()) | set(tgt_meta_cache.keys())
         for (otype, oname) in all_keys:
             src_m = src_meta_cache.get((otype, oname))
@@ -154,6 +227,15 @@ def load_catalog():
                 """, (snapshot_id, otype, oname, status, json.dumps(diff, default=str)))
 
         pg.commit()
+        broadcast({
+            "type":         "ddl_snapshot.complete",
+            "src_schema":   src_schema,
+            "tgt_schema":   tgt_schema,
+            "snapshot_id":  snapshot_id,
+            "object_counts": object_counts,
+            "src_total":    len(src_objects),
+            "tgt_total":    len(tgt_objects),
+        })
 
         return jsonify({
             "snapshot_id": snapshot_id,

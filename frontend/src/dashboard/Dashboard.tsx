@@ -9,6 +9,7 @@ import { DashboardEmptyState } from "./EmptyState";
 import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
 import { fmtCompactNum } from "../utils/format";
 import { useApi } from "../hooks/useApi";
+import type { SSEEvent } from "../hooks/useSSE";
 import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
 import {
   type SchemaMigrationListItem,
@@ -21,9 +22,10 @@ interface Props {
   onCreated:         (newId: string) => void;
   /** When `true` and `schema` is null, render the empty state with CTA. */
   showEmptyState:    boolean;
+  sseEvents:         SSEEvent[];
 }
 
-export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Props) {
+export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEvents }: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search,       setSearch]       = useState("");
@@ -194,13 +196,13 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
         sort={sort}                 onSort={setSort}
       />
 
-      {objects.length === 0 && !objectsApi.loading && (
-        <LoadSnapshotBanner
-          srcSchema={schema.src_schema || ""}
-          tgtSchema={schema.tgt_schema || ""}
-          onLoaded={() => objectsApi.reload()}
-        />
-      )}
+      <LoadSnapshotBanner
+        srcSchema={schema.src_schema || ""}
+        tgtSchema={schema.tgt_schema || ""}
+        sseEvents={sseEvents}
+        onLoaded={() => objectsApi.reload()}
+      />
+
 
       <ObjectTable
         objects={filtered}

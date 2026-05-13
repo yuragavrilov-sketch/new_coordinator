@@ -111,6 +111,7 @@ export default function App() {
             schema={selectedSchema}
             onCreated={id => { setSelectedId(id); listApi.reload(); }}
             showEmptyState={backendStatus === "ok" && !listApi.loading && list.length === 0}
+            sseEvents={sseEvents}
           />
         )}
         {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}

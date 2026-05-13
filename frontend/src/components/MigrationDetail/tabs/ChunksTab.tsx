@@ -78,7 +78,7 @@ function ChunksSection({
 
   useEffect(() => {
     const last = sseEvents[0];
-    if (!last || last.migration_id !== migrationId) return;
+    if (!last || !("migration_id" in last) || last.migration_id !== migrationId) return;
     if (
       last.type === "chunk_progress" ||
       last.type === "baseline_progress" ||

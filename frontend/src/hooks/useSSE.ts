@@ -55,12 +55,37 @@ export interface BaselineProgressEvent {
   ts: string;
 }
 
+export interface DdlSnapshotProgressEvent {
+  type: "ddl_snapshot.progress";
+  src_schema: string;
+  tgt_schema: string;
+  snapshot_id: number;
+  phase:   "listing" | "source" | "target" | "comparing";
+  done:    number;
+  total:   number;
+  current: string;
+  ts:      string;
+}
+
+export interface DdlSnapshotCompleteEvent {
+  type: "ddl_snapshot.complete";
+  src_schema: string;
+  tgt_schema: string;
+  snapshot_id: number;
+  object_counts: Record<string, number>;
+  src_total: number;
+  tgt_total: number;
+  ts:        string;
+}
+
 export type SSEEvent =
   | MigrationPhaseEvent
   | ChunkProgressEvent
   | ConnectorStatusEvent
   | KafkaLagEvent
-  | BaselineProgressEvent;
+  | BaselineProgressEvent
+  | DdlSnapshotProgressEvent
+  | DdlSnapshotCompleteEvent;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
 

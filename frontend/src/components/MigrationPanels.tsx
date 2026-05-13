@@ -40,7 +40,7 @@ export function BulkProgressPanel({
     const last = sseEvents[0];
     if (!last) return;
     if (
-      last.migration_id === migrationId &&
+      ("migration_id" in last && last.migration_id === migrationId) &&
       (last.type === "chunk_progress" || last.type === "migration_phase" ||
        last.type === "baseline_progress")
     ) {
@@ -130,7 +130,7 @@ export function ConnectorPanel({
 
   useEffect(() => {
     const last = sseEvents[0];
-    if (last?.migration_id === migrationId &&
+    if ((last && "migration_id" in last && last.migration_id === migrationId) &&
         (last.type === "connector_status" || last.type === "migration_phase")) {
       reload();
     }
@@ -174,7 +174,7 @@ export function KafkaLagPanel({
 
   useEffect(() => {
     const last = sseEvents[0];
-    if (last?.migration_id === migrationId &&
+    if ((last && "migration_id" in last && last.migration_id === migrationId) &&
         (last.type === "kafka_lag" || last.type === "migration_phase")) {
       reload();
     }
