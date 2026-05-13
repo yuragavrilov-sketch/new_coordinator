@@ -37,7 +37,7 @@ export interface SchemaInfo {
 }
 
 export interface SchemaObject {
-  id:         number;
+  id:         string;
   type:       ObjectType;
   name:       string;
   rows:       number | null;

@@ -3,17 +3,24 @@ import { t } from "../theme";
 import {
   Icon, ObjStatusBadge, ProgressBar,
 } from "../components/ui";
+import { useApi } from "../hooks/useApi";
 import { fmtCompactNum, fmtMb } from "../utils/format";
 import { STATUS_MAP, OBJECT_TYPES, type SchemaObject, type MigrationEvent } from "./types";
+import type { ObjectDetailResp, DdlDetailResp, MigrationDetailResp } from "./api";
+import { DiffSections } from "./DiffSections";
 
 interface Props {
-  object:   SchemaObject;
-  events:   MigrationEvent[];
-  onClose:  () => void;
-  onAction: (o: SchemaObject, action: "pause" | "retry" | "rollback") => void;
+  schemaMigrationId: string;
+  object:            SchemaObject;
+  events:            MigrationEvent[];
+  onClose:           () => void;
+  onAction:          (o: SchemaObject, action: "pause" | "retry" | "rollback") => void;
 }
 
-export function ObjectDrawer({ object: o, events, onClose, onAction }: Props) {
+export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, onAction }: Props) {
+  const detail = useApi<ObjectDetailResp>(
+    `/api/schema-migrations/${schemaMigrationId}/objects/${encodeURIComponent(o.id)}/detail`,
+  );
   const status = o.status;
   const tone =
     status === "error" ? "error" :
@@ -184,6 +191,26 @@ export function ObjectDrawer({ object: o, events, onClose, onAction }: Props) {
             </div>
           )}
 
+          {/* Diff sections — populated from /objects/:id/detail */}
+          {detail.loading && (
+            <div style={{ fontSize: 12, color: t.text.muted }}>загружаем детали…</div>
+          )}
+          {detail.error && (
+            <div style={{
+              padding: "10px 12px", fontSize: 12,
+              background: t.tone.errorSoft, color: t.tone.error,
+              borderRadius: t.radius.sm,
+            }}>
+              Не удалось загрузить детали: {detail.error}
+            </div>
+          )}
+          {detail.data && detail.data.kind === "ddl" && (
+            <DiffSections detail={detail.data as DdlDetailResp}/>
+          )}
+          {detail.data && detail.data.kind === "migration" && (
+            <MigrationDetailBlock data={detail.data as MigrationDetailResp}/>
+          )}
+
           {/* Event log */}
           <div style={{
             background: t.bg.s1,
@@ -232,6 +259,90 @@ export function ObjectDrawer({ object: o, events, onClose, onAction }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function MigrationDetailBlock({ data }: { data: MigrationDetailResp }) {
+  if (!data.found) {
+    return (
+      <div style={{
+        background: t.bg.s1,
+        border: `1px solid ${t.border.subtle}`,
+        borderRadius: t.radius.lg,
+        padding: 14, fontSize: 12, color: t.text.muted,
+      }}>
+        Миграция не найдена в БД.
+      </div>
+    );
+  }
+  const m = (data.migration || {}) as Record<string, unknown>;
+  const errText      = m.error_text   as string | null | undefined;
+  const failedPhase  = m.failed_phase as string | null | undefined;
+  const errorCode    = m.error_code   as string | null | undefined;
+  const phase        = m.phase        as string | undefined;
+  const totalChunks  = m.total_chunks as number | null | undefined;
+  const chunksDone   = m.chunks_done  as number | null | undefined;
+  const chunksFailed = m.chunks_failed as number | null | undefined;
+  const ddlDiff      = data.ddl_diff;
+
+  return (
+    <>
+      {errText && (
+        <div style={{
+          background: t.bg.s1,
+          border: `1px solid ${t.border.subtle}`,
+          borderRadius: t.radius.lg,
+          padding: 14,
+        }}>
+          <div style={{ fontSize: "12.5px", fontWeight: 600, marginBottom: 8 }}>
+            Текущая ошибка
+          </div>
+          <div style={{ display: "flex", gap: 12, fontSize: 11, color: t.text.muted, marginBottom: 6 }}>
+            {errorCode && <span>Код: <span style={{ fontFamily: t.font.mono, color: t.tone.error }}>{errorCode}</span></span>}
+            {failedPhase && <span>Фаза: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{failedPhase}</span></span>}
+            {phase && <span>Текущая: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{phase}</span></span>}
+          </div>
+          <pre style={{
+            margin: 0, fontFamily: t.font.mono, fontSize: "11.5px",
+            lineHeight: 1.5, padding: "10px 12px",
+            background: t.tone.errorSoft, color: t.tone.error,
+            border: `1px solid color-mix(in oklab, ${t.tone.error} 26%, transparent)`,
+            borderRadius: t.radius.sm,
+            whiteSpace: "pre-wrap", wordBreak: "break-word",
+          }}>{errText}</pre>
+        </div>
+      )}
+
+      {((totalChunks || 0) > 0 || (chunksFailed || 0) > 0) && (
+        <div style={{
+          background: t.bg.s1,
+          border: `1px solid ${t.border.subtle}`,
+          borderRadius: t.radius.lg,
+          padding: 14,
+        }}>
+          <div style={{ fontSize: "12.5px", fontWeight: 600, marginBottom: 8 }}>
+            Чанки
+          </div>
+          <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
+            <span style={{ color: t.text.muted }}>
+              Всего: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{totalChunks ?? 0}</span>
+            </span>
+            <span style={{ color: t.text.muted }}>
+              Готово: <span style={{ fontFamily: t.font.mono, color: t.tone.ok }}>{chunksDone ?? 0}</span>
+            </span>
+            {(chunksFailed || 0) > 0 && (
+              <span style={{ color: t.text.muted }}>
+                Упало: <span style={{ fontFamily: t.font.mono, color: t.tone.error }}>{chunksFailed}</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {ddlDiff && ddlDiff.found && ddlDiff.match_status !== "MATCH" && (
+        <DiffSections detail={ddlDiff}/>
+      )}
+    </>
   );
 }
 

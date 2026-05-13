@@ -71,6 +71,40 @@ export async function pause(id: string, paused: boolean): Promise<void> {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
 
+export interface DdlSideInfo {
+  metadata:      Record<string, unknown>;
+  oracle_status: string | null;
+  last_ddl_time: string | null;
+}
+
+export interface DdlDetailResp {
+  kind:        "ddl";
+  found:       boolean;
+  object_type: string;       // canonical Oracle name (e.g. "MATERIALIZED VIEW")
+  object_name: string;
+  source?:     DdlSideInfo | null;
+  target?:     DdlSideInfo | null;
+  match_status?: "MATCH" | "DIFF" | "MISSING" | "EXTRA" | "UNKNOWN";
+  diff?:       Record<string, unknown>;
+}
+
+export interface MigrationDetailResp {
+  kind:         "migration";
+  found:        boolean;
+  migration_id?: string;
+  migration?:   Record<string, unknown>;     // raw `migrations` row
+  history?:     Array<Record<string, unknown>>;
+  ddl_diff?:    DdlDetailResp | null;
+}
+
+export type ObjectDetailResp = DdlDetailResp | MigrationDetailResp;
+
+export async function getObjectDetail(smId: string, objId: string): Promise<ObjectDetailResp> {
+  const r = await fetch(`/api/schema-migrations/${smId}/objects/${encodeURIComponent(objId)}/detail`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 export async function rollback(id: string): Promise<number> {
   const r = await fetch(`/api/schema-migrations/${id}/rollback`, { method: "POST" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);

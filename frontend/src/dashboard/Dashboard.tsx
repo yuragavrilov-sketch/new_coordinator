@@ -210,8 +210,9 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         onAction={(o, a) => console.log("object action", a, o.name)}
       />
 
-      {openObject && (
+      {openObject && selectedId && (
         <ObjectDrawer
+          schemaMigrationId={selectedId}
           object={openObject}
           events={events}
           onClose={() => setOpenObject(null)}

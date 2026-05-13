@@ -157,6 +157,15 @@ _MATCH_MAP = {
 }
 
 
+def _ddl_id(fe_type: str, object_name: str) -> str:
+    """URL-safe id for DDL object — uses frontend alias (e.g. MVIEW, no spaces)."""
+    return f"ddl-{fe_type}-{object_name}"
+
+
+# Reverse map: frontend type → Oracle canonical (for lookups by id)
+_FE_TYPE_TO_ORACLE = {v: k for k, v in _DDL_TYPE_MAP.items()}
+
+
 def _build_ddl_object(
     object_type: str, object_name: str, oracle_status: str | None,
     match_status: str, diff_json,
@@ -182,7 +191,7 @@ def _build_ddl_object(
                     break
 
     return {
-        "id":         f"ddl-{object_type}-{object_name}",
+        "id":         _ddl_id(fe_type, object_name),
         "type":       fe_type,
         "name":       object_name,
         "rows":       None,
@@ -348,6 +357,130 @@ def get_objects(conn, sm_id: str) -> list[dict]:
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get
     # synthetic "ddl-<TYPE>-<NAME>" IDs to avoid collisions.
     return tables + ddl_objects
+
+
+def get_object_detail(conn, sm_id: str, obj_id: str) -> dict | None:
+    """Detailed view of one object for the Drawer.
+
+    obj_id formats:
+      - "ddl-<TYPE>-<NAME>" → DDL object: returns src_meta + tgt_meta + diff +
+        match_status from latest snapshot.
+      - "<uuid>"            → migration row: returns full migrations row +
+        recent state_history + (optional) DDL diff from snapshot if any.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT src_schema, tgt_schema FROM schema_migrations WHERE schema_migration_id = %s",
+            (sm_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        src_schema, tgt_schema = row
+
+    if obj_id.startswith("ddl-"):
+        # Format: "ddl-<FE_TYPE>-<NAME>" — FE_TYPE is the frontend alias
+        # (TABLE/VIEW/MVIEW/PACKAGE/...) without spaces. Oracle object names
+        # never contain '-' unless quoted, so partition on first '-' is safe.
+        rest = obj_id[len("ddl-"):]
+        fe_type, _, oname = rest.partition("-")
+        otype = _FE_TYPE_TO_ORACLE.get(fe_type, fe_type)
+        return _load_ddl_detail(conn, src_schema, tgt_schema, otype, oname)
+    else:
+        return _load_migration_detail(conn, src_schema, tgt_schema, obj_id)
+
+
+def _load_ddl_detail(conn, src_schema: str, tgt_schema: str,
+                     object_type: str, object_name: str) -> dict | None:
+    import json
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT snapshot_id FROM ddl_snapshots
+            WHERE src_schema = %s AND tgt_schema = %s
+            ORDER BY loaded_at DESC FETCH FIRST 1 ROWS ONLY
+        """, (src_schema, tgt_schema))
+        snap = cur.fetchone()
+        if not snap:
+            return {"kind": "ddl", "found": False, "object_type": object_type, "object_name": object_name}
+        snapshot_id = snap[0]
+        cur.execute("""
+            SELECT db_side, metadata, oracle_status, last_ddl_time FROM ddl_objects
+            WHERE snapshot_id = %s AND object_type = %s AND object_name = %s
+        """, (snapshot_id, object_type, object_name))
+        result: dict = {"kind": "ddl", "found": True,
+                        "object_type": object_type, "object_name": object_name,
+                        "source": None, "target": None}
+        for r in cur.fetchall():
+            side, meta, ostatus, last_ddl = r
+            meta_obj = meta if isinstance(meta, dict) else (json.loads(meta) if meta else {})
+            result[side] = {
+                "metadata":      meta_obj,
+                "oracle_status": ostatus,
+                "last_ddl_time": last_ddl.isoformat() if last_ddl else None,
+            }
+        cur.execute("""
+            SELECT match_status, diff FROM ddl_compare_results
+            WHERE snapshot_id = %s AND object_type = %s AND object_name = %s
+        """, (snapshot_id, object_type, object_name))
+        cr = cur.fetchone()
+        if cr:
+            result["match_status"] = cr[0]
+            result["diff"] = cr[1] if isinstance(cr[1], dict) else (json.loads(cr[1]) if cr[1] else {})
+        else:
+            result["match_status"] = "UNKNOWN"
+            result["diff"] = {}
+        return result
+
+
+def _load_migration_detail(conn, src_schema: str, tgt_schema: str, migration_id: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM migrations WHERE migration_id = %s", (migration_id,))
+        row = cur.fetchone()
+        if not row:
+            return {"kind": "migration", "found": False, "migration_id": migration_id}
+        cols = [d[0] for d in cur.description]
+        m = dict(zip(cols, row))
+        cur.execute("""
+            SELECT id, from_phase, to_phase, transition_status, transition_reason,
+                   message, actor_type, actor_id, created_at
+            FROM migration_state_history
+            WHERE migration_id = %s
+            ORDER BY created_at DESC
+            LIMIT 50
+        """, (migration_id,))
+        hist_cols = [d[0] for d in cur.description]
+        history = []
+        for r in cur.fetchall():
+            h = dict(zip(hist_cols, r))
+            if h.get("created_at"):
+                h["created_at"] = h["created_at"].isoformat()
+            history.append(h)
+
+    # Strip non-JSON-serialisable types
+    def _clean(v):
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            return None
+        return v
+    m_clean = {k: _clean(v) for k, v in m.items()}
+    m_clean["migration_id"] = str(m_clean.get("migration_id") or "")
+    if m_clean.get("group_id"):
+        m_clean["group_id"] = str(m_clean["group_id"])
+
+    # Optional DDL diff for the same table in latest snapshot
+    table_name = m.get("source_table") or ""
+    ddl_diff = None
+    if table_name:
+        ddl_diff = _load_ddl_detail(conn, src_schema, tgt_schema, "TABLE", table_name)
+
+    return {
+        "kind":      "migration",
+        "found":     True,
+        "migration": m_clean,
+        "history":   history,
+        "ddl_diff":  ddl_diff,
+    }
 
 
 def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:

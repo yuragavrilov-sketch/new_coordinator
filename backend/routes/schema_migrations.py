@@ -72,6 +72,22 @@ def get_objects(sm_id: str):
         conn.close()
 
 
+@bp.get("/api/schema-migrations/<sm_id>/objects/<path:obj_id>/detail")
+def get_object_detail(sm_id: str, obj_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    conn = _state["get_conn"]()
+    try:
+        detail = svc.get_object_detail(conn, sm_id, obj_id)
+        if detail is None:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify(detail)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
 @bp.get("/api/schema-migrations/<sm_id>/events")
 def get_events(sm_id: str):
     if not _db_ok():
