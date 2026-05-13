@@ -740,15 +740,14 @@ def init_db() -> None:
 def get_active_migrations(conn) -> list[dict]:
     """Return all migrations in active (non-terminal) phases."""
     _ACTIVE_PHASES = (
-        "NEW", "PREPARING", "SCN_FIXED",
-        "CONNECTOR_STARTING", "CDC_BUFFERING",
+        "NEW",
         "TOPIC_CREATING",
         "CHUNKING", "BULK_LOADING", "BULK_LOADED",
         "STAGE_VALIDATING", "STAGE_VALIDATED",
         "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
         "STAGE_DROPPING", "INDEXES_ENABLING",
         "DATA_VERIFYING", "DATA_MISMATCH",
-        "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+        "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
         "STEADY_STATE",
         "CANCELLING",
     )
