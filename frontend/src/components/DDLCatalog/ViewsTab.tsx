@@ -29,26 +29,26 @@ function ViewDiffSummary({ diff, srcSql, tgtSql }: { diff: Record<string, unknow
   const diffStyle: React.CSSProperties = {
     margin: 0, padding: "8px 10px", fontSize: 10, color: t.text.secondary,
     fontFamily: "monospace", whiteSpace: "pre-wrap", overflowX: "auto",
-    maxHeight: 250, background: "#0a0f1a", borderTop: "1px solid #1e293b",
+    maxHeight: 250, background: t.bg.s2, borderTop: `1px solid ${t.border.subtle}`,
   };
 
   return (
     <div style={{
-      background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
+      background: t.bg.s2, border: `1px solid ${`color-mix(in oklab, ${t.amber.dim} 27%, transparent)`}`, borderRadius: 6,
       padding: "10px 14px", marginBottom: 6,
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: t.amber.base, marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
       {items.map((item, i) => (
-        <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
+        <div key={i} style={{ fontSize: 11, color: t.amber.fg }}>{item}</div>
       ))}
       {diff.sql_match === false && srcSql && tgtSql && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ border: `1px solid ${t.border.subtle}`, borderRadius: 4, overflow: "hidden" }}>
             <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: t.blue.base, background: t.bg.s1 }}>SOURCE</div>
             <pre style={diffStyle}>{srcSql}</pre>
           </div>
-          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: t.bg.s1 }}>TARGET</div>
+          <div style={{ border: `1px solid ${t.border.subtle}`, borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: t.amber.base, background: t.bg.s1 }}>TARGET</div>
             <pre style={diffStyle}>{tgtSql}</pre>
           </div>
         </div>
@@ -76,8 +76,8 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
   const tgtSql = tgtMeta ? (tgtMeta.sql_text as string) ?? "" : "";
 
   const sectionStyle: React.CSSProperties = {
-    background: "#07101e",
-    border: "1px solid #1e293b",
+    background: t.bg.s2,
+    border: `1px solid ${t.border.subtle}`,
     borderRadius: 6,
     marginTop: 4,
     overflow: "hidden",
@@ -89,11 +89,11 @@ function ViewDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
     color: t.text.muted,
     letterSpacing: 0.5,
     background: t.bg.s1,
-    borderBottom: "1px solid #1e293b",
+    borderBottom: `1px solid ${t.border.subtle}`,
   };
 
   return (
-    <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
+    <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: t.bg.s2 }}>
       {obj.match_status === "DIFF" && <ViewDiffSummary diff={obj.diff} srcSql={sql} tgtSql={tgtSql} />}
       {mview && (
         <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 6 }}>
@@ -213,8 +213,8 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
                   </td>
                   <td style={S.td}>
                     {mview
-                      ? <span style={S.badge("#0ea5e922", "#0ea5e9")}>MVIEW</span>
-                      : <span style={S.badge("#3b82f622", t.blue.base)}>VIEW</span>
+                      ? <span style={S.badge(`${t.blue.base}22`, t.blue.base)}>MVIEW</span>
+                      : <span style={S.badge(`${t.blue.base}22`, t.blue.base)}>VIEW</span>
                     }
                   </td>
                   <td style={{ ...S.td, color: t.text.secondary }}>{obj.oracle_status}</td>
@@ -232,7 +232,7 @@ export function ViewsTab({ objects, snapshotId, syncBusy, onCompare, onSync }: P
                   </td>
                 </tr>
                 {expanded && (
-                  <tr style={{ background: "#07101e" }}>
+                  <tr style={{ background: t.bg.s2 }}>
                     <ViewDetail obj={obj} snapshotId={snapshotId} />
                   </tr>
                 )}

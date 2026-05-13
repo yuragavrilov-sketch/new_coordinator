@@ -58,3 +58,28 @@ export function fmtBytes(n: number | null | undefined): string {
   while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
   return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${units[u]}`;
 }
+
+/** Compact integer: 1842 → "1.8k", 184_000_000 → "184M". For dashboard KPI/rows columns. */
+export function fmtCompactNum(n: number | null | undefined): string {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000)     return (n / 1_000).toFixed(1) + "k";
+  return n.toFixed(0);
+}
+
+/** Format gigabytes — input GB, output `1.8 TB` or `412 GB`. */
+export function fmtGb(gb: number | null | undefined): string {
+  if (gb == null) return "—";
+  if (gb >= 1024) return (gb / 1024).toFixed(1) + " TB";
+  return gb + " GB";
+}
+
+/** Format megabytes — auto-scales to KB / MB / GB / TB. */
+export function fmtMb(mb: number | null | undefined): string {
+  if (mb == null) return "—";
+  if (mb >= 1024 * 1024) return (mb / 1024 / 1024).toFixed(1) + " TB";
+  if (mb >= 1024)        return (mb / 1024).toFixed(1) + " GB";
+  if (mb >= 10)          return mb.toFixed(0) + " MB";
+  if (mb >= 0.1)         return mb.toFixed(1) + " MB";
+  return (mb * 1024).toFixed(0) + " KB";
+}

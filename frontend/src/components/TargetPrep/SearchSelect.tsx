@@ -7,7 +7,7 @@ function highlightMatch(text: string, query: string) {
   return (
     <>
       {text.slice(0, idx)}
-      <mark style={{ background: "#1d4ed844", color: t.blue.fg, padding: 0 }}>
+      <mark style={{ background: `${t.blue.dim}44`, color: t.blue.fg, padding: 0 }}>
         {text.slice(idx, idx + query.length)}
       </mark>
       {text.slice(idx + query.length)}
@@ -89,7 +89,7 @@ export function SearchSelect({
           display: "flex", flexDirection: "column",
         }}>
           <div style={{
-            padding: "6px 8px", borderBottom: "1px solid #0f1e35",
+            padding: "6px 8px", borderBottom: `1px solid ${t.bg.s2}`,
             display: "flex", alignItems: "center", gap: 6,
           }}>
             <span style={{ color: t.text.disabled, fontSize: t.size.sm }}>🔍</span>
@@ -116,9 +116,9 @@ export function SearchSelect({
                 style={{
                   padding: "5px 10px", fontSize: t.size.sm,
                   cursor: "pointer", color: t.text.disabled,
-                  borderBottom: "1px solid #0f1e35",
+                  borderBottom: `1px solid ${t.bg.s2}`,
                 }}
-                onMouseEnter={e => (e.currentTarget.style.background = "#0f1e35")}
+                onMouseEnter={e => (e.currentTarget.style.background = t.bg.s2)}
                 onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
               >
                 — Очистить —
@@ -133,11 +133,11 @@ export function SearchSelect({
                   key={o} onMouseDown={() => handleSelect(o)}
                   style={{
                     padding: "6px 10px", fontSize: t.size.base, cursor: "pointer",
-                    background: o === value ? "#1d3a5f" : "transparent",
+                    background: o === value ? t.bg.s3 : "transparent",
                     color: o === value ? t.blue.fg : t.text.primary,
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "#0f1624")}
-                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "transparent")}
+                  onMouseEnter={e => (e.currentTarget.style.background = o === value ? t.bg.s3 : t.bg.s2)}
+                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? t.bg.s3 : "transparent")}
                 >
                   {query ? highlightMatch(o, query) : o}
                 </div>

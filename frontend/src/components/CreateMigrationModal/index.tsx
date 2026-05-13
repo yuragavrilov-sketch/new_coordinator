@@ -300,7 +300,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
           </Section>
 
           {/* ── Target ── */}
-          <Section title="Цель (Oracle Target)" accent="#047857">
+          <Section title="Цель (Oracle Target)" accent={t.green.dim}>
             <SchemaTablePair
               db="target"
               schema={form.target_schema}
@@ -318,7 +318,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   style={{
                     padding: "6px 14px", borderRadius: t.radius.md,
                     cursor: (ensureBusy || !form.target_table) ? "not-allowed" : "pointer",
-                    border: "1px solid #047857", background: t.green.bg, color: "#6ee7b7",
+                    border: `1px solid ${t.green.dim}`, background: t.green.bg, color: t.green.fg,
                     fontSize: t.size.base, fontWeight: 600,
                     opacity: (ensureBusy || !form.target_table) ? 0.5 : 1,
                   }}
@@ -351,9 +351,9 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   onClick={() => setF({ migration_mode: "BULK_ONLY" })}
                   style={{
                     flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_mode === "BULK_ONLY" ? "#059669" : t.border.base}`,
-                    background: form.migration_mode === "BULK_ONLY" ? "#064e3b" : t.bg.s2,
-                    color:      form.migration_mode === "BULK_ONLY" ? "#6ee7b7" : t.text.muted,
+                    border:     `1px solid ${form.migration_mode === "BULK_ONLY" ? t.green.base : t.border.base}`,
+                    background: form.migration_mode === "BULK_ONLY" ? t.green.bg : t.bg.s2,
+                    color:      form.migration_mode === "BULK_ONLY" ? t.green.fg : t.text.muted,
                     fontWeight: 700, fontSize: t.size.base,
                   }}
                 >
@@ -388,9 +388,9 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   onClick={() => setF({ migration_strategy: "DIRECT" })}
                   style={{
                     flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_strategy === "DIRECT" ? "#059669" : t.border.base}`,
-                    background: form.migration_strategy === "DIRECT" ? "#064e3b" : t.bg.s2,
-                    color:      form.migration_strategy === "DIRECT" ? "#6ee7b7" : t.text.muted,
+                    border:     `1px solid ${form.migration_strategy === "DIRECT" ? t.green.base : t.border.base}`,
+                    background: form.migration_strategy === "DIRECT" ? t.green.bg : t.bg.s2,
+                    color:      form.migration_strategy === "DIRECT" ? t.green.fg : t.text.muted,
                     fontWeight: 700, fontSize: t.size.base,
                   }}
                 >
@@ -439,7 +439,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
                   </>
                 )}
                 {form.group_id && (
-                  <div style={{ fontSize: t.size.xs, color: "#6ee7b7", padding: "4px 0" }}>
+                  <div style={{ fontSize: t.size.xs, color: t.green.fg, padding: "4px 0" }}>
                     Connector, topic prefix и consumer group будут унаследованы от группы
                   </div>
                 )}
@@ -609,7 +609,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
           {/* Duplicate warning */}
           {dupWarning && (
             <div style={{
-              background: "#451a03", border: "1px solid #92400e", borderRadius: t.radius.md,
+              background: t.amber.bg, border: `1px solid ${t.amber.dim}`, borderRadius: t.radius.md,
               padding: "10px 14px", fontSize: t.size.base, color: t.amber.fg,
             }}>
               ⚠ {dupWarning}
@@ -638,7 +638,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
           <button onClick={handleSubmit} disabled={submitting} style={{
             background: submitting ? t.bg.s3 : t.blue.dim,
             border: "none", borderRadius: t.radius.md,
-            color: submitting ? t.text.muted : "#fff",
+            color: submitting ? t.text.muted : t.text.inverse,
             padding: "7px 22px", fontSize: t.size.md, fontWeight: 700,
             cursor: submitting ? "not-allowed" : "pointer",
           }}>

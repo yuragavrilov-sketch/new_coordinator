@@ -25,14 +25,14 @@ function useNow(intervalMs = 5000) {
 // hardcoded hex values because these are specific phase-identity colors,
 // not part of the general design-token palette.
 function phaseBarColor(phase: string): string {
-  if (phase === "BULK_LOADING")         return "#d97706";
-  if (phase === "CDC_CATCHING_UP")      return "#ea580c";
-  if (phase === "STEADY_STATE")         return "#16a34a";
-  if (phase === "BASELINE_PUBLISHING")  return "#7c3aed";
-  if (phase === "FAILED")               return "#ef4444";
-  if (phase === "CANCELLED")            return "#64748b";
-  if (phase === "COMPLETED")            return "#22c55e";
-  return "#1d4ed8";
+  if (phase === "BULK_LOADING")         return t.amber.dim;
+  if (phase === "CDC_CATCHING_UP")      return t.amber.dim;
+  if (phase === "STEADY_STATE")         return t.green.dim;
+  if (phase === "BASELINE_PUBLISHING")  return t.purple.base;
+  if (phase === "FAILED")               return t.red.base;
+  if (phase === "CANCELLED")            return t.text.muted;
+  if (phase === "COMPLETED")            return t.green.base;
+  return t.blue.dim;
 }
 
 export function StatisticsTab({ detail }: { detail: MigrationDetail }) {
@@ -191,9 +191,9 @@ export function StatisticsTab({ detail }: { detail: MigrationDetail }) {
               gridTemplateColumns: "160px 1fr 110px 90px",
               gap: `2px ${t.space[3]}`,
               padding: `5px ${t.space[3]}`,
-              borderBottom: i < periods.length - 1 ? "1px solid #0f172a" : "none",
+              borderBottom: i < periods.length - 1 ? `1px solid ${t.bg.app}` : "none",
               alignItems: "center",
-              background: isCurrent ? "#0d1e35" : "transparent",
+              background: isCurrent ? t.bg.s2 : "transparent",
             }}>
               {/* phase name */}
               <span style={{

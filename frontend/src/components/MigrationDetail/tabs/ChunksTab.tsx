@@ -36,7 +36,7 @@ function ChunksSection({
   const PAGE_SIZE = 100;
 
   const isBaseline = chunkType === "BASELINE";
-  const accent     = isBaseline ? "#9333ea" : t.amber.dim;
+  const accent     = isBaseline ? t.purple.base : t.amber.dim;
 
   function load(p?: number) {
     const pg = p ?? page;
@@ -247,7 +247,7 @@ function ChunksSection({
                 style={{
                   display: "grid", gridTemplateColumns: "36px 72px 1fr 64px 52px",
                   gap: "1px 8px", fontSize: t.size.xs, padding: "2px 0",
-                  borderBottom: "1px solid #0f172a",
+                  borderBottom: `1px solid ${t.bg.app}`,
                   color: c.status === "FAILED"   ? t.red.fg
                        : c.status === "DONE"     ? t.green.fg
                        : c.status === "RUNNING"  ? t.amber.fg
@@ -274,7 +274,7 @@ function ChunksSection({
                   margin: "2px 0 4px",
                   fontFamily: "monospace", fontSize: t.size.xs, color: t.red.fg,
                   whiteSpace: "pre-wrap", wordBreak: "break-word",
-                  background: "#0f0404", border: "1px solid #3b0f0f",
+                  background: t.bg.s2, border: `1px solid ${t.red.bg}`,
                   borderRadius: t.radius.sm, padding: "6px 10px",
                   maxHeight: 150, overflowY: "auto",
                 }}>

@@ -305,7 +305,7 @@ export function Checklist() {
                             ...cellSelectStyle,
                             background: row.status === "done" ? t.green.bg : t.bg.s2,
                             color:      row.status === "done" ? t.green.fg : t.text.secondary,
-                            borderColor: row.status === "done" ? "#16a34a44" : "#33415544",
+                            borderColor: row.status === "done" ? `${t.green.dim}44` : `${t.border.base}44`,
                           }}
                         >
                           {(Object.keys(STATUS_LABELS) as Status[]).map(s => (

@@ -339,13 +339,13 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
               {/* Selected tables with key config — scrollable */}
               {tables.length > 0 && (
                 <div style={{
-                  border: "1px solid #16a34a50", borderRadius: t.radius.md,
+                  border: `1px solid ${t.green.dim}50`, borderRadius: t.radius.md,
                   display: "flex", flexDirection: "column",
                   minHeight: 0, flex: "1 1 auto",
                 }}>
                   <div style={{
                     padding: "7px 14px", background: t.bg.s1,
-                    borderBottom: "1px solid #16a34a40",
+                    borderBottom: `1px solid ${t.green.dim}40`,
                     fontSize: t.size.sm, fontWeight: 700, color: t.green.dim,
                     textTransform: "uppercase", letterSpacing: 0.8,
                     flexShrink: 0,
@@ -425,7 +425,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
           {step < STEP_LABELS.length - 1 ? (
             <button onClick={next} style={{
               background: t.blue.dim, border: "none", borderRadius: t.radius.md,
-              color: "#fff", padding: "7px 20px", fontSize: t.size.base, cursor: "pointer",
+              color: t.text.inverse, padding: "7px 20px", fontSize: t.size.base, cursor: "pointer",
               fontWeight: 600,
             }}>Далее</button>
           ) : (
@@ -434,7 +434,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
               disabled={submitting}
               style={{
                 background: t.green.dim, border: "none", borderRadius: t.radius.md,
-                color: "#fff", padding: "7px 20px", fontSize: t.size.base, cursor: "pointer",
+                color: t.text.inverse, padding: "7px 20px", fontSize: t.size.base, cursor: "pointer",
                 fontWeight: 600, opacity: submitting ? 0.6 : 1,
               }}
             >

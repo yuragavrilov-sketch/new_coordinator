@@ -91,7 +91,7 @@ export function OverviewTab({
             <div style={{ fontSize: t.size.base, color: t.amber.fg, fontWeight: 700 }}>
               В очереди на загрузку
             </div>
-            <div style={{ fontSize: t.size.sm, color: "#d4a050" }}>
+            <div style={{ fontSize: t.size.sm, color: t.amber.dim }}>
               Ожидание завершения загрузки другой миграции. SCN ещё не зафиксирован.
             </div>
           </div>
@@ -155,7 +155,7 @@ export function OverviewTab({
         <InfoRow label="Обновлена"     value={fmtTs(detail.updated_at)} />
         <InfoRow label="Повторов"      value={
           detail.retry_count > 0
-            ? <span style={{ color: "#f59e0b" }}>{detail.retry_count}</span>
+            ? <span style={{ color: t.amber.base }}>{detail.retry_count}</span>
             : "0"
         } />
       </InfoGrid>
@@ -177,7 +177,7 @@ export function OverviewTab({
           style={{
             padding: "6px 14px", borderRadius: t.radius.md,
             cursor: ensureBusy ? "not-allowed" : "pointer",
-            border: "1px solid #047857", background: t.green.bg, color: "#6ee7b7",
+            border: `1px solid ${t.green.dim}`, background: t.green.bg, color: t.green.fg,
             fontSize: t.size.base, fontWeight: 600,
             opacity: ensureBusy ? 0.5 : 1, alignSelf: "flex-start",
           }}
@@ -196,13 +196,13 @@ export function OverviewTab({
               <EnsureChip label={`+${ensureResult.columns.added.length} колонок`} color={t.green.fg} bg={t.green.bg} />
             )}
             {ensureResult.columns?.dropped?.length > 0 && (
-              <EnsureChip label={`−${ensureResult.columns.dropped.length} лишних колонок`} color="#f97316" bg="#431407" />
+              <EnsureChip label={`−${ensureResult.columns.dropped.length} лишних колонок`} color={t.amber.dim} bg={t.red.bg} />
             )}
             {ensureResult.columns?.drop_errors?.length > 0 && (
               <EnsureChip label={`${ensureResult.columns.drop_errors.length} ошибок удаления колонок`} color={t.red.fg} bg={t.red.bg} />
             )}
             {ensureResult.columns?.warnings?.length > 0 && (
-              <EnsureChip label={`${ensureResult.columns.warnings.length} расхождений типов`} color="#fbbf24" bg="#422006" />
+              <EnsureChip label={`${ensureResult.columns.warnings.length} расхождений типов`} color={t.amber.base} bg={t.amber.bg} />
             )}
             {(ensureResult.objects?.constraints?.added?.length > 0 ||
               ensureResult.objects?.indexes?.added?.length > 0 ||
@@ -242,7 +242,7 @@ export function OverviewTab({
         <InfoRow label="Режим" value={
           <span style={{
             fontWeight: 700,
-            color: isCdcMode(detail) ? t.purple.fg : "#6ee7b7",
+            color: isCdcMode(detail) ? t.purple.fg : t.green.fg,
           }}>
             {isCdcMode(detail) ? "CDC (Debezium)" : "Разовая переливка"}
           </span>

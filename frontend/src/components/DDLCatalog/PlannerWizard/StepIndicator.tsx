@@ -16,7 +16,7 @@ export function StepIndicator({ current }: { current: number }) {
             {i > 0 && (
               <div style={{
                 flex: 1, height: 2,
-                background: done ? "#22c55e55" : t.border.subtle,
+                background: done ? `${t.green.base}55` : t.border.subtle,
                 margin: "0 4px",
               }} />
             )}

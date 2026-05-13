@@ -42,8 +42,8 @@ export function AvailableTablesList({ tables, schema, groupMap, onAdd, emptyText
               <span style={{
                 marginLeft: "auto", fontSize: 9, fontWeight: 600,
                 padding: "1px 6px", borderRadius: 3,
-                background: "#431407", color: "#fdba74",
-                border: "1px solid #ea580c44",
+                background: t.red.bg, color: t.amber.fg,
+                border: `1px solid ${t.amber.dim}44`,
               }}>
                 {groupName}
               </span>

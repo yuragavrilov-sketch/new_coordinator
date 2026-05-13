@@ -50,26 +50,26 @@ function CodeDiffSummary({ diff, codeType, srcMeta, tgtMeta }: {
   const preStyle: React.CSSProperties = {
     margin: 0, padding: "8px 10px", fontSize: 10, color: t.text.secondary,
     fontFamily: "monospace", whiteSpace: "pre-wrap", overflowX: "auto",
-    maxHeight: 250, background: "#0a0f1a", borderTop: "1px solid #1e293b",
+    maxHeight: 250, background: t.bg.s2, borderTop: `1px solid ${t.border.subtle}`,
   };
 
   return (
     <div style={{
-      background: "#1c1007", border: "1px solid #854d0e44", borderRadius: 6,
+      background: t.bg.s2, border: `1px solid ${`color-mix(in oklab, ${t.amber.dim} 27%, transparent)`}`, borderRadius: 6,
       padding: "10px 14px", marginBottom: 6,
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: t.amber.base, marginBottom: 4 }}>РАЗЛИЧИЯ С ТАРГЕТОМ</div>
       {items.map((item, i) => (
-        <div key={i} style={{ fontSize: 11, color: "#fde68a" }}>{item}</div>
+        <div key={i} style={{ fontSize: 11, color: t.amber.fg }}>{item}</div>
       ))}
       {tgtMeta && srcCode && tgtCode && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ border: `1px solid ${t.border.subtle}`, borderRadius: 4, overflow: "hidden" }}>
             <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: t.blue.base, background: t.bg.s1 }}>SOURCE</div>
             <pre style={preStyle}>{srcCode}</pre>
           </div>
-          <div style={{ border: "1px solid #1e293b", borderRadius: 4, overflow: "hidden" }}>
-            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#f59e0b", background: t.bg.s1 }}>TARGET</div>
+          <div style={{ border: `1px solid ${t.border.subtle}`, borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ padding: "4px 10px", fontSize: 10, fontWeight: 700, color: t.amber.base, background: t.bg.s1 }}>TARGET</div>
             <pre style={preStyle}>{tgtCode}</pre>
           </div>
         </div>
@@ -93,8 +93,8 @@ function CodeDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
   }, [obj.object_name, obj.match_status, snapshotId, codeType]);
 
   const sectionStyle: React.CSSProperties = {
-    background: "#07101e",
-    border: "1px solid #1e293b",
+    background: t.bg.s2,
+    border: `1px solid ${t.border.subtle}`,
     borderRadius: 6,
     marginTop: 4,
     overflow: "hidden",
@@ -106,7 +106,7 @@ function CodeDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
     color: t.text.muted,
     letterSpacing: 0.5,
     background: t.bg.s1,
-    borderBottom: "1px solid #1e293b",
+    borderBottom: `1px solid ${t.border.subtle}`,
   };
   const preStyle: React.CSSProperties = {
     margin: 0, padding: "10px 12px",
@@ -118,7 +118,7 @@ function CodeDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numbe
   const argCount = meta.argument_count as number | undefined;
 
   return (
-    <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
+    <td colSpan={5} style={{ padding: "8px 16px 12px 32px", background: t.bg.s2 }}>
       {obj.match_status === "DIFF" && <CodeDiffSummary diff={obj.diff} codeType={codeType} srcMeta={meta} tgtMeta={tgtMeta} />}
       {(codeType === "FUNCTION" || codeType === "PROCEDURE") && argCount != null && (
         <div style={{ marginBottom: 6, fontSize: 12, color: t.text.muted }}>
@@ -262,7 +262,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
                     </div>
                   </td>
                   <td style={S.td}>
-                    <span style={S.badge("#8b5cf622", "#8b5cf6")}>{codeType}</span>
+                    <span style={S.badge(`${t.purple.base}22`, t.purple.base)}>{codeType}</span>
                   </td>
                   <td style={{ ...S.td, color: t.text.secondary }}>{obj.oracle_status}</td>
                   <td style={S.td}><MatchBadge status={obj.match_status} /></td>
@@ -279,7 +279,7 @@ export function CodeTab({ objects, snapshotId, syncBusy, onCompare, onSync }: Pr
                   </td>
                 </tr>
                 {expanded && (
-                  <tr style={{ background: "#07101e" }}>
+                  <tr style={{ background: t.bg.s2 }}>
                     <CodeDetail obj={obj} snapshotId={snapshotId} />
                   </tr>
                 )}

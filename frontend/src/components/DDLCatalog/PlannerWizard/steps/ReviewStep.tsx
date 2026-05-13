@@ -80,7 +80,7 @@ export function ReviewStep({
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid #1e293b" }}>
+                <tr style={{ borderBottom: `1px solid ${t.border.subtle}` }}>
                   {["#", "Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers"].map(h => (
                     <th key={h} style={S.th}>{h}</th>
                   ))}
@@ -125,7 +125,7 @@ export function ReviewStep({
       {/* Execute / Start */}
       <div style={{
         display: "flex", alignItems: "center", gap: 12,
-        padding: "16px 0", borderTop: "1px solid #1e293b",
+        padding: "16px 0", borderTop: `1px solid ${t.border.subtle}`,
       }}>
         {!planId ? (
           <button

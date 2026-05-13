@@ -6,10 +6,10 @@ import {
 } from "./helpers";
 
 const CTYPE_COLOR: Record<string, string> = {
-  "PRIMARY KEY": "#3b82f6",
-  "UNIQUE":      "#8b5cf6",
-  "FOREIGN KEY": "#f59e0b",
-  "CHECK":       "#64748b",
+  "PRIMARY KEY": t.blue.base,
+  "UNIQUE":      t.purple.base,
+  "FOREIGN KEY": t.amber.base,
+  "CHECK":       t.text.muted,
 };
 
 interface Props {

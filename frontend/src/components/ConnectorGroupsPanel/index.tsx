@@ -181,7 +181,7 @@ export function ConnectorGroupsPanel() {
                 )}
                 {g.status === "RUNNING" && (
                   <button onClick={e => { e.stopPropagation(); stopGroup(g.group_id); }}
-                    style={actionBtn("#431407", "#ea580c")}>
+                    style={actionBtn(t.red.bg, t.amber.dim)}>
                     Stop
                   </button>
                 )}

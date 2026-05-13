@@ -1,3 +1,5 @@
+import { t } from "../theme";
+
 export type MigrationPhase =
   | "DRAFT" | "NEW" | "PREPARING" | "SCN_FIXED"
   | "CONNECTOR_STARTING" | "CDC_BUFFERING"
@@ -141,38 +143,38 @@ export interface MigrationDetail extends Migration {
 interface PhaseColor { bg: string; text: string; border: string }
 
 const PHASE_COLORS: Record<string, PhaseColor> = {
-  DRAFT:               { bg: "#1e293b", text: "#94a3b8", border: "#334155" },
-  NEW:                 { bg: "#1e3a5f", text: "#93c5fd", border: "#1d4ed8" },
-  PREPARING:           { bg: "#1e3a5f", text: "#93c5fd", border: "#1d4ed8" },
-  SCN_FIXED:           { bg: "#1e3a5f", text: "#93c5fd", border: "#1d4ed8" },
-  CONNECTOR_STARTING:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
-  CDC_BUFFERING:       { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
-  TOPIC_CREATING:      { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
-  CHUNKING:            { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
-  BULK_LOADING:        { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
-  BULK_LOADED:         { bg: "#3b2000", text: "#fcd34d", border: "#d97706" },
-  STAGE_VALIDATING:    { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
-  STAGE_VALIDATED:     { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
-  BASELINE_PUBLISHING: { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
-  BASELINE_LOADING:    { bg: "#3b1f6e", text: "#d8b4fe", border: "#9333ea" },
-  BASELINE_PUBLISHED:  { bg: "#2e1065", text: "#c4b5fd", border: "#7c3aed" },
-  STAGE_DROPPING:      { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
-  INDEXES_ENABLING:    { bg: "#1a2e1a", text: "#86efac", border: "#15803d" },
-  DATA_VERIFYING:      { bg: "#083344", text: "#67e8f9", border: "#0891b2" },
-  DATA_MISMATCH:       { bg: "#431407", text: "#fdba74", border: "#ea580c" },
-  CDC_APPLY_STARTING:  { bg: "#431407", text: "#fdba74", border: "#ea580c" },
-  CDC_APPLYING:        { bg: "#431407", text: "#fdba74", border: "#ea580c" },
-  CDC_CATCHING_UP:     { bg: "#431407", text: "#fdba74", border: "#ea580c" },
-  CDC_CAUGHT_UP:       { bg: "#431407", text: "#fdba74", border: "#ea580c" },
-  STEADY_STATE:        { bg: "#052e16", text: "#86efac", border: "#16a34a" },
-  PAUSED:              { bg: "#1e293b", text: "#cbd5e1", border: "#475569" },
-  CANCELLING:          { bg: "#450a0a", text: "#fca5a5", border: "#dc2626" },
-  CANCELLED:           { bg: "#1c1917", text: "#78716c", border: "#57534e" },
-  COMPLETED:           { bg: "#052e16", text: "#86efac", border: "#16a34a" },
-  FAILED:              { bg: "#450a0a", text: "#fca5a5", border: "#dc2626" },
+  DRAFT:               { bg: t.border.subtle, text: t.text.secondary, border: t.border.base },
+  NEW:                 { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
+  PREPARING:           { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
+  SCN_FIXED:           { bg: t.bg.s3, text: t.blue.fg, border: t.blue.dim },
+  CONNECTOR_STARTING:  { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  CDC_BUFFERING:       { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  TOPIC_CREATING:      { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  CHUNKING:            { bg: t.amber.bg, text: t.amber.fg, border: t.amber.dim },
+  BULK_LOADING:        { bg: t.amber.bg, text: t.amber.fg, border: t.amber.dim },
+  BULK_LOADED:         { bg: t.amber.bg, text: t.amber.fg, border: t.amber.dim },
+  STAGE_VALIDATING:    { bg: t.blue.bg, text: t.blue.fg, border: t.blue.dim },
+  STAGE_VALIDATED:     { bg: t.blue.bg, text: t.blue.fg, border: t.blue.dim },
+  BASELINE_PUBLISHING: { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  BASELINE_LOADING:    { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  BASELINE_PUBLISHED:  { bg: t.purple.bg, text: t.purple.fg, border: t.purple.base },
+  STAGE_DROPPING:      { bg: t.bg.s2, text: t.green.fg, border: t.green.base },
+  INDEXES_ENABLING:    { bg: t.bg.s2, text: t.green.fg, border: t.green.base },
+  DATA_VERIFYING:      { bg: t.blue.bg, text: t.blue.fg, border: t.blue.dim },
+  DATA_MISMATCH:       { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
+  CDC_APPLY_STARTING:  { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
+  CDC_APPLYING:        { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
+  CDC_CATCHING_UP:     { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
+  CDC_CAUGHT_UP:       { bg: t.red.bg, text: t.amber.fg, border: t.amber.dim },
+  STEADY_STATE:        { bg: t.green.bg, text: t.green.fg, border: t.green.dim },
+  PAUSED:              { bg: t.border.subtle, text: t.text.primary, border: t.text.disabled },
+  CANCELLING:          { bg: t.red.bg, text: t.red.fg, border: t.red.dim },
+  CANCELLED:           { bg: t.bg.s2, text: t.text.muted, border: t.text.disabled },
+  COMPLETED:           { bg: t.green.bg, text: t.green.fg, border: t.green.dim },
+  FAILED:              { bg: t.red.bg, text: t.red.fg, border: t.red.dim },
 };
 
-const FALLBACK_COLOR: PhaseColor = { bg: "#1e293b", text: "#94a3b8", border: "#334155" };
+const FALLBACK_COLOR: PhaseColor = { bg: t.border.subtle, text: t.text.secondary, border: t.border.base };
 
 export function phaseColor(phase: string): PhaseColor {
   return PHASE_COLORS[phase] ?? FALLBACK_COLOR;

@@ -10,7 +10,7 @@ const opColor: Record<string, string> = {
   INSERT: t.green.base,
   UPDATE: t.blue.base,
   DELETE: t.red.base,
-  UNKNOWN: "#6b7280",
+  UNKNOWN: t.text.muted,
 };
 
 function OpBadge({ op }: { op: string }) {
@@ -51,7 +51,7 @@ export function EventTable({ events, filter }: Props) {
 
   if (visible.length === 0) {
     return (
-      <div style={{ textAlign: "center", color: "#6b7280", padding: 48 }}>
+      <div style={{ textAlign: "center", color: t.text.muted, padding: 48 }}>
         No events yet — waiting for CDC stream…
       </div>
     );
@@ -74,8 +74,8 @@ export function EventTable({ events, filter }: Props) {
             <tr
               key={e.id + i}
               style={{
-                background: i % 2 === 0 ? t.bg.app : "#111827",
-                borderBottom: "1px solid #1e293b",
+                background: i % 2 === 0 ? t.bg.app : t.bg.s2,
+                borderBottom: `1px solid ${t.border.subtle}`,
                 animation: i === 0 ? "fadeIn 0.3s ease" : undefined,
               }}
             >

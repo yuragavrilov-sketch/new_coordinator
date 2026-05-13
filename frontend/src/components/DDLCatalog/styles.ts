@@ -54,7 +54,7 @@ export const S = {
     background:   t.blue.base,
     border:       "none",
     borderRadius: t.radius.md,
-    color:        "#fff",
+    color:        t.text.inverse,
     padding:      "6px 14px",
     fontSize:     t.size.base,
     fontWeight:   600 as const,
@@ -73,8 +73,8 @@ export const S = {
   // ── Danger / Success use alpha-tinted variants; alpha cannot pass through
   // CSS var() concatenation, so the alpha forms stay as literal hex values.
   btnDanger: {
-    background:   "#7f1d1d33",
-    border:       "1px solid #7f1d1d88",
+    background:   `${t.red.border}33`,
+    border:       `1px solid ${t.red.border}88`,
     borderRadius: t.radius.md,
     color:        t.red.fg,
     padding:      "6px 14px",
@@ -83,8 +83,8 @@ export const S = {
     cursor:       "pointer" as const,
   },
   btnSuccess: {
-    background:   "#22c55e22",
-    border:       "1px solid #22c55e55",
+    background:   `${t.green.base}22`,
+    border:       `1px solid ${t.green.base}55`,
     borderRadius: t.radius.md,
     color:        t.green.fg,
     padding:      "6px 14px",
@@ -110,5 +110,5 @@ export const S = {
     whiteSpace: "nowrap" as const,
   },
   td: { padding: "5px 10px", fontSize: t.size.base },
-  trBorder: { borderBottom: "1px solid #0f1624" },
+  trBorder: { borderBottom: `1px solid ${t.bg.s2}` },
 };

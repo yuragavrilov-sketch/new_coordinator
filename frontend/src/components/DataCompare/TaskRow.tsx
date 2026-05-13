@@ -50,7 +50,7 @@ export function TaskRow({ task: task, onDelete }: Props) {
 
   return (
     <>
-      <tr style={{ borderBottom: expanded ? "none" : "1px solid #0f1624" }}>
+      <tr style={{ borderBottom: expanded ? "none" : `1px solid ${t.bg.s2}` }}>
         <td style={{ padding: "6px 10px" }}>
           <div style={{ fontSize: t.size.base, color: t.text.primary }}>
             {task.source_schema}.{task.source_table}
@@ -120,7 +120,7 @@ export function TaskRow({ task: task, onDelete }: Props) {
 
         <td style={{ padding: "6px 10px" }}>
           {matchBadge(task.counts_match, task.source_count !== null && task.target_count !== null
-            ? `${(Math.abs((task.source_count || 0) - (task.target_count || 0))).toLocaleString("ru-RU")}`
+            ? (Math.abs((task.source_count || 0) - (task.target_count || 0))).toLocaleString("ru-RU")
             : "Mismatch")}
         </td>
 
@@ -166,8 +166,8 @@ export function TaskRow({ task: task, onDelete }: Props) {
         </td>
       </tr>
       {expanded && (
-        <tr style={{ borderBottom: "1px solid #0f1624" }}>
-          <td colSpan={9} style={{ background: "#0a0f1a", padding: 0 }}>
+        <tr style={{ borderBottom: `1px solid ${t.bg.s2}` }}>
+          <td colSpan={9} style={{ background: t.bg.s2, padding: 0 }}>
             <ColumnDiffPanel taskId={task.task_id} />
           </td>
         </tr>

@@ -69,8 +69,8 @@ function TypeDetail({ meta }: { meta: Record<string, unknown> }) {
   const source = (meta.source as string) ?? (meta.spec_source as string) ?? "";
   return (
     <div style={{
-      background: "#07101e",
-      border: "1px solid #1e293b",
+      background: t.bg.s2,
+      border: `1px solid ${t.border.subtle}`,
       borderRadius: 6,
       marginTop: 4,
       overflow: "hidden",
@@ -82,7 +82,7 @@ function TypeDetail({ meta }: { meta: Record<string, unknown> }) {
         color: t.text.muted,
         letterSpacing: 0.5,
         background: t.bg.s1,
-        borderBottom: "1px solid #1e293b",
+        borderBottom: `1px solid ${t.border.subtle}`,
       }}>
         ИСХОДНЫЙ КОД
       </div>
@@ -102,7 +102,7 @@ function OtherDetail({ obj }: { obj: CatalogObject }) {
   const meta = obj.metadata;
   const kind = detectOtherType(meta);
   return (
-    <td colSpan={4} style={{ padding: "8px 16px 12px 32px", background: "#07101e" }}>
+    <td colSpan={4} style={{ padding: "8px 16px 12px 32px", background: t.bg.s2 }}>
       {kind === "SEQUENCE" && <SequenceDetail meta={meta} />}
       {kind === "SYNONYM" && <SynonymDetail meta={meta} />}
       {kind === "TYPE" && <TypeDetail meta={meta} />}
@@ -130,11 +130,11 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
     const kind = detectOtherType(meta);
     switch (kind) {
       case "SEQUENCE":
-        return <span style={S.badge("#d97706222", t.amber.dim)}>SEQUENCE</span>;
+        return <span style={S.badge(`${t.amber.dim}222`, t.amber.dim)}>SEQUENCE</span>;
       case "SYNONYM":
-        return <span style={S.badge("#0891b222", "#0891b2")}>SYNONYM</span>;
+        return <span style={S.badge(`${t.blue.dim}22`, t.blue.dim)}>SYNONYM</span>;
       case "TYPE":
-        return <span style={S.badge("#8b5cf622", "#8b5cf6")}>TYPE</span>;
+        return <span style={S.badge(`${t.purple.base}22`, t.purple.base)}>TYPE</span>;
     }
   };
 
@@ -199,7 +199,7 @@ export function OtherTab({ objects, syncBusy, onCompare, onSync }: Props) {
                   </td>
                 </tr>
                 {expanded && (
-                  <tr style={{ background: "#07101e" }}>
+                  <tr style={{ background: t.bg.s2 }}>
                     <OtherDetail obj={obj} />
                   </tr>
                 )}

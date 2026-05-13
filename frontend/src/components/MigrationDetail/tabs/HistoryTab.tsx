@@ -11,7 +11,7 @@ function StatusDot({ status }: { status: string }) {
   const color =
     status === "SUCCESS" ? t.green.base
     : status === "FAILED" ? t.red.base
-    : "#f59e0b";
+    : t.amber.base;
   return (
     <span style={{
       width: 7, height: 7, borderRadius: t.radius.pill, background: color,
@@ -27,8 +27,8 @@ function HistoryRow({ entry, isFirst }: { entry: StateHistoryEntry; isFirst: boo
 
   return (
     <div style={{
-      background: isFirst ? "#0d1e35" : t.bg.s1,
-      border: `1px solid ${isFirst ? "#1d3558" : t.border.subtle}`,
+      background: isFirst ? t.bg.s2 : t.bg.s1,
+      border: `1px solid ${isFirst ? t.bg.s3 : t.border.subtle}`,
       borderRadius: 5,
       overflow: "hidden",
     }}>

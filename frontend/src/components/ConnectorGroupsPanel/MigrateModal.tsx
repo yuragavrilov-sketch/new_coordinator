@@ -128,7 +128,7 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
             <div style={lbl}>Режим</div>
             <div style={{ display: "flex", gap: 8 }}>
               <ModeBtn value="CDC"       label="CDC (Debezium)"     activeColor={t.purple.base} />
-              <ModeBtn value="BULK_ONLY" label="Разовая переливка" activeColor="#059669" />
+              <ModeBtn value="BULK_ONLY" label="Разовая переливка" activeColor={t.green.base} />
             </div>
             <div style={hint}>
               {params.migration_mode === "CDC"
@@ -142,7 +142,7 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
             <div style={lbl}>Стратегия</div>
             <div style={{ display: "flex", gap: 8 }}>
               <ModeBtn value="STAGE"  label="STAGE"  activeColor={t.blue.base} />
-              <ModeBtn value="DIRECT" label="DIRECT" activeColor="#059669" />
+              <ModeBtn value="DIRECT" label="DIRECT" activeColor={t.green.base} />
             </div>
             <div style={hint}>
               {params.migration_strategy === "STAGE"
@@ -227,7 +227,7 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
               background:   submitting ? t.bg.s3 : t.green.dim,
               border:       "none",
               borderRadius: t.radius.md,
-              color:        submitting ? t.text.muted : "#fff",
+              color:        submitting ? t.text.muted : t.text.inverse,
               padding:      "6px 18px",
               fontSize:     t.size.base,
               fontWeight:   700,

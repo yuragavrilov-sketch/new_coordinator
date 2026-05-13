@@ -121,7 +121,7 @@ export function TablePairDetail({
           href={reportUrl} target="_blank" rel="noreferrer"
           style={{
             background: t.bg.s3, color: t.blue.fg,
-            border: "1px solid #2563eb",
+            border: `1px solid ${t.blue.dim}`,
             borderRadius: t.radius.md, padding: "4px 12px",
             fontSize: t.size.sm, fontWeight: 600,
             textDecoration: "none", cursor: "pointer",
@@ -133,7 +133,7 @@ export function TablePairDetail({
 
       {detailError && (
         <div style={{
-          background: "#7f1d1d22", border: `1px solid ${t.red.border}`,
+          background: `${t.red.border}22`, border: `1px solid ${t.red.border}`,
           color: t.red.fg, padding: "8px 12px",
           borderRadius: t.radius.md, fontSize: t.size.base,
         }}>
@@ -217,7 +217,7 @@ export function TablePairDetail({
               </span>
             )}
             {colDiff.filter(r => r.state === "extra").length > 0 && (
-              <span style={{ color: "#f97316" }}>
+              <span style={{ color: t.amber.dim }}>
                 + {colDiff.filter(r => r.state === "extra").length} лишних в таргете
               </span>
             )}

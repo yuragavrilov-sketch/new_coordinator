@@ -33,7 +33,7 @@ export function BulkProgressPanel({
   );
 
   const isBaseline = chunkType === "BASELINE";
-  const accent     = isBaseline ? "#9333ea" : t.amber.dim;
+  const accent     = isBaseline ? t.purple.base : t.amber.dim;
   const panelTitle = isBaseline ? "Baseline Load Progress" : "Bulk Load Progress";
 
   useEffect(() => {

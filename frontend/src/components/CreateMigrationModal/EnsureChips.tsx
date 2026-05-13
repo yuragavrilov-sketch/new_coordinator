@@ -36,13 +36,13 @@ export function EnsureChips({ result }: Props) {
         <Chip label={`+${colsAdded} колонок`} color={t.green.fg} bg={t.green.bg} />
       )}
       {colsDropped > 0 && (
-        <Chip label={`−${colsDropped} лишних колонок`} color="#f97316" bg="#431407" />
+        <Chip label={`−${colsDropped} лишних колонок`} color={t.amber.dim} bg={t.red.bg} />
       )}
       {colsDropErr > 0 && (
         <Chip label={`${colsDropErr} ошибок удаления колонок`} color={t.red.fg} bg={t.red.bg} />
       )}
       {colsWarn > 0 && (
-        <Chip label={`${colsWarn} расхождений типов`} color="#fbbf24" bg="#422006" />
+        <Chip label={`${colsWarn} расхождений типов`} color={t.amber.base} bg={t.amber.bg} />
       )}
       {objAdded > 0 && (
         <Chip label={`+${objAdded} объектов`} color={t.green.fg} bg={t.green.bg} />

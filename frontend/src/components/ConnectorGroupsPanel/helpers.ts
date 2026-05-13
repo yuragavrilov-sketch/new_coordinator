@@ -8,8 +8,8 @@ export const STATUS_COLORS: Record<GroupStatus, { bg: string; text: string }> = 
   TOPICS_CREATING:    { bg: t.bg.s3,    text: t.blue.fg },
   CONNECTOR_STARTING: { bg: t.bg.s3,    text: t.blue.fg },
   RUNNING:            { bg: t.green.bg, text: t.green.fg },
-  STOPPING:           { bg: "#431407",  text: "#fdba74" },
-  STOPPED:            { bg: "#1c1917",  text: "#78716c" },
+  STOPPING:           { bg: t.red.bg,  text: t.amber.fg },
+  STOPPED:            { bg: t.bg.s2,  text: t.text.muted },
   FAILED:             { bg: t.red.bg,   text: t.red.fg },
 };
 

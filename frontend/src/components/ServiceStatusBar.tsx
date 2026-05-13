@@ -14,9 +14,9 @@ const LABELS: Record<string, string> = {
 };
 
 const COLORS: Record<ServiceAvailability, { bg: string; border: string; text: string; dot: string; dim: string }> = {
-  up:      { bg: t.green.bg, border: t.green.border, text: t.green.fg,        dot: t.green.base,    dim: "#4ade8088" },
-  down:    { bg: t.red.bg,   border: t.red.border,   text: t.red.fg,          dot: t.red.base,      dim: "#f8717188" },
-  unknown: { bg: t.bg.s2,    border: t.border.base,  text: t.text.secondary,  dot: t.text.disabled, dim: "#47556988" },
+  up:      { bg: t.green.bg, border: t.green.border, text: t.green.fg,        dot: t.green.base,    dim: `color-mix(in oklab, ${t.green.fg} 53%, transparent)` },
+  down:    { bg: t.red.bg,   border: t.red.border,   text: t.red.fg,          dot: t.red.base,      dim: `${t.red.fg}88` },
+  unknown: { bg: t.bg.s2,    border: t.border.base,  text: t.text.secondary,  dot: t.text.disabled, dim: `${t.text.disabled}88` },
 };
 
 export function ServiceStatusBar({ statuses }: Props) {

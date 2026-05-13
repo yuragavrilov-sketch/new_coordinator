@@ -18,7 +18,7 @@ const TABS: { id: ObjectTabId; label: string; countKey: keyof Props["counts"] }[
 
 export function ObjectTabs({ active, onChange, counts }: Props) {
   return (
-    <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #1e293b", marginBottom: 12 }}>
+    <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${t.border.subtle}`, marginBottom: 12 }}>
       {TABS.map(tab => {
         const isActive = active === tab.id;
         return (

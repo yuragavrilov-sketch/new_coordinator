@@ -231,7 +231,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
   return (
     <div style={{
       background: t.bg.app,
-      border: "1px solid #3b82f6",
+      border: `1px solid ${t.blue.base}`,
       borderRadius: 10,
       overflow: "hidden",
       display: "flex", flexDirection: "column",
@@ -239,7 +239,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       <div style={{
         padding: "12px 16px",
         background: t.bg.s1,
-        borderBottom: "1px solid #1e293b",
+        borderBottom: `1px solid ${t.border.subtle}`,
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <span style={{ fontSize: 14, fontWeight: 700, color: t.text.primary }}>
@@ -265,7 +265,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
 
         {executeError && (
           <div style={{
-            background: "#7f1d1d22", border: "1px solid #7f1d1d", borderRadius: 6,
+            background: `${t.red.border}22`, border: `1px solid ${t.red.border}`, borderRadius: 6,
             color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12,
           }}>
             {executeError}
@@ -273,7 +273,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         )}
         {startError && (
           <div style={{
-            background: "#7f1d1d22", border: "1px solid #7f1d1d", borderRadius: 6,
+            background: `${t.red.border}22`, border: `1px solid ${t.red.border}`, borderRadius: 6,
             color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12,
           }}>
             {startError}
@@ -312,7 +312,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
 
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
-          marginTop: 20, paddingTop: 16, borderTop: "1px solid #1e293b",
+          marginTop: 20, paddingTop: 16, borderTop: `1px solid ${t.border.subtle}`,
         }}>
           <button
             onClick={goBack}

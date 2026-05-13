@@ -151,7 +151,7 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
                 onClick={() => setShowCreate(true)}
                 style={{
                   marginLeft: "auto", background: t.blue.dim, border: "none",
-                  borderRadius: t.radius.md, color: "#fff",
+                  borderRadius: t.radius.md, color: t.text.inverse,
                   fontSize: t.size.sm, padding: "4px 10px",
                   cursor: "pointer", fontWeight: 700,
                 }}

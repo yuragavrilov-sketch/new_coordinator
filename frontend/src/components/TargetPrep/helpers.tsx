@@ -66,7 +66,7 @@ export function BulkDangerBtn({ label, onClick }: { label: string; onClick: () =
     <button
       onClick={onClick}
       style={{
-        background: "#7f1d1d33", border: "1px solid #7f1d1d88",
+        background: `${t.red.border}33`, border: `1px solid ${t.red.border}88`,
         borderRadius: t.radius.sm, color: t.red.fg, padding: "3px 11px",
         fontSize: t.size.sm, cursor: "pointer", fontWeight: 500,
       }}
@@ -101,7 +101,7 @@ export function Section({
     <div style={{ border: `1px solid ${t.border.subtle}`, borderRadius: t.radius.lg, overflow: "hidden" }}>
       <div
         style={{
-          background: "#0f1e35", padding: "9px 14px",
+          background: t.bg.s2, padding: "9px 14px",
           display: "flex", alignItems: "center", gap: 10,
           cursor: "pointer", userSelect: "none",
         }}
@@ -158,7 +158,7 @@ export const TH: React.CSSProperties = {
   color: t.text.muted, fontWeight: 500, fontSize: t.size.base, whiteSpace: "nowrap",
 };
 export const TD: React.CSSProperties = { padding: "5px 10px", fontSize: t.size.base };
-export const TR_BORDER: React.CSSProperties = { borderBottom: "1px solid #0f1624" };
+export const TR_BORDER: React.CSSProperties = { borderBottom: `1px solid ${t.bg.s2}` };
 
 // ── DiffCell ─────────────────────────────────────────────────────────────────
 

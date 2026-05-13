@@ -59,7 +59,7 @@ export function ColumnDiffPanel({ taskId }: Props) {
         </thead>
         <tbody>
           {displayed.map(c => (
-            <tr key={c.column} style={{ background: c.match ? "transparent" : "#1c0a0a" }}>
+            <tr key={c.column} style={{ background: c.match ? "transparent" : t.bg.s2 }}>
               <td style={{
                 padding: "3px 8px",
                 color: c.match ? t.text.secondary : t.red.fg,

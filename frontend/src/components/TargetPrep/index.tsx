@@ -168,7 +168,7 @@ export function TargetPrep() {
 
       {/* Schema selector + load/compare buttons */}
       <div style={{
-        background: "#0f1e35", border: `1px solid ${t.border.subtle}`,
+        background: t.bg.s2, border: `1px solid ${t.border.subtle}`,
         borderRadius: t.radius.lg, padding: "14px 18px",
         marginBottom: 16, display: "flex", gap: 16,
         alignItems: "flex-end", flexWrap: "wrap",
@@ -205,7 +205,7 @@ export function TargetPrep() {
           disabled={!canLoad || tablesLoading}
           style={{
             background: canLoad && !tablesLoading ? t.blue.dim : t.bg.s2,
-            border: "none", borderRadius: t.radius.md, color: "#fff",
+            border: "none", borderRadius: t.radius.md, color: t.text.inverse,
             padding: "7px 20px", fontSize: t.size.md, fontWeight: 600,
             cursor: canLoad && !tablesLoading ? "pointer" : "not-allowed",
             opacity: canLoad && !tablesLoading ? 1 : 0.5,
@@ -219,7 +219,7 @@ export function TargetPrep() {
             onClick={compareAll}
             disabled={compareAllBusy || pairs.filter(p => p.tgtTable).length === 0}
             style={{
-              background: "#0f3460", border: `1px solid ${t.blue.dim}`,
+              background: t.blue.bg, border: `1px solid ${t.blue.dim}`,
               borderRadius: t.radius.md, color: t.blue.fg,
               padding: "7px 20px", fontSize: t.size.md, fontWeight: 600,
               cursor: compareAllBusy ? "not-allowed" : "pointer",
@@ -234,7 +234,7 @@ export function TargetPrep() {
             href={`/api/target-prep/report-all?src_schema=${encodeURIComponent(srcSchema)}&tgt_schema=${encodeURIComponent(tgtSchema)}`}
             target="_blank" rel="noreferrer"
             style={{
-              background: t.bg.s3, border: "1px solid #2563eb",
+              background: t.bg.s3, border: `1px solid ${t.blue.dim}`,
               borderRadius: t.radius.md, color: t.blue.fg,
               padding: "7px 20px", fontSize: t.size.md, fontWeight: 600,
               textDecoration: "none", cursor: "pointer",
@@ -248,7 +248,7 @@ export function TargetPrep() {
       {/* Load error */}
       {loadError && (
         <div style={{
-          background: "#7f1d1d22", border: `1px solid ${t.red.border}`,
+          background: `${t.red.border}22`, border: `1px solid ${t.red.border}`,
           color: t.red.fg, padding: "10px 14px", borderRadius: t.radius.md,
           marginBottom: 12, fontSize: t.size.md,
         }}>
@@ -304,7 +304,7 @@ export function TargetPrep() {
               f === "error" ? t.red.base :
               f === "diff"  ? t.amber.base :
               f === "ok"    ? t.green.base :
-              f === "no_target" ? "#f97316" : t.blue.base;
+              f === "no_target" ? t.amber.dim : t.blue.base;
             return (
               <button
                 key={f} onClick={() => setFilter(f)}
@@ -334,7 +334,7 @@ export function TargetPrep() {
           <div style={{
             display: "grid",
             gridTemplateColumns: "32px 1fr 1fr 80px 72px 90px 64px 210px",
-            background: "#0f1e35", borderBottom: `1px solid ${t.border.subtle}`,
+            background: t.bg.s2, borderBottom: `1px solid ${t.border.subtle}`,
             padding: "0 4px",
           }}>
             {["", "Источник", "Таргет", "Колонки", "Индексы", "Констрейнты", "Тригг.", "Действия"].map((h, i) => (
@@ -347,7 +347,7 @@ export function TargetPrep() {
             const st         = pairStatus[srcTable] ?? DEFAULT_STATUS;
             const isExpanded = expandedKey === srcTable;
             const hasError   = !!st.error;
-            const rowBg      = hasError ? "rgba(239,68,68,0.04)" : isExpanded ? "#0d1a2e" : "transparent";
+            const rowBg      = hasError ? "rgba(239,68,68,0.04)" : isExpanded ? t.bg.s2 : "transparent";
 
             return (
               <React.Fragment key={srcTable}>
@@ -357,10 +357,10 @@ export function TargetPrep() {
                   style={{
                     display: "grid",
                     gridTemplateColumns: "32px 1fr 1fr 80px 72px 90px 64px 210px",
-                    background: rowBg, borderBottom: "1px solid #0f1624",
+                    background: rowBg, borderBottom: `1px solid ${t.bg.s2}`,
                     cursor: "pointer", alignItems: "center", padding: "0 4px",
                   }}
-                  onMouseEnter={e => { if (!isExpanded && !hasError) (e.currentTarget as HTMLDivElement).style.background = "#0d1a2e"; }}
+                  onMouseEnter={e => { if (!isExpanded && !hasError) (e.currentTarget as HTMLDivElement).style.background = t.bg.s2; }}
                   onMouseLeave={e => { if (!isExpanded && !hasError) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
                 >
                   <div style={{ padding: "9px 6px", color: t.text.disabled, fontSize: t.size.xs, textAlign: "center" }}>
@@ -424,7 +424,7 @@ export function TargetPrep() {
                       </span>
                     )}
                     {st.syncError && (
-                      <span title={st.syncError} style={{ color: "#f97316", fontSize: t.size.sm, cursor: "help" }}>
+                      <span title={st.syncError} style={{ color: t.amber.dim, fontSize: t.size.sm, cursor: "help" }}>
                         ⚠ Sync
                       </span>
                     )}
@@ -433,7 +433,7 @@ export function TargetPrep() {
 
                 {/* Expanded detail */}
                 {isExpanded && (
-                  <div style={{ borderBottom: `1px solid ${t.border.subtle}`, background: "#080f1a" }}>
+                  <div style={{ borderBottom: `1px solid ${t.border.subtle}`, background: t.bg.s2 }}>
                     {!tgtTable && (
                       <div style={{
                         padding: "20px", color: t.text.disabled, fontSize: t.size.md,

@@ -117,7 +117,7 @@ export function EnableIndexesButton({ migrationId, onDone }: { migrationId: stri
         style={{
           background: busy ? t.bg.s3 : t.blue.dim,
           color: busy ? t.text.muted : t.text.primary,
-          border: "1px solid #2563eb",
+          border: `1px solid ${t.blue.dim}`,
           borderRadius: 5,
           padding: "5px 14px",
           fontSize: 12,
@@ -170,9 +170,9 @@ export function EnableTriggersButton({ migrationId, onDone }: { migrationId: str
         onClick={handleClick}
         disabled={busy}
         style={{
-          background: busy ? "#1e3a2f" : "#15803d",
+          background: busy ? t.bg.s2 : t.green.base,
           color: busy ? t.text.muted : t.text.primary,
-          border: "1px solid #166534",
+          border: `1px solid ${t.green.border}`,
           borderRadius: 5,
           padding: "5px 14px",
           fontSize: 12,
@@ -220,8 +220,8 @@ export function RestartBaselineButton({ migrationId, onDone }: { migrationId: st
         onClick={handleClick}
         disabled={busy}
         style={{
-          background: busy ? "#3b2000" : "#92400e",
-          color: busy ? t.text.muted : "#fef3c7",
+          background: busy ? t.amber.bg : t.amber.dim,
+          color: busy ? t.text.muted : t.amber.bg,
           border: `1px solid ${t.amber.dim}`,
           borderRadius: 5,
           padding: "5px 14px",
@@ -285,8 +285,8 @@ export function DataMismatchButtons({ migrationId, onDone }: { migrationId: stri
         onClick={() => doAction("force_complete", "Завершить миграцию без успешной сверки данных?")}
         disabled={busy}
         style={{
-          background: "#431407", border: "1px solid #ea580c", borderRadius: 5,
-          color: "#fdba74", padding: "4px 12px", fontSize: 11, fontWeight: 600,
+          background: t.red.bg, border: `1px solid ${t.amber.dim}`, borderRadius: 5,
+          color: t.amber.fg, padding: "4px 12px", fontSize: 11, fontWeight: 600,
           cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1,
         }}
       >
@@ -330,7 +330,7 @@ export function DataVerifyCard({ taskId, phase }: { taskId: string; phase: strin
       <div style={{ fontSize: 12, fontWeight: 600, color: t.text.primary, marginBottom: 8 }}>
         Сверка данных
         {phase === "DATA_VERIFYING" && (
-          <span style={{ color: "#67e8f9", fontWeight: 400, marginLeft: 8 }}>
+          <span style={{ color: t.blue.fg, fontWeight: 400, marginLeft: 8 }}>
             {info.status === "RUNNING" ? `${progress}% (${info.chunks_done}/${info.chunks_total})` : info.status}
           </span>
         )}

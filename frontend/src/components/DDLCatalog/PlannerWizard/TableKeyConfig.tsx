@@ -99,13 +99,13 @@ export function TableKeyConfig({ entry, onChange }: Props) {
         <div>
           <div style={{
             maxHeight: 140, overflowY: "auto",
-            border: "1px solid #334155", borderRadius: 5, background: t.bg.s2,
+            border: `1px solid ${t.border.base}`, borderRadius: 5, background: t.bg.s2,
           }}>
             {info.columns.map(col => (
               <label key={col.name} style={{
                 display: "flex", alignItems: "center", gap: 8,
                 padding: "4px 10px", cursor: "pointer",
-                borderBottom: "1px solid #0f172a",
+                borderBottom: `1px solid ${t.bg.app}`,
               }}>
                 <input type="checkbox"
                   checked={entry.effective_key_columns.includes(col.name)}

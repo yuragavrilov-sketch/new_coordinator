@@ -137,7 +137,7 @@ export default function App() {
         display: "flex",
         gap: 0,
         marginTop: 16,
-        borderBottom: "1px solid #1e293b",
+        borderBottom: `1px solid ${t.border.subtle}`,
       }}>
         <TabButton
           label="DDL Каталог"
@@ -209,7 +209,7 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
 function btnStyle(bg: string): React.CSSProperties {
   return {
     background: bg,
-    border: "1px solid #334155",
+    border: `1px solid ${t.border.base}`,
     borderRadius: 6,
     color: t.text.secondary,
     padding: "5px 12px",

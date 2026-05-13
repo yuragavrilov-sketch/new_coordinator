@@ -22,7 +22,7 @@ export function ErrorsTab({ detail }: { detail: MigrationDetail }) {
       <div>
         <SectionHeader>Ошибка миграции</SectionHeader>
         <div style={{
-          background: "#1a0808", border: `1px solid ${t.red.border}`,
+          background: t.bg.s2, border: `1px solid ${t.red.border}`,
           borderRadius: t.radius.md, padding: t.space[4],
         }}>
           {detail.error_code && (
@@ -30,7 +30,7 @@ export function ErrorsTab({ detail }: { detail: MigrationDetail }) {
               <div style={{ fontSize: t.size.xs, color: t.text.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Код</div>
               <span style={{
                 fontFamily: t.font.mono, fontSize: t.size.md, color: t.red.fg,
-                fontWeight: 700, background: "#2d0a0a",
+                fontWeight: 700, background: t.red.bg,
                 border: `1px solid ${t.red.border}`, borderRadius: t.radius.sm, padding: `2px ${t.space[2]}`,
               }}>
                 {detail.error_code}
@@ -40,7 +40,7 @@ export function ErrorsTab({ detail }: { detail: MigrationDetail }) {
           {detail.failed_phase && (
             <div style={{ marginBottom: t.space[2] }}>
               <div style={{ fontSize: t.size.xs, color: t.text.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>Фаза</div>
-              <span style={{ fontSize: t.size.md, color: "#f87171" }}>{detail.failed_phase}</span>
+              <span style={{ fontSize: t.size.md, color: t.red.fg }}>{detail.failed_phase}</span>
             </div>
           )}
           {detail.error_text && (
@@ -49,9 +49,9 @@ export function ErrorsTab({ detail }: { detail: MigrationDetail }) {
               <pre style={{
                 margin: 0, fontFamily: t.font.mono, fontSize: t.size.base, color: t.red.fg,
                 whiteSpace: "pre-wrap", wordBreak: "break-word",
-                background: "#0f0404", borderRadius: t.radius.sm, padding: `${t.space[2]} ${t.space[3]}`,
+                background: t.bg.s2, borderRadius: t.radius.sm, padding: `${t.space[2]} ${t.space[3]}`,
                 maxHeight: 320, overflowY: "auto",
-                border: "1px solid #3b0f0f",
+                border: `1px solid ${t.red.bg}`,
               }}>
                 {detail.error_text}
               </pre>

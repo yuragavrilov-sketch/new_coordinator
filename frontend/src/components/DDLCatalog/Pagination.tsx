@@ -28,7 +28,7 @@ export function Pagination({ total, page, pageSize, onPage, onPageSize }: Props)
   return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "8px 16px", borderTop: "1px solid #1e293b", fontSize: 11, color: t.text.muted,
+      padding: "8px 16px", borderTop: `1px solid ${t.border.subtle}`, fontSize: 11, color: t.text.muted,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span>{from}–{to} из {total}</span>

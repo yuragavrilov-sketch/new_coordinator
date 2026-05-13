@@ -51,8 +51,8 @@ function SearchSelect({
         <span style={{ color: t.text.disabled, fontSize: 9 }}>{open ? "\u25B2" : "\u25BC"}</span>
       </div>
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, background: t.bg.s2, border: "1px solid #334155", borderRadius: 4, zIndex: 200, boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
-          <div style={{ padding: "6px 8px", borderBottom: "1px solid #0f1e35", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, background: t.bg.s2, border: `1px solid ${t.border.base}`, borderRadius: 4, zIndex: 200, boxShadow: "0 6px 20px rgba(0,0,0,0.5)" }}>
+          <div style={{ padding: "6px 8px", borderBottom: `1px solid ${t.bg.s2}`, display: "flex", alignItems: "center", gap: 6 }}>
             <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
               onKeyDown={e => { if (e.key === "Escape") { setOpen(false); setQuery(""); } if (e.key === "Enter" && filtered.length === 1) { onChange(filtered[0]); setOpen(false); setQuery(""); } }}
               placeholder="Поиск..." style={{ background: "none", border: "none", color: t.text.primary, fontSize: 12, width: "100%", outline: "none" }} />
@@ -62,9 +62,9 @@ function SearchSelect({
               ? <div style={{ padding: "8px 10px", color: t.text.disabled, fontSize: 12 }}>Нет совпадений</div>
               : filtered.map(o => (
                 <div key={o} onMouseDown={() => { onChange(o); setOpen(false); setQuery(""); }}
-                  style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", background: o === value ? "#1d3a5f" : "transparent", color: o === value ? t.blue.fg : t.text.primary }}
-                  onMouseEnter={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "#0f1624")}
-                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? "#1d3a5f" : "transparent")}>
+                  style={{ padding: "6px 10px", fontSize: 12, cursor: "pointer", background: o === value ? t.bg.s3 : "transparent", color: o === value ? t.blue.fg : t.text.primary }}
+                  onMouseEnter={e => (e.currentTarget.style.background = o === value ? t.bg.s3 : t.bg.s2)}
+                  onMouseLeave={e => (e.currentTarget.style.background = o === value ? t.bg.s3 : "transparent")}>
                   {o}
                 </div>
               ))}
@@ -265,7 +265,7 @@ export function DDLCatalog() {
       </div>
 
       {loadError && (
-        <div style={{ background: "#7f1d1d22", border: "1px solid #7f1d1d", borderRadius: 6, color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12 }}>
+        <div style={{ background: `${t.red.border}22`, border: `1px solid ${t.red.border}`, borderRadius: 6, color: t.red.fg, padding: "8px 14px", fontSize: 12, marginBottom: 12 }}>
           {loadError}
         </div>
       )}

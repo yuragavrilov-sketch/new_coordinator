@@ -72,7 +72,7 @@ function Field({
         placeholder={placeholder}
         autoComplete="off"
         style={{
-          width: "100%", background: t.bg.app, border: "1px solid #334155",
+          width: "100%", background: t.bg.app, border: `1px solid ${t.border.base}`,
           borderRadius: 5, color: t.text.primary, padding: "6px 10px", fontSize: 13,
         }}
       />
@@ -159,7 +159,7 @@ export function SettingsModal({ onClose }: Props) {
 
   const tabBarStyle: React.CSSProperties = {
     display: "flex", gap: 2, marginBottom: 20,
-    borderBottom: "1px solid #334155", paddingBottom: 0,
+    borderBottom: `1px solid ${t.border.base}`, paddingBottom: 0,
   };
 
   function tabStyle(active: boolean): React.CSSProperties {
@@ -168,7 +168,7 @@ export function SettingsModal({ onClose }: Props) {
       cursor: "pointer", border: "none", borderRadius: "5px 5px 0 0",
       background: active ? t.bg.app : "transparent",
       color: active ? t.text.primary : t.text.muted,
-      borderBottom: active ? "2px solid #3b82f6" : "2px solid transparent",
+      borderBottom: active ? `2px solid ${t.blue.base}` : "2px solid transparent",
       marginBottom: -1,
     };
   }
@@ -188,7 +188,7 @@ export function SettingsModal({ onClose }: Props) {
       <div style={{
         position: "fixed", top: "50%", left: "50%",
         transform: "translate(-50%, -50%)",
-        background: t.bg.s2, border: "1px solid #334155",
+        background: t.bg.s2, border: `1px solid ${t.border.base}`,
         borderRadius: 10, padding: "24px 28px",
         width: 500, maxWidth: "92vw", maxHeight: "88vh",
         overflowY: "auto", zIndex: 201,
@@ -255,7 +255,7 @@ export function SettingsModal({ onClose }: Props) {
                 <div style={{
                   fontSize: 11, color: t.text.disabled, fontWeight: 600, marginBottom: 4, marginTop: 8,
                   textTransform: "uppercase", letterSpacing: 0.4,
-                  borderTop: "1px solid #334155", paddingTop: 12,
+                  borderTop: `1px solid ${t.border.base}`, paddingTop: 12,
                 }}>
                   Schema Owner (DDL / Catalog)
                 </div>
@@ -321,7 +321,7 @@ export function SettingsModal({ onClose }: Props) {
               onClick={testConnection}
               disabled={testing}
               style={{
-                background: t.bg.s2, border: "1px solid #334155", borderRadius: 6,
+                background: t.bg.s2, border: `1px solid ${t.border.base}`, borderRadius: 6,
                 color: t.text.secondary, padding: "8px 16px", fontSize: 13,
                 cursor: testing ? "wait" : "pointer", fontWeight: 600,
               }}

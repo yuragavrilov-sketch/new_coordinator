@@ -34,11 +34,11 @@ export function MigrationRow({
         padding:      compact ? "10px 14px" : "12px 16px",
         borderBottom: `1px solid ${t.bg.app}`,
         cursor:       "pointer",
-        background:   selected ? "#0d1e35" : "transparent",
+        background:   selected ? t.bg.s2 : "transparent",
         borderLeft:   `3px solid ${selected ? t.blue.base : "transparent"}`,
         transition:   "background 0.1s",
       }}
-      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "#0d1829"; }}
+      onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = t.bg.s2; }}
       onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
     >
       {/* Name + phase + actions */}
@@ -53,8 +53,8 @@ export function MigrationRow({
         <PhaseBadge phase={m.phase} size="sm" />
         {m.migration_mode === "BULK_ONLY" && (
           <span style={{
-            background: "#064e3b", color: "#6ee7b7",
-            border: "1px solid #059669", borderRadius: t.radius.sm,
+            background: t.green.bg, color: t.green.fg,
+            border: `1px solid ${t.green.base}`, borderRadius: t.radius.sm,
             fontSize: 9, fontWeight: 700, padding: "1px 5px",
             textTransform: "uppercase", letterSpacing: 0.4,
           }}>
@@ -151,7 +151,7 @@ export function MigrationRow({
           </span>
         )}
         {m.retry_count > 0 && (
-          <span style={{ fontSize: t.size.xs, color: "#f59e0b" }}>↺ {m.retry_count}</span>
+          <span style={{ fontSize: t.size.xs, color: t.amber.base }}>↺ {m.retry_count}</span>
         )}
         <span style={{ marginLeft: "auto", fontSize: t.size.xs, color: t.text.faint }}>
           {fmtTs(m.state_changed_at)}

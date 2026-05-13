@@ -136,7 +136,7 @@ export function TableSelectionStep({
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ borderBottom: "1px solid #1e293b" }}>
+              <tr style={{ borderBottom: `1px solid ${t.border.subtle}` }}>
                 {["Таблица", "Ключ", "Режим", "Стратегия", "Chunk", "Workers", "Индивидуально"].map(h => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
@@ -153,7 +153,7 @@ export function TableSelectionStep({
                   : keyEntry?.loadingInfo ? "..." : "—";
                 const keyColor = keyEntry?.effective_key_type === "PRIMARY_KEY"  ? t.green.fg
                   : keyEntry?.effective_key_type === "UNIQUE_KEY"   ? t.purple.fg
-                  : keyEntry?.effective_key_type === "USER_DEFINED" ? "#fbbf24"
+                  : keyEntry?.effective_key_type === "USER_DEFINED" ? t.amber.base
                   : keyEntry?.effective_key_type === "NONE"         ? t.red.fg
                   :                                                   t.text.disabled;
                 return (
@@ -242,7 +242,7 @@ export function TableSelectionStep({
                       <tr>
                         <td colSpan={7} style={{
                           padding: "10px 16px", background: t.bg.s1,
-                          borderBottom: "1px solid #1e293b",
+                          borderBottom: `1px solid ${t.border.subtle}`,
                         }}>
                           <TableKeyConfig
                             entry={keyEntry}
