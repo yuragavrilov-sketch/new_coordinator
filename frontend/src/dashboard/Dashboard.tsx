@@ -121,6 +121,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
                 target_version: d.targetVersion,
                 priority:       d.priority,
                 window_at:      d.cutoverAt || undefined,
+                description:    d.description || undefined,
               });
               setWizardOpen(false);
               onCreated(id);

@@ -50,6 +50,39 @@ def list_schemas(conn) -> list[str]:
         return [r[0] for r in cur.fetchall() if r[0] not in _SYSTEM_SCHEMAS]
 
 
+def get_oracle_version(conn) -> dict:
+    """Return Oracle version info. Tries product_component_version → V$VERSION.
+    Falls back to {short: 'unknown'} on any failure (don't crash on auth)."""
+    try:
+        with conn.cursor() as cur:
+            # product_component_version is queryable by any user; V$VERSION needs privs
+            cur.execute("""
+                SELECT product, version FROM product_component_version
+                WHERE product LIKE 'Oracle%'
+                FETCH FIRST 1 ROWS ONLY
+            """)
+            row = cur.fetchone()
+            if row:
+                product, version = row
+                return {"banner": f"{product} {version}", "short": version}
+    except Exception:
+        pass
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT banner FROM v$version WHERE banner LIKE 'Oracle%' FETCH FIRST 1 ROWS ONLY")
+            row = cur.fetchone()
+            if row:
+                banner = row[0]
+                # Extract version e.g. "19.21" from "Oracle Database 19c Enterprise Edition Release 19.21.0.0.0 - Production"
+                import re
+                m = re.search(r"\b(\d+\.\d+(?:\.\d+)?)\b", banner)
+                short = m.group(1) if m else banner.split()[2] if len(banner.split()) > 2 else "unknown"
+                return {"banner": banner, "short": short}
+    except Exception:
+        pass
+    return {"banner": "unknown", "short": "unknown"}
+
+
 def list_tables(conn, schema: str) -> list[str]:
     with conn.cursor() as cur:
         cur.execute(

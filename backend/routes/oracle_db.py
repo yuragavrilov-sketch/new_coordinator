@@ -1,7 +1,9 @@
 """Oracle DB browser routes — used by the migration creation wizard."""
 
 from flask import Blueprint, jsonify, request
-from db.oracle_browser import get_oracle_conn, list_schemas, list_tables, get_table_info
+from db.oracle_browser import (
+    get_oracle_conn, list_schemas, list_tables, get_table_info, get_oracle_version,
+)
 
 bp = Blueprint("oracle_db", __name__)
 
@@ -57,3 +59,38 @@ def source_table_info():
             conn.close()
     except Exception as exc:
         return jsonify({"error": str(exc)}), 503
+
+
+@bp.get("/api/db/info")
+def db_info():
+    """Wizard helper: returns {source, target} = { host, service_name, version, ok }
+    so the New-Migration form can show prefilled host/version from existing settings.
+    Failures are returned as { ok: false, error } per side — endpoint never 5xx's."""
+    configs = _state["load_configs"]()
+    out: dict = {}
+    for side in ("source", "target"):
+        cfg = configs.get(f"oracle_{side}", {})
+        info = {
+            "host":         cfg.get("host", ""),
+            "port":         cfg.get("port", 1521),
+            "service_name": cfg.get("service_name", ""),
+            "configured":   bool(cfg.get("host") and cfg.get("service_name") and cfg.get("user")),
+            "version":      "",
+            "version_banner": "",
+            "ok":           False,
+            "error":        None,
+        }
+        if info["configured"]:
+            try:
+                conn = get_oracle_conn(side, configs)
+                try:
+                    v = get_oracle_version(conn)
+                    info["version"]        = v.get("short", "")
+                    info["version_banner"] = v.get("banner", "")
+                    info["ok"]             = True
+                finally:
+                    conn.close()
+            except Exception as exc:
+                info["error"] = str(exc)[:200]
+        out[side] = info
+    return jsonify(out)
