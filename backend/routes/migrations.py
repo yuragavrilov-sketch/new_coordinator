@@ -10,6 +10,7 @@ import services.debezium    as debezium
 import services.job_queue   as job_queue
 import services.kafka_lag   as kafka_lag_svc
 import services.oracle_stage as oracle_stage
+from services.strategy import Strategy
 
 bp = Blueprint("migrations", __name__)
 
@@ -120,36 +121,37 @@ def create_migration():
         conn = _state["get_conn"]()
         try:
             with conn.cursor() as cur:
-                strategy = body.get("migration_strategy", "STAGE").strip().upper()
-                if strategy not in ("STAGE", "DIRECT"):
-                    strategy = "STAGE"
+                # ── Strategy: single enum field replaces mode + strategy ──
+                try:
+                    strategy = Strategy.parse(body.get("strategy"))
+                except ValueError as exc:
+                    return jsonify({"error": f"Invalid strategy: {exc}"}), 400
 
-                mode = body.get("migration_mode", "CDC").strip().upper()
-                if mode not in ("CDC", "BULK_ONLY"):
-                    mode = "CDC"
-
-                # Group-based migration: derive connector fields from group
+                # group_id is now MANDATORY (no more Legacy per-migration connector)
                 group_id = body.get("group_id") or None
+                if not group_id:
+                    return jsonify({"error": "group_id is required (Legacy per-migration connector is no longer supported)"}), 400
+
                 connector_name = ""
                 topic_prefix = ""
                 consumer_group = ""
 
-                if group_id and mode == "CDC":
-                    from services.connector_groups import get_group as _get_group
+                if strategy.has_cdc:
+                    from services.connector_groups import get_group as _get_group, _active_topic_prefix
                     group = _get_group(group_id)
                     if not group:
                         return jsonify({"error": f"Группа {group_id} не найдена"}), 404
-                    from services.connector_groups import _active_topic_prefix
+                    if group.get("status") != "RUNNING":
+                        return jsonify({"error": (
+                            f"Коннектор группы не запущен (status={group.get('status')}). "
+                            "Запустите коннектор группы перед созданием CDC-миграции."
+                        )}), 409
                     connector_name = group["connector_name"]
                     topic_prefix = _active_topic_prefix(group)
                     src_schema = body.get("source_schema", "").upper()
                     src_table = body.get("source_table", "").upper()
                     prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
                     consumer_group = f"{prefix}_{src_schema}_{src_table}"
-                elif mode == "CDC":
-                    connector_name = body.get("connector_name", "")
-                    topic_prefix = body.get("topic_prefix", "")
-                    consumer_group = body.get("consumer_group", "")
 
                 cur.execute("""
                     INSERT INTO migrations (
@@ -162,7 +164,7 @@ def create_migration():
                         validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
-                        migration_strategy, migration_mode,
+                        strategy,
                         group_id,
                         created_at, updated_at
                     ) VALUES (
@@ -175,7 +177,7 @@ def create_migration():
                         %s,
                         %s, %s,
                         %s, %s, %s,
-                        %s, %s,
+                        %s,
                         %s,
                         %s, %s
                     )
@@ -197,7 +199,7 @@ def create_migration():
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
                     body.get("effective_key_columns_json", "[]"),
-                    strategy, mode,
+                    strategy.value,
                     group_id,
                     now, now,
                 ))
@@ -211,7 +213,7 @@ def create_migration():
             conn.close()
 
         # If group-based, update Debezium connector table list
-        if group_id and mode == "CDC":
+        if strategy.has_cdc:
             try:
                 from services.connector_groups import refresh_connector_tables
                 refresh_connector_tables(group_id)
