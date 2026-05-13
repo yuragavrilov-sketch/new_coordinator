@@ -86,9 +86,6 @@ export default function App() {
         onChange={onNavChange}
         schemaName={selectedSchema?.name || "—"}
         migrationId={selectedSchema ? selectedSchema.id.slice(0, 8) : "—"}
-        userName="Антон Волков"
-        userInitials="АВ"
-        userRole="DBA · admin"
       />
 
       <main style={{ padding: "18px 22px", minWidth: 0 }}>

@@ -74,6 +74,13 @@ export interface LiveMetrics {
   netSpark:  number[];
   redoSpark: number[];
   lagSpark:  number[];
+  // Target side (same metrics from target Oracle's V$SYSMETRIC)
+  targetCpu:        number;
+  targetNetwork:    number;
+  targetRedoPerSec: number;
+  targetCpuSpark:   number[];
+  targetNetSpark:   number[];
+  targetRedoSpark:  number[];
 }
 
 export const STATUS_MAP: Record<ObjectStatus, { label: string; tone: "info" | "ok" | "warn" | "error" | "muted" }> = {

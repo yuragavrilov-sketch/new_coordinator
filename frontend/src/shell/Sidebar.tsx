@@ -23,16 +23,10 @@ interface Props {
   onChange:      (key: NavKey) => void;
   schemaName:    string;
   migrationId:   string;
-  env?:          string;          // "prod · eu-central"
-  userName:      string;
-  userInitials:  string;
-  userRole:      string;
 }
 
 export function Sidebar({
   active, onChange, schemaName, migrationId,
-  env = "prod · eu-central",
-  userName, userInitials, userRole,
 }: Props) {
   return (
     <aside style={{
@@ -153,44 +147,6 @@ export function Sidebar({
         })}
       </nav>
 
-      {/* Side foot */}
-      <div style={{
-        marginTop: "auto",
-        display: "flex", flexDirection: "column", gap: 8,
-        paddingTop: 10,
-        borderTop: `1px solid ${t.border.subtle}`,
-      }}>
-        <span style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "3px 9px",
-          background: t.bg.s1,
-          border: `1px solid ${t.border.subtle}`,
-          borderRadius: t.radius.pill,
-          fontSize: 11,
-          width: "fit-content",
-        }}>
-          <span aria-hidden style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: t.tone.ok,
-            boxShadow: `0 0 0 3px color-mix(in oklab, ${t.tone.ok} 18%, transparent)`,
-          }}/>
-          {env}
-        </span>
-        <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "2px 4px" }}>
-          <span style={{
-            width: 26, height: 26, borderRadius: "50%",
-            background: t.tone.accent, color: t.text.inverse,
-            display: "grid", placeItems: "center",
-            fontSize: "10.5px", fontWeight: 600,
-          }}>
-            {userInitials}
-          </span>
-          <div style={{ lineHeight: 1.25 }}>
-            <div style={{ fontSize: 12, fontWeight: 500 }}>{userName}</div>
-            <div style={{ fontSize: "10.5px", color: t.text.muted }}>{userRole}</div>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

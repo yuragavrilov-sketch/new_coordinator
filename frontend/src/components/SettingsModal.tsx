@@ -1,5 +1,50 @@
 import React, { useEffect, useState } from "react";
 import { t } from "../theme";
+import { useApi } from "../hooks/useApi";
+import { fmtBytes } from "../utils/format";
+
+// ─── Service metrics types ───────────────────────────────────────────────────
+
+interface OracleMetric {
+  ok:            boolean;
+  error?:        string;
+  host?:         string;
+  service_name?: string;
+  version?:      string;
+  cpu_pct?:      number;
+  redo_bps?:     number;
+  network_bps?:  number;
+  active_sessions?: number | null;
+  instance?:     { name: string; host: string; status: string } | null;
+  rtt_ms?:       number;
+}
+
+interface KafkaMetric {
+  ok:         boolean;
+  error?:     string;
+  bootstrap?: string;
+  brokers?:   number;
+  topics?:    number;
+  cluster_id?: string | null;
+  rtt_ms?:    number;
+}
+
+interface KafkaConnectMetric {
+  ok:         boolean;
+  error?:     string;
+  url?:       string;
+  version?:   string;
+  cluster_id?: string;
+  connectors?: { total: number; running: number; failed: number; paused: number; unassigned: number };
+  rtt_ms?:    number;
+}
+
+interface ServicesMetrics {
+  oracle_source: OracleMetric;
+  oracle_target: OracleMetric;
+  kafka:         KafkaMetric;
+  kafka_connect: KafkaConnectMetric;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +144,9 @@ export function SettingsModal({ onClose }: Props) {
   const [error,       setError]       = useState<string | null>(null);
   const [testing,     setTesting]     = useState(false);
   const [testResult,  setTestResult]  = useState<{ status: string; message: string } | null>(null);
+
+  // Live service-health metrics (polled every 10s)
+  const metricsApi = useApi<ServicesMetrics>("/api/services/metrics", { intervalMs: 10000 });
 
   useEffect(() => {
     fetch("/api/config")
@@ -227,6 +275,9 @@ export function SettingsModal({ onClose }: Props) {
           </div>
         )}
 
+        {/* Live metrics for the current tab */}
+        <ServiceMetricsPanel tab={activeTab} data={metricsApi.data}/>
+
         {/* Tab content */}
         {(activeTab === "oracle_source" || activeTab === "oracle_target") && (
           <div>
@@ -342,3 +393,168 @@ export function SettingsModal({ onClose }: Props) {
     </>
   );
 }
+
+// ─── Service metrics panel ───────────────────────────────────────────────────
+
+function ServiceMetricsPanel({
+  tab, data,
+}: {
+  tab:   TabKey;
+  data:  ServicesMetrics | null;
+}) {
+  if (!data) {
+    return (
+      <div style={metricsBoxStyle}>
+        <span style={{ color: t.text.muted, fontSize: 11 }}>загружаем метрики…</span>
+      </div>
+    );
+  }
+  if (tab === "oracle_source" || tab === "oracle_target") {
+    return <OracleMetricsPanel data={data[tab]}/>;
+  }
+  if (tab === "kafka") {
+    return <KafkaMetricsPanel data={data.kafka}/>;
+  }
+  return <KafkaConnectMetricsPanel data={data.kafka_connect}/>;
+}
+
+function StatusDot({ ok }: { ok: boolean }) {
+  const color = ok ? t.green.fg : t.red.fg;
+  return (
+    <span aria-hidden style={{
+      width: 8, height: 8, borderRadius: "50%",
+      background: color,
+      boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 22%, transparent)`,
+      display: "inline-block", flexShrink: 0,
+    }}/>
+  );
+}
+
+function MetricItem({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <span style={{ fontSize: "9.5px", textTransform: "uppercase", letterSpacing: "0.06em", color: t.text.muted, fontWeight: 600 }}>
+        {label}
+      </span>
+      <span style={{ fontSize: "12.5px", fontWeight: 500, fontFamily: mono ? t.font.mono : undefined }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function OracleMetricsPanel({ data }: { data: OracleMetric }) {
+  return (
+    <div style={metricsBoxStyle}>
+      <div style={metricsHeadStyle}>
+        <StatusDot ok={data.ok}/>
+        <span style={{ fontWeight: 600, fontSize: "12.5px" }}>
+          {data.ok ? "Подключение работает" : "Недоступен"}
+        </span>
+        {data.rtt_ms !== undefined && (
+          <span style={{ marginLeft: "auto", fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+            {data.rtt_ms} ms
+          </span>
+        )}
+      </div>
+      {!data.ok && data.error && (
+        <div style={{ fontSize: 11, color: t.red.fg, fontFamily: t.font.mono }}>{data.error}</div>
+      )}
+      {data.ok && (
+        <div style={metricsGridStyle}>
+          <MetricItem label="Host"     value={data.host || "—"} mono/>
+          <MetricItem label="Service"  value={data.service_name || "—"} mono/>
+          <MetricItem label="Version"  value={data.version || "—"} mono/>
+          <MetricItem label="CPU"      value={`${data.cpu_pct ?? 0}%`}/>
+          <MetricItem label="Redo/s"   value={fmtBytes(data.redo_bps || 0) + "/s"}/>
+          <MetricItem label="Network"  value={fmtBytes(data.network_bps || 0) + "/s"}/>
+          <MetricItem label="Sessions" value={data.active_sessions ?? "—"}/>
+          {data.instance && (
+            <MetricItem label="Instance" value={`${data.instance.name} · ${data.instance.status}`} mono/>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KafkaMetricsPanel({ data }: { data: KafkaMetric }) {
+  return (
+    <div style={metricsBoxStyle}>
+      <div style={metricsHeadStyle}>
+        <StatusDot ok={data.ok}/>
+        <span style={{ fontWeight: 600, fontSize: "12.5px" }}>
+          {data.ok ? "Кластер доступен" : "Недоступен"}
+        </span>
+        {data.rtt_ms !== undefined && (
+          <span style={{ marginLeft: "auto", fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+            {data.rtt_ms} ms
+          </span>
+        )}
+      </div>
+      {!data.ok && data.error && (
+        <div style={{ fontSize: 11, color: t.red.fg, fontFamily: t.font.mono }}>{data.error}</div>
+      )}
+      {data.ok && (
+        <div style={metricsGridStyle}>
+          <MetricItem label="Bootstrap"  value={data.bootstrap || "—"} mono/>
+          <MetricItem label="Brokers"    value={data.brokers ?? 0}/>
+          <MetricItem label="Topics"     value={data.topics  ?? 0}/>
+          {data.cluster_id && <MetricItem label="Cluster ID" value={data.cluster_id} mono/>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KafkaConnectMetricsPanel({ data }: { data: KafkaConnectMetric }) {
+  return (
+    <div style={metricsBoxStyle}>
+      <div style={metricsHeadStyle}>
+        <StatusDot ok={data.ok}/>
+        <span style={{ fontWeight: 600, fontSize: "12.5px" }}>
+          {data.ok ? "REST API отвечает" : "Недоступен"}
+        </span>
+        {data.rtt_ms !== undefined && (
+          <span style={{ marginLeft: "auto", fontSize: 11, color: t.text.muted, fontFamily: t.font.mono }}>
+            {data.rtt_ms} ms
+          </span>
+        )}
+      </div>
+      {!data.ok && data.error && (
+        <div style={{ fontSize: 11, color: t.red.fg, fontFamily: t.font.mono }}>{data.error}</div>
+      )}
+      {data.ok && data.connectors && (
+        <div style={metricsGridStyle}>
+          <MetricItem label="URL"     value={data.url || "—"} mono/>
+          <MetricItem label="Version" value={data.version || "—"} mono/>
+          <MetricItem label="Connectors" value={data.connectors.total}/>
+          <MetricItem label="Running" value={<span style={{ color: t.green.fg }}>{data.connectors.running}</span>}/>
+          <MetricItem label="Failed"  value={<span style={{ color: data.connectors.failed > 0 ? t.red.fg : t.text.primary }}>{data.connectors.failed}</span>}/>
+          <MetricItem label="Paused"  value={data.connectors.paused}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const metricsBoxStyle: React.CSSProperties = {
+  background:   t.bg.s2,
+  border:       `1px solid ${t.border.subtle}`,
+  borderRadius: 6,
+  padding:      "10px 12px",
+  marginBottom: 14,
+  display:      "flex",
+  flexDirection: "column",
+  gap:          8,
+};
+const metricsHeadStyle: React.CSSProperties = {
+  display:    "flex",
+  alignItems: "center",
+  gap:        8,
+};
+const metricsGridStyle: React.CSSProperties = {
+  display:             "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+  gap:                 "8px 16px",
+};

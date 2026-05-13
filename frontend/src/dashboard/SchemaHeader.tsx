@@ -1,11 +1,10 @@
 import React from "react";
 import { t } from "../theme";
 import {
-  Icon, ObjStatusBadge, ProgressBar, StagePipeline,
-  PriorityChip, Endpoint,
+  Icon, ProgressBar, StagePipeline, Endpoint,
 } from "../components/ui";
 import { fmtGb } from "../utils/format";
-import { STAGES, STATUS_MAP, type SchemaInfo } from "./types";
+import { STAGES, type SchemaInfo } from "./types";
 
 interface Props {
   schema:    SchemaInfo;
@@ -16,8 +15,6 @@ interface Props {
 }
 
 export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: Props) {
-  const statusTone = STATUS_MAP[schema.status === "cdc" ? "running" : schema.status as never]?.tone ?? "info";
-  const statusLabel = STATUS_MAP[schema.status === "cdc" ? "running" : schema.status as never]?.label ?? schema.status;
   return (
     <div style={{
       background:   t.bg.s1,
@@ -54,8 +51,6 @@ export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: P
               <span style={{ color: t.text.muted }}> / </span>
               миграция схемы
             </h1>
-            <ObjStatusBadge tone={statusTone} label={statusLabel}/>
-            <PriorityChip priority={schema.priority}/>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12 }}>
             <Endpoint label="SOURCE" value={`${schema.source.host} · ${schema.source.version}`}/>

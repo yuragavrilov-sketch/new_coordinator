@@ -103,12 +103,18 @@ export const initialEvents: MigrationEvent[] = [
 ];
 
 export const initialMetrics = {
-  sourceCpu:  68,
-  network:    412,
-  redoPerSec: 1024 * 1024 * 84,
-  cdcLagMs:   1800,
-  cpuSpark:  [62, 64, 70, 75, 72, 68, 71, 74, 69, 68],
-  netSpark:  [380, 400, 420, 415, 412, 408, 430, 425, 412, 415],
-  redoSpark: [60, 65, 70, 80, 85, 78, 82, 84, 86, 84],
-  lagSpark:  [3.2, 2.8, 2.4, 2.0, 1.9, 2.1, 1.8, 1.6, 1.9, 1.8],
+  sourceCpu:  0,
+  network:    0,
+  redoPerSec: 0,
+  cdcLagMs:   0,
+  cpuSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  netSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  redoSpark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  lagSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  targetCpu:        0,
+  targetNetwork:    0,
+  targetRedoPerSec: 0,
+  targetCpuSpark:   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  targetNetSpark:   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  targetRedoSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 };

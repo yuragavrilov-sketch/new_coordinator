@@ -48,10 +48,18 @@ export function RightRail({ schemaName, metrics, events }: Props) {
           borderRadius: t.radius.lg,
           padding: 10,
         }}>
-          <MiniStat label="Source CPU" value={`${metrics.sourceCpu}%`}             tone="info" data={metrics.cpuSpark}/>
-          <MiniStat label="Network"    value={`${metrics.network} MB/s`}           tone="ok"   data={metrics.netSpark}/>
-          <MiniStat label="Redo/s"     value={fmtBytes(metrics.redoPerSec) + "/s"} tone="warn" data={metrics.redoSpark}/>
-          <MiniStat label="CDC lag"    value={`${(metrics.cdcLagMs / 1000).toFixed(1)}s`} tone="info" data={metrics.lagSpark}/>
+          <GroupHeading>Source</GroupHeading>
+          <MiniStat label="CPU"     value={`${metrics.sourceCpu}%`}             tone="info" data={metrics.cpuSpark}/>
+          <MiniStat label="Network" value={`${metrics.network} MB/s`}           tone="ok"   data={metrics.netSpark}/>
+          <MiniStat label="Redo/s"  value={fmtBytes(metrics.redoPerSec) + "/s"} tone="warn" data={metrics.redoSpark}/>
+
+          <GroupHeading>Target</GroupHeading>
+          <MiniStat label="CPU"     value={`${metrics.targetCpu}%`}                   tone="info" data={metrics.targetCpuSpark}/>
+          <MiniStat label="Network" value={`${metrics.targetNetwork} MB/s`}           tone="ok"   data={metrics.targetNetSpark}/>
+          <MiniStat label="Redo/s"  value={fmtBytes(metrics.targetRedoPerSec) + "/s"} tone="warn" data={metrics.targetRedoSpark}/>
+
+          <GroupHeading>CDC</GroupHeading>
+          <MiniStat label="Lag" value={`${(metrics.cdcLagMs / 1000).toFixed(1)}s`} tone="info" data={metrics.lagSpark}/>
         </div>
       </section>
 
@@ -83,6 +91,21 @@ export function RightRail({ schemaName, metrics, events }: Props) {
         </div>
       </section>
     </aside>
+  );
+}
+
+function GroupHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: "9.5px", fontWeight: 700, letterSpacing: "0.07em",
+      textTransform: "uppercase",
+      color: t.text.muted,
+      marginTop: 6,
+      paddingBottom: 2,
+      borderBottom: `1px dashed ${t.border.subtle}`,
+    }}>
+      {children}
+    </div>
   );
 }
 

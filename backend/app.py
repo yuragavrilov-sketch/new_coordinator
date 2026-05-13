@@ -132,6 +132,10 @@ from routes.oracle_db import bp as oracle_bp
 oracle_mod.init(load_configs_fn=_load_cfg)
 app.register_blueprint(oracle_bp)
 
+# ── Service-health metrics (Settings page) ────────────────────────────────────
+from routes.services_metrics import bp as services_metrics_bp
+app.register_blueprint(services_metrics_bp)
+
 # ── Checklist blueprint ───────────────────────────────────────────────────────
 import routes.checklist as checklist_mod
 from routes.checklist import bp as checklist_bp

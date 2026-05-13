@@ -573,43 +573,45 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
     return out
 
 
-def get_metrics(conn, sm_id: str) -> dict:
-    """Live metrics: source-Oracle V$SYSMETRIC + CDC lag aggregated across
-    child migrations. Failures degrade silently to zeros so the dashboard
-    never crashes on a misconfigured source."""
-    cpu = 0.0
-    net_mb_s = 0.0
-    redo_bps = 0
-    cpu_hist:  list[float] = []
-    net_hist:  list[float] = []
-    redo_hist: list[float] = []
-
+def _collect_side_metrics(side: str) -> dict:
+    """Open `oracle_<side>` and pull current + historical V$SYSMETRIC.
+    Silent fallback to zeros on any failure (V$ permissions, network, etc)."""
+    out = {
+        "cpu": 0.0, "net_mb_s": 0.0, "redo_bps": 0,
+        "cpu_hist": [], "net_hist": [], "redo_hist": [],
+    }
     try:
         from db.oracle_browser import get_oracle_conn, get_v_sysmetric, get_v_sysmetric_history
         from db.state_db import load_configs
 
         configs = load_configs(True)
-        src = get_oracle_conn("source", configs)
+        ora = get_oracle_conn(side, configs)
         try:
-            cur_vals  = get_v_sysmetric(src)
-            hist_vals = get_v_sysmetric_history(src, limit_per_metric=10)
+            cur_vals  = get_v_sysmetric(ora)
+            hist_vals = get_v_sysmetric_history(ora, limit_per_metric=10)
         finally:
-            try: src.close()
+            try: ora.close()
             except Exception: pass
 
-        cpu      = float(cur_vals.get("Host CPU Utilization (%)") or 0)
-        net_bps  = float(cur_vals.get("Network Traffic Volume Per Sec") or 0)
-        net_mb_s = round(net_bps / (1024 * 1024), 2)
-        redo_bps = int(cur_vals.get("Redo Generated Per Sec") or 0)
-
-        cpu_hist  = [round(float(v), 1) for v in hist_vals.get("Host CPU Utilization (%)") or []]
-        net_hist  = [round(float(v) / (1024 * 1024), 2)
-                     for v in hist_vals.get("Network Traffic Volume Per Sec") or []]
-        redo_hist = [int(v) for v in hist_vals.get("Redo Generated Per Sec") or []]
+        out["cpu"]      = round(float(cur_vals.get("Host CPU Utilization (%)") or 0), 1)
+        net_bps         = float(cur_vals.get("Network Traffic Volume Per Sec") or 0)
+        out["net_mb_s"] = round(net_bps / (1024 * 1024), 2)
+        out["redo_bps"] = int(cur_vals.get("Redo Generated Per Sec") or 0)
+        out["cpu_hist"]  = [round(float(v), 1) for v in hist_vals.get("Host CPU Utilization (%)") or []]
+        out["net_hist"]  = [round(float(v) / (1024 * 1024), 2)
+                            for v in hist_vals.get("Network Traffic Volume Per Sec") or []]
+        out["redo_hist"] = [int(v) for v in hist_vals.get("Redo Generated Per Sec") or []]
     except Exception as exc:
-        print(f"[metrics] source-side metrics failed: {exc}")
+        print(f"[metrics] {side}-side metrics failed: {exc}")
+    return out
 
-    # CDC lag: sum across all child migrations of this schema_migration
+
+def get_metrics(conn, sm_id: str) -> dict:
+    """Live metrics: V$SYSMETRIC from both source and target + CDC lag.
+    Failures degrade silently to zeros so the dashboard never crashes."""
+    src = _collect_side_metrics("source")
+    tgt = _collect_side_metrics("target")
+
     cdc_lag_total = 0
     try:
         with conn.cursor() as cur:
@@ -629,14 +631,23 @@ def get_metrics(conn, sm_id: str) -> dict:
         return ([0] * (10 - len(arr)) + arr)[-10:] if arr else [0] * 10
 
     return {
-        "sourceCpu":  round(cpu, 1),
-        "network":    net_mb_s,
-        "redoPerSec": redo_bps,
-        "cdcLagMs":   cdc_lag_total,
-        "cpuSpark":   _pad10(cpu_hist),
-        "netSpark":   _pad10(net_hist),
-        "redoSpark":  _pad10(redo_hist),
-        "lagSpark":   [0] * 10,
+        # Source
+        "sourceCpu":  src["cpu"],
+        "network":    src["net_mb_s"],
+        "redoPerSec": src["redo_bps"],
+        "cpuSpark":   _pad10(src["cpu_hist"]),
+        "netSpark":   _pad10(src["net_hist"]),
+        "redoSpark":  _pad10(src["redo_hist"]),
+        # Target
+        "targetCpu":        tgt["cpu"],
+        "targetNetwork":    tgt["net_mb_s"],
+        "targetRedoPerSec": tgt["redo_bps"],
+        "targetCpuSpark":   _pad10(tgt["cpu_hist"]),
+        "targetNetSpark":   _pad10(tgt["net_hist"]),
+        "targetRedoSpark":  _pad10(tgt["redo_hist"]),
+        # CDC
+        "cdcLagMs":  cdc_lag_total,
+        "lagSpark":  [0] * 10,
     }
 
 
