@@ -119,9 +119,6 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
                 source_version: d.sourceVersion,
                 target_host:    d.targetCluster,
                 target_version: d.targetVersion,
-                priority:       d.priority,
-                window_at:      d.cutoverAt || undefined,
-                description:    d.description || undefined,
               });
               setWizardOpen(false);
               onCreated(id);
@@ -222,8 +219,6 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
               source_version: d.sourceVersion,
               target_host:    d.targetCluster,
               target_version: d.targetVersion,
-              priority:       d.priority,
-              window_at:      d.cutoverAt || undefined,
             });
             setWizardOpen(false);
             onCreated(id);
