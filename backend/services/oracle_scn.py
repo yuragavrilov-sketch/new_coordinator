@@ -24,20 +24,6 @@ def open_oracle_conn(cfg: dict):
     )
 
 
-def get_current_scn(cfg: dict) -> int:
-    """Return the current SCN of an Oracle instance."""
-    conn = open_oracle_conn(cfg)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT current_scn FROM v$database")
-            row = cur.fetchone()
-            if not row:
-                raise RuntimeError("v$database returned no rows — проверьте привилегии")
-            return int(row[0])
-    finally:
-        conn.close()
-
-
 def check_supplemental_logging(cfg: dict, schema: str, table: str) -> bool:
     """
     Return True if the table has at least ALL COLUMNS supplemental logging enabled.
