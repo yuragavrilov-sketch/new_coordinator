@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 from db.oracle_browser import get_oracle_conn, get_full_ddl_info, list_tables
+from services.strategy import Strategy
 
 bp = Blueprint("planner", __name__)
 
@@ -293,7 +294,11 @@ def execute_plan():
                     # Merge defaults with overrides
                     chunk_size = overrides.get("chunk_size", defaults.get("chunk_size", 1_000_000))
                     max_workers = overrides.get("max_parallel_workers", defaults.get("max_parallel_workers", 1))
-                    strategy = overrides.get("migration_strategy", defaults.get("migration_strategy", "STAGE"))
+                    raw_strategy = overrides.get("strategy") or defaults.get("strategy") or "CDC_STAGE"
+                    try:
+                        strategy = Strategy.parse(raw_strategy)
+                    except ValueError as exc:
+                        return jsonify({"error": f"Invalid strategy for {table_name}: {exc}"}), 400
                     baseline_pd = overrides.get("baseline_parallel_degree", defaults.get("baseline_parallel_degree", 4))
 
                     mid = str(uuid.uuid4())
@@ -306,7 +311,7 @@ def execute_plan():
                             target_schema, target_table,
                             chunk_size, max_parallel_workers,
                             baseline_parallel_degree,
-                            migration_strategy, migration_mode,
+                            strategy,
                             group_id,
                             created_at, updated_at
                         ) VALUES (
@@ -316,7 +321,7 @@ def execute_plan():
                             %s, %s,
                             %s, %s,
                             %s,
-                            %s, %s,
+                            %s,
                             %s,
                             %s, %s
                         )
@@ -326,8 +331,8 @@ def execute_plan():
                         tgt_schema, table_name,
                         chunk_size, max(1, int(max_workers)),
                         max(1, int(baseline_pd)),
-                        strategy, mode,
-                        group_id if mode == "CDC" else None,
+                        strategy.value,
+                        group_id if strategy.has_cdc else None,
                         now, now,
                     ))
 

@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
+from services.strategy import Strategy
 
 bp = Blueprint("connector_groups", __name__)
 
@@ -369,15 +370,13 @@ def create_migration_from_table(group_id: str):
     prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
     consumer_group = f"{prefix}_{src_schema}_{src_table}"
 
-    migration_mode = body.get("migration_mode", "CDC").upper()
-    if migration_mode not in ("CDC", "BULK_ONLY"):
-        migration_mode = "CDC"
-    migration_strategy = body.get("migration_strategy", "STAGE").upper()
-    if migration_strategy not in ("STAGE", "DIRECT"):
-        migration_strategy = "STAGE"
+    try:
+        strategy = Strategy.parse(body.get("strategy"))
+    except ValueError as exc:
+        return jsonify({"error": f"Invalid strategy: {exc}"}), 400
 
-    stage_name = f"STG_{src_schema}_{src_table}" if migration_strategy == "STAGE" else ""
-    stage_tablespace = body.get("stage_tablespace", "PAYSTAGE") if migration_strategy == "STAGE" else ""
+    stage_name       = f"STG_{src_schema}_{src_table}" if strategy.uses_stage else ""
+    stage_tablespace = body.get("stage_tablespace", "PAYSTAGE") if strategy.uses_stage else ""
 
     migration_name = (body.get("migration_name", "").strip()
                       or f"{src_schema}.{src_table} → {tgt_schema}.{tgt_table}")
@@ -401,7 +400,7 @@ def create_migration_from_table(group_id: str):
                     validate_hash_sample,
                     source_pk_exists, source_uk_exists,
                     effective_key_type, effective_key_source, effective_key_columns_json,
-                    migration_strategy, migration_mode,
+                    strategy,
                     group_id,
                     created_at, updated_at
                 ) VALUES (
@@ -414,7 +413,7 @@ def create_migration_from_table(group_id: str):
                     %s,
                     %s, %s,
                     %s, %s, %s,
-                    %s, %s,
+                    %s,
                     %s,
                     %s, %s
                 )
@@ -430,7 +429,7 @@ def create_migration_from_table(group_id: str):
                 body.get("validate_hash_sample", False),
                 pk_exists, uk_exists,
                 ekt, key_source_map.get(ekt, "NONE"), ekc_json,
-                migration_strategy, migration_mode,
+                strategy.value,
                 group_id,
                 now, now,
             ))
@@ -447,7 +446,7 @@ def create_migration_from_table(group_id: str):
         conn.close()
 
     # ── refresh Debezium table list ───────────────────────────────────────
-    if migration_mode == "CDC":
+    if strategy.has_cdc:
         try:
             refresh_connector_tables(group_id)
         except Exception as exc:
