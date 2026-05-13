@@ -7,90 +7,34 @@
  * ValidationPanel     — stage validation result (STAGE_VALIDATING / STAGE_VALIDATED+)
  */
 
-import React, { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { SSEEvent } from "../hooks/useSSE";
-
-// ── Shared style helpers ──────────────────────────────────────────────────────
-
-function PanelWrap({ accent, title, children }: {
-  accent: string; title: string; children: React.ReactNode;
-}) {
-  return (
-    <div style={{
-      border:        `1px solid ${accent}40`,
-      borderRadius:  7,
-      overflow:      "hidden",
-      marginBottom:  14,
-    }}>
-      <div style={{
-        padding:    "6px 12px",
-        background: "#0a111f",
-        borderBottom: `1px solid ${accent}30`,
-        fontSize:   11,
-        fontWeight: 700,
-        color:      accent,
-        textTransform: "uppercase",
-        letterSpacing: 0.8,
-      }}>
-        {title}
-      </div>
-      <div style={{ padding: "10px 12px", background: "#060e1a" }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                  fontSize: 12, marginBottom: 5 }}>
-      <span style={{ color: "#64748b" }}>{label}</span>
-      <span style={{ color: "#e2e8f0", fontFamily: mono ? "monospace" : undefined }}>{value}</span>
-    </div>
-  );
-}
+import { Panel, Row, Button, Badge } from "./ui";
+import { t } from "../theme";
+import { useApi } from "../hooks/useApi";
+import { fmtTs } from "../utils/format";
 
 // ── BulkProgressPanel ─────────────────────────────────────────────────────────
 
-interface ChunkStats {
-  total: number; pending: number; claimed: number;
-  running: number; done: number; failed: number;
-  rows_loaded: number;
+interface ChunkStatsResp {
+  stats: {
+    total: number; pending: number; claimed: number;
+    running: number; done: number; failed: number;
+    rows_loaded: number;
+  };
 }
 
 export function BulkProgressPanel({
   migrationId, sseEvents, chunkType = "BULK",
 }: { migrationId: string; sseEvents: SSEEvent[]; chunkType?: "BULK" | "BASELINE" }) {
-  const [stats,    setStats]    = useState<ChunkStats | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [retrying, setRetrying] = useState(false);
+  const { data, loading, reload } = useApi<ChunkStatsResp>(
+    `/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}&page=1&page_size=1`,
+    { intervalMs: 5_000, deps: [migrationId, chunkType] },
+  );
 
   const isBaseline = chunkType === "BASELINE";
-  const accent     = isBaseline ? "#9333ea" : "#d97706";
+  const accent     = isBaseline ? "#9333ea" : t.amber.dim;
   const panelTitle = isBaseline ? "Baseline Load Progress" : "Bulk Load Progress";
-
-  function load() {
-    fetch(`/api/migrations/${migrationId}/chunks?chunk_type=${chunkType}&page=1&page_size=1`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setStats(d.stats); setLoading(false); })
-      .catch(() => setLoading(false));
-  }
-
-  async function retryFailed() {
-    setRetrying(true);
-    try {
-      await fetch(
-        `/api/migrations/${migrationId}/retry-chunks?chunk_type=${chunkType}`,
-        { method: "POST" },
-      );
-      load();
-    } finally {
-      setRetrying(false);
-    }
-  }
-
-  useEffect(() => { load(); }, [migrationId]);
 
   useEffect(() => {
     const last = sseEvents[0];
@@ -100,211 +44,175 @@ export function BulkProgressPanel({
       (last.type === "chunk_progress" || last.type === "migration_phase" ||
        last.type === "baseline_progress")
     ) {
-      load();
+      reload();
     }
-  }, [sseEvents]); // eslint-disable-line
+  }, [sseEvents, migrationId, reload]);
 
-  useEffect(() => {
-    const id = setInterval(load, 5_000);
-    return () => clearInterval(id);
-  }, [migrationId]); // eslint-disable-line
+  async function retryFailed() {
+    await fetch(
+      `/api/migrations/${migrationId}/retry-chunks?chunk_type=${chunkType}`,
+      { method: "POST" },
+    );
+    reload();
+  }
 
-  if (loading) return null;
-  if (!stats || stats.total === 0) return null;
-
-  const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+  if (loading || !data?.stats || data.stats.total === 0) return null;
+  const stats  = data.stats;
+  const pct    = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
   const active = stats.claimed + stats.running;
 
   return (
-    <PanelWrap accent={accent} title={panelTitle}>
+    <Panel accent={accent} title={panelTitle} style={{ marginBottom: t.space[4] }}>
       {/* Progress bar */}
-      <div style={{ marginBottom: 10 }}>
+      <div style={{ marginBottom: t.space[3] }}>
         <div style={{
-          background: "#1e293b", borderRadius: 4, height: 8, overflow: "hidden",
+          background: t.bg.s2, borderRadius: t.radius.sm, height: 8, overflow: "hidden",
         }}>
           <div style={{
-            width: `${pct}%`, height: "100%",
-            background: stats.failed > 0 ? "#ef4444" : "#22c55e",
+            width:      `${pct}%`,
+            height:     "100%",
+            background: stats.failed > 0 ? t.red.base : t.green.base,
             transition: "width 0.4s",
           }} />
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between",
-                      fontSize: 11, color: "#64748b", marginTop: 4 }}>
-          <span>{stats.done} / {stats.total} чанков &middot; {stats.rows_loaded.toLocaleString()} строк</span>
-          <span style={{ color: pct === 100 ? "#22c55e" : "#fcd34d", fontWeight: 700 }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between",
+          fontSize: t.size.sm, color: t.text.muted, marginTop: 4,
+        }}>
+          <span>{stats.done} / {stats.total} чанков · {stats.rows_loaded.toLocaleString()} строк</span>
+          <span style={{ color: pct === 100 ? t.green.base : t.amber.fg, fontWeight: 700 }}>
             {pct}%
           </span>
         </div>
       </div>
 
-      {/* Stats row */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ display: "flex", gap: t.space[3], flexWrap: "wrap", alignItems: "flex-end" }}>
         {[
-          { label: "Ожидают",   value: stats.pending, color: "#64748b" },
-          { label: "Активны",   value: active,        color: "#fcd34d" },
-          { label: "Готово",    value: stats.done,    color: "#22c55e" },
-          { label: "Ошибки",    value: stats.failed,  color: "#ef4444" },
+          { label: "Ожидают", value: stats.pending, color: t.text.muted   },
+          { label: "Активны", value: active,        color: t.amber.fg     },
+          { label: "Готово",  value: stats.done,    color: t.green.base   },
+          { label: "Ошибки",  value: stats.failed,  color: t.red.base     },
         ].map(s => (
           <div key={s.label} style={{ textAlign: "center" }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 10, color: "#475569" }}>{s.label}</div>
+            <div style={{ fontSize: t.size.xs, color: t.text.disabled }}>{s.label}</div>
           </div>
         ))}
         {stats.failed > 0 && (
-          <button
+          <Button
+            variant="danger"
+            size="sm"
             onClick={retryFailed}
-            disabled={retrying}
-            style={{
-              marginLeft: "auto",
-              background: "#450a0a", border: "1px solid #7f1d1d", borderRadius: 5,
-              color: "#fca5a5", fontSize: 10, padding: "4px 10px",
-              cursor: retrying ? "not-allowed" : "pointer", fontWeight: 700,
-            }}
+            style={{ marginLeft: "auto" }}
           >
-            {retrying ? "…" : `↺ Повторить ошибки (${stats.failed})`}
-          </button>
+            ↺ Повторить ошибки ({stats.failed})
+          </Button>
         )}
       </div>
-    </PanelWrap>
+    </Panel>
   );
 }
 
 // ── ConnectorPanel ────────────────────────────────────────────────────────────
 
+interface ConnectorData {
+  connector_name: string;
+  status:         string;
+}
+
 export function ConnectorPanel({
   migrationId, sseEvents,
 }: { migrationId: string; sseEvents: SSEEvent[] }) {
-  const [data,    setData]    = useState<{ connector_name: string; status: string } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  function load() {
-    fetch(`/api/migrations/${migrationId}/connector`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }
-
-  useEffect(() => { load(); }, [migrationId]);
+  const { data, loading, reload } = useApi<ConnectorData>(
+    `/api/migrations/${migrationId}/connector`,
+    { intervalMs: 10_000, deps: [migrationId] },
+  );
 
   useEffect(() => {
     const last = sseEvents[0];
     if (last?.migration_id === migrationId &&
         (last.type === "connector_status" || last.type === "migration_phase")) {
-      load();
+      reload();
     }
-  }, [sseEvents]); // eslint-disable-line
-
-  useEffect(() => {
-    const id = setInterval(load, 10_000);
-    return () => clearInterval(id);
-  }, [migrationId]); // eslint-disable-line
+  }, [sseEvents, migrationId, reload]);
 
   if (loading || !data) return null;
 
-  const statusColor = data.status === "RUNNING"  ? "#22c55e"
-                    : data.status === "FAILED"    ? "#ef4444"
-                    : data.status === "NOT_FOUND" ? "#64748b"
-                    : "#fcd34d";
+  const statusColor = data.status === "RUNNING"   ? t.green.base
+                    : data.status === "FAILED"    ? t.red.base
+                    : data.status === "NOT_FOUND" ? t.text.muted
+                                                  : t.amber.fg;
 
   return (
-    <PanelWrap accent="#7c3aed" title="Debezium Connector">
-      <Row label="Коннектор" value={
-        <span style={{ fontFamily: "monospace", fontSize: 11 }}>
-          {data.connector_name || "—"}
-        </span>
-      } />
+    <Panel accent={t.purple.base} title="Debezium Connector" style={{ marginBottom: t.space[4] }}>
+      <Row label="Коннектор" mono value={data.connector_name || "—"} />
       <Row label="Статус" value={
         <span style={{ fontWeight: 700, color: statusColor }}>{data.status}</span>
       } />
-    </PanelWrap>
+    </Panel>
   );
 }
 
 // ── KafkaLagPanel ─────────────────────────────────────────────────────────────
 
 interface LagData {
-  total_lag: number | null;
+  total_lag:        number | null;
   lag_by_partition: Record<string, number> | null;
-  worker_id: string | null;
+  worker_id:        string | null;
   worker_heartbeat: string | null;
-  updated_at: string | null;
-  rows_applied: number | null;
-}
-
-function fmtTs(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("ru-RU", {
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-  } catch { return iso ?? "—"; }
+  updated_at:       string | null;
+  rows_applied:     number | null;
 }
 
 export function KafkaLagPanel({
   migrationId, sseEvents,
 }: { migrationId: string; sseEvents: SSEEvent[] }) {
-  const [data,    setData]    = useState<LagData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  function load() {
-    fetch(`/api/migrations/${migrationId}/lag`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }
-
-  useEffect(() => { load(); }, [migrationId]);
+  const { data, loading, reload } = useApi<LagData>(
+    `/api/migrations/${migrationId}/lag`,
+    { intervalMs: 5_000, deps: [migrationId] },
+  );
 
   useEffect(() => {
     const last = sseEvents[0];
     if (last?.migration_id === migrationId &&
         (last.type === "kafka_lag" || last.type === "migration_phase")) {
-      load();
+      reload();
     }
-  }, [sseEvents]); // eslint-disable-line
-
-  useEffect(() => {
-    const id = setInterval(load, 5_000);
-    return () => clearInterval(id);
-  }, [migrationId]); // eslint-disable-line
+  }, [sseEvents, migrationId, reload]);
 
   if (loading || !data) return null;
 
-  const lag      = data.total_lag ?? null;
-  const lagColor = lag === 0        ? "#22c55e"
-                 : lag !== null && lag < 10000 ? "#fcd34d"
-                 : "#ef4444";
-  const parts    = data.lag_by_partition ?? {};
+  const lag = data.total_lag ?? null;
+  const lagColor =
+    lag === 0                           ? t.green.base
+    : lag !== null && lag < 10_000      ? t.amber.fg
+                                        : t.red.base;
+  const parts = data.lag_by_partition ?? {};
 
   return (
-    <PanelWrap accent="#ea580c" title="Kafka Lag">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+    <Panel accent={t.amber.dim} title="Kafka Lag" style={{ marginBottom: t.space[4] }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: t.space[2], marginBottom: t.space[2] }}>
         <span style={{
-          fontSize: 28, fontWeight: 800,
-          color: lagColor,
+          fontSize:           28,
+          fontWeight:         800,
+          color:              lagColor,
           fontVariantNumeric: "tabular-nums",
         }}>
           {lag !== null ? lag.toLocaleString() : "—"}
         </span>
-        <span style={{ fontSize: 11, color: "#64748b" }}>messages behind</span>
-        {lag === 0 && (
-          <span style={{
-            background: "#052e16", color: "#86efac",
-            border: "1px solid #16a34a",
-            borderRadius: 4, fontSize: 10, fontWeight: 700, padding: "1px 6px",
-          }}>CAUGHT UP</span>
-        )}
+        <span style={{ fontSize: t.size.sm, color: t.text.muted }}>messages behind</span>
+        {lag === 0 && <Badge tone="success" size="sm">CAUGHT UP</Badge>}
       </div>
 
       {Object.keys(parts).length > 0 && (
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: t.space[2] }}>
           {Object.entries(parts).map(([k, v]) => (
             <div key={k} style={{
               display: "flex", justifyContent: "space-between",
-              fontSize: 10, color: "#64748b", marginBottom: 2,
+              fontSize: t.size.xs, color: t.text.muted, marginBottom: 2,
             }}>
               <span>{k}</span>
-              <span style={{ color: v === 0 ? "#22c55e" : "#fcd34d" }}>
+              <span style={{ color: v === 0 ? t.green.base : t.amber.fg }}>
                 {v.toLocaleString()}
               </span>
             </div>
@@ -314,60 +222,51 @@ export function KafkaLagPanel({
 
       {data.rows_applied !== null && data.rows_applied > 0 && (
         <Row label="Применено строк" value={
-          <span style={{ color: "#86efac", fontVariantNumeric: "tabular-nums" }}>
+          <span style={{ color: t.green.fg, fontVariantNumeric: "tabular-nums" }}>
             {data.rows_applied.toLocaleString()}
           </span>
         } />
       )}
       <Row label="Worker"    value={data.worker_id ?? "—"} />
-      <Row label="Heartbeat" value={fmtTs(data.worker_heartbeat)} />
-      <Row label="Обновлено" value={fmtTs(data.updated_at)} />
-    </PanelWrap>
+      <Row label="Heartbeat" value={fmtTs(data.worker_heartbeat, { timeOnly: true, withSeconds: true })} />
+      <Row label="Обновлено" value={fmtTs(data.updated_at,       { timeOnly: true, withSeconds: true })} />
+    </Panel>
   );
 }
 
 // ── ValidationPanel ───────────────────────────────────────────────────────────
 
-interface ValidationResult {
-  ok: boolean;
-  message: string;
-  details?: Record<string, unknown>;
+interface ValidationResp {
+  result: {
+    ok: boolean;
+    message: string;
+    details?: Record<string, unknown>;
+  };
 }
 
-export function ValidationPanel({
-  migrationId,
-}: { migrationId: string }) {
-  const [result,  setResult]  = useState<ValidationResult | null>(null);
-  const [loading, setLoading] = useState(true);
+export function ValidationPanel({ migrationId }: { migrationId: string }) {
+  const { data, loading } = useApi<ValidationResp>(
+    `/api/migrations/${migrationId}/validation`,
+    { deps: [migrationId] },
+  );
 
-  useEffect(() => {
-    fetch(`/api/migrations/${migrationId}/validation`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => { setResult(d.result); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [migrationId]);
-
-  if (loading || !result) return null;
-
-  const accent = result.ok ? "#16a34a" : "#dc2626";
+  if (loading || !data?.result) return null;
+  const result = data.result;
+  const accent = result.ok ? t.green.dim : t.red.dim;
 
   return (
-    <PanelWrap accent={accent} title="Результат валидации">
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
-      }}>
-        <span style={{
-          fontSize: 20, color: result.ok ? "#22c55e" : "#ef4444",
-        }}>
+    <Panel accent={accent} title="Результат валидации" style={{ marginBottom: t.space[4] }}>
+      <div style={{ display: "flex", alignItems: "center", gap: t.space[2], marginBottom: t.space[2] }}>
+        <span style={{ fontSize: 20, color: result.ok ? t.green.base : t.red.base }}>
           {result.ok ? "✓" : "✗"}
         </span>
-        <span style={{ fontSize: 12, color: result.ok ? "#86efac" : "#fca5a5" }}>
+        <span style={{ fontSize: t.size.base, color: result.ok ? t.green.fg : t.red.fg }}>
           {result.message}
         </span>
       </div>
       {result.details && Object.entries(result.details).map(([k, v]) => (
         <Row key={k} label={k} value={String(v)} />
       ))}
-    </PanelWrap>
+    </Panel>
   );
 }

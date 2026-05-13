@@ -1,4 +1,5 @@
 import { phaseColor } from "../types/migration";
+import { t } from "../theme";
 
 interface Props {
   phase: string;
@@ -7,20 +8,18 @@ interface Props {
 
 export function PhaseBadge({ phase, size = "md" }: Props) {
   const c = phaseColor(phase);
-  const fontSize = size === "sm" ? 10 : 11;
-  const padding = size === "sm" ? "2px 7px" : "3px 10px";
   return (
     <span style={{
-      background: c.bg,
-      color: c.text,
-      border: `1px solid ${c.border}`,
-      borderRadius: 4,
-      fontSize,
-      fontWeight: 700,
-      padding,
+      background:    c.bg,
+      color:         c.text,
+      border:        `1px solid ${c.border}`,
+      borderRadius:  t.radius.sm,
+      fontSize:      size === "sm" ? t.size.xs : t.size.sm,
+      fontWeight:    700,
+      padding:       size === "sm" ? "2px 7px" : "3px 10px",
       letterSpacing: 0.3,
-      display: "inline-block",
-      whiteSpace: "nowrap",
+      display:       "inline-block",
+      whiteSpace:    "nowrap",
     }}>
       {phase}
     </span>

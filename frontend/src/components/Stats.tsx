@@ -1,4 +1,5 @@
-import React from "react";
+import { StatTile } from "./ui";
+import { t } from "../theme";
 
 interface CdcEvent {
   operation: string; schema: string; table: string;
@@ -17,28 +18,18 @@ export function Stats({ events }: Props) {
   const tableSet = new Set(events.map((e) => `${e.schema}.${e.table}`));
 
   const tiles = [
-    { label: "Total", value: events.length, color: "#e2e8f0" },
-    { label: "INSERT", value: counts.INSERT ?? 0, color: "#22c55e" },
-    { label: "UPDATE", value: counts.UPDATE ?? 0, color: "#3b82f6" },
-    { label: "DELETE", value: counts.DELETE ?? 0, color: "#ef4444" },
-    { label: "Tables", value: tableSet.size, color: "#a78bfa" },
+    { label: "Total",  value: events.length,        color: t.text.primary },
+    { label: "INSERT", value: counts.INSERT ?? 0,   color: t.green.base   },
+    { label: "UPDATE", value: counts.UPDATE ?? 0,   color: t.blue.base    },
+    { label: "DELETE", value: counts.DELETE ?? 0,   color: t.red.base     },
+    { label: "Tables", value: tableSet.size,        color: t.purple.fg    },
   ];
 
   return (
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      {tiles.map((t) => (
-        <div
-          key={t.label}
-          style={{
-            flex: "1 1 100px",
-            background: "#1e293b",
-            borderRadius: 8,
-            padding: "12px 16px",
-            minWidth: 80,
-          }}
-        >
-          <div style={{ color: "#64748b", fontSize: 11, marginBottom: 4 }}>{t.label}</div>
-          <div style={{ color: t.color, fontSize: 24, fontWeight: 700 }}>{t.value}</div>
+    <div style={{ display: "flex", gap: t.space[3], flexWrap: "wrap" }}>
+      {tiles.map((tile) => (
+        <div key={tile.label} style={{ flex: "1 1 100px", minWidth: 80 }}>
+          <StatTile label={tile.label} value={tile.value} color={tile.color} />
         </div>
       ))}
     </div>

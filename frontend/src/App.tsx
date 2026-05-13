@@ -102,17 +102,6 @@ export default function App() {
       fontFamily: "'Inter', 'Segoe UI', sans-serif",
       padding: 24,
     }}>
-      <style>{`
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
-        * { box-sizing: border-box; }
-        input { outline: none; }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0a111f; }
-        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #334155; }
-      `}</style>
-
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
 
       {/* Backend unreachable banner */}
