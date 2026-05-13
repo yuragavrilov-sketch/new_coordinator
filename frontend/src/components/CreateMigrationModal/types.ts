@@ -1,3 +1,5 @@
+import { Strategy } from "../../types/migration";
+
 export interface Column {
   name:     string;
   type:     string;
@@ -21,8 +23,7 @@ export interface FormData {
   source_table:             string;
   target_schema:            string;
   target_table:             string;
-  migration_mode:           "CDC" | "BULK_ONLY";
-  migration_strategy:       "STAGE" | "DIRECT";
+  strategy:                 Strategy;
   group_id:                 string;
   connector_name:           string;
   topic_prefix:             string;

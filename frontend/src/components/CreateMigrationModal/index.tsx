@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectorGroup } from "../../types/migration";
+import { hasCdc, usesStage } from "../../types/migration";
 import { t } from "../../theme";
+import { StrategyPicker } from "../StrategyPicker";
 import { S } from "./styles";
 import type { FormData, TableInfo, EnsureResult } from "./types";
 import { INIT, KEY_SOURCE_MAP, autoFields } from "./helpers";
@@ -172,12 +174,12 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     if (!form.source_table)            e.source_table   = "Выберите таблицу";
     if (!form.target_schema)           e.target_schema  = "Выберите схему";
     if (!form.target_table)            e.target_table   = "Выберите таблицу";
-    if (form.migration_mode === "CDC" && !form.group_id) {
+    if (hasCdc(form.strategy) && !form.group_id) {
       if (!form.connector_name.trim()) e.connector_name = "Обязательное поле";
       if (!form.topic_prefix.trim())   e.topic_prefix   = "Обязательное поле";
       if (!form.consumer_group.trim()) e.consumer_group = "Обязательное поле";
     }
-    if (form.migration_strategy === "STAGE" && !form.stage_table_name.trim())
+    if (usesStage(form.strategy) && !form.stage_table_name.trim())
       e.stage_table_name = "Обязательное поле";
     if (form.chunk_size <= 0)          e.chunk_size = "Должно быть > 0";
     if (!form.effective_key_type)      e.effective_key_type = "Выберите тип ключа";
@@ -195,20 +197,19 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     const payload = {
       initial_phase:              "DRAFT",
       migration_name:             form.migration_name.trim(),
-      migration_mode:             form.migration_mode,
-      migration_strategy:         form.migration_strategy,
+      strategy:                   form.strategy,
       source_connection_id:       "oracle_source",
       target_connection_id:       "oracle_target",
       source_schema:              form.source_schema,
       source_table:               form.source_table,
       target_schema:              form.target_schema,
       target_table:               form.target_table,
-      stage_table_name:           form.migration_strategy === "STAGE" ? form.stage_table_name.trim() : "",
-      stage_tablespace:           form.migration_strategy === "STAGE" ? form.stage_tablespace.trim() : "",
+      stage_table_name:           usesStage(form.strategy) ? form.stage_table_name.trim() : "",
+      stage_tablespace:           usesStage(form.strategy) ? form.stage_tablespace.trim() : "",
       group_id:                   form.group_id || undefined,
-      connector_name:             form.migration_mode === "CDC" && !form.group_id ? form.connector_name.trim() : "",
-      topic_prefix:               form.migration_mode === "CDC" && !form.group_id ? form.topic_prefix.trim() : "",
-      consumer_group:             form.migration_mode === "CDC" && !form.group_id ? form.consumer_group.trim() : "",
+      connector_name:             hasCdc(form.strategy) && !form.group_id ? form.connector_name.trim() : "",
+      topic_prefix:               hasCdc(form.strategy) && !form.group_id ? form.topic_prefix.trim() : "",
+      consumer_group:             hasCdc(form.strategy) && !form.group_id ? form.consumer_group.trim() : "",
       chunk_size:                 form.chunk_size,
       max_parallel_workers:       form.max_parallel_workers,
       baseline_parallel_degree:   form.baseline_parallel_degree,
@@ -331,80 +332,17 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
             )}
           </Section>
 
-          {/* ── Mode ── */}
-          <Section title="Режим миграции" accent={t.purple.base}>
-            <Field label="Режим">
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => setF({ migration_mode: "CDC" })}
-                  style={{
-                    flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_mode === "CDC" ? t.purple.base : t.border.base}`,
-                    background: form.migration_mode === "CDC" ? t.purple.bg : t.bg.s2,
-                    color:      form.migration_mode === "CDC" ? t.purple.fg : t.text.muted,
-                    fontWeight: 700, fontSize: t.size.base,
-                  }}
-                >
-                  CDC (Debezium)
-                </button>
-                <button
-                  onClick={() => setF({ migration_mode: "BULK_ONLY" })}
-                  style={{
-                    flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_mode === "BULK_ONLY" ? t.green.base : t.border.base}`,
-                    background: form.migration_mode === "BULK_ONLY" ? t.green.bg : t.bg.s2,
-                    color:      form.migration_mode === "BULK_ONLY" ? t.green.fg : t.text.muted,
-                    fontWeight: 700, fontSize: t.size.base,
-                  }}
-                >
-                  Разовая переливка
-                </button>
-              </div>
-              <div style={{ fontSize: t.size.xs, color: t.text.disabled, marginTop: 4 }}>
-                {form.migration_mode === "CDC"
-                  ? "Полная миграция с Debezium: bulk-загрузка + отслеживание изменений через CDC до полного catchup"
-                  : "Однократная переливка данных без Debezium/Kafka. Не отслеживает изменения — только разовый снимок"}
-              </div>
-            </Field>
+          {/* ── Mode + Strategy ── */}
+          <Section title="Стратегия миграции" accent={t.purple.base}>
+            <StrategyPicker
+              value={form.strategy}
+              onChange={(s) => setF({ strategy: s })}
+            />
           </Section>
 
           {/* ── Config ── */}
           <Section title="Параметры миграции">
-            <Field label="Стратегия миграции" required>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => setF({ migration_strategy: "STAGE" })}
-                  style={{
-                    flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_strategy === "STAGE" ? t.blue.base : t.border.base}`,
-                    background: form.migration_strategy === "STAGE" ? t.bg.s3 : t.bg.s2,
-                    color:      form.migration_strategy === "STAGE" ? t.blue.fg : t.text.muted,
-                    fontWeight: 700, fontSize: t.size.base,
-                  }}
-                >
-                  STAGE
-                </button>
-                <button
-                  onClick={() => setF({ migration_strategy: "DIRECT" })}
-                  style={{
-                    flex: 1, padding: "8px 12px", borderRadius: t.radius.md, cursor: "pointer",
-                    border:     `1px solid ${form.migration_strategy === "DIRECT" ? t.green.base : t.border.base}`,
-                    background: form.migration_strategy === "DIRECT" ? t.green.bg : t.bg.s2,
-                    color:      form.migration_strategy === "DIRECT" ? t.green.fg : t.text.muted,
-                    fontWeight: 700, fontSize: t.size.base,
-                  }}
-                >
-                  DIRECT
-                </button>
-              </div>
-              <div style={{ fontSize: t.size.xs, color: t.text.disabled, marginTop: 4 }}>
-                {form.migration_strategy === "STAGE"
-                  ? "Загрузка через промежуточную stage-таблицу → валидация → публикация в целевую"
-                  : "Прямая загрузка в целевую таблицу, без stage. Быстрее, но без возможности валидации stage"}
-              </div>
-            </Field>
-
-            {form.migration_mode === "CDC" && (
+            {hasCdc(form.strategy) && (
               <>
                 <Field label="Группа коннектора" hint="Выберите группу для общего Debezium-коннектора или оставьте пустым для отдельного">
                   <select
@@ -447,7 +385,7 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
             )}
 
             <div style={S.row2}>
-              {form.migration_strategy === "STAGE" && (<>
+              {usesStage(form.strategy) && (<>
                 <Field label="Stage table name" required error={fieldErrs.stage_table_name}>
                   <TextInput value={form.stage_table_name} hasError={!!fieldErrs.stage_table_name}
                     onChange={v => setF({ stage_table_name: v })} />

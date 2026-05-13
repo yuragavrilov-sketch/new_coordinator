@@ -1,4 +1,5 @@
 import type { FormData } from "./types";
+import type { Strategy } from "../../types/migration";
 
 export function toSnake(s: string): string {
   return s.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
@@ -31,8 +32,7 @@ export const INIT: FormData = {
   source_table:             "",
   target_schema:            "",
   target_table:             "",
-  migration_mode:           "CDC",
-  migration_strategy:       "STAGE",
+  strategy:                 "CDC_STAGE" as Strategy,
   group_id:                 "",
   connector_name:           "",
   topic_prefix:             "",
