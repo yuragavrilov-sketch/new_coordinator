@@ -328,11 +328,14 @@ def get_objects(conn, sm_id: str) -> list[dict]:
             return []
         src_schema, tgt_schema = row
 
-    # (a) TABLE objects driven by migrations — they have phase/progress/errors
+    # (a) TABLE objects driven by migrations — they have phase/progress/errors.
+    # Project only the columns _build_object actually reads — avoids dragging
+    # 30+ migration metadata columns over the wire on every 5s poll.
     tables: list[dict] = []
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT m.*
+            SELECT m.migration_id, m.migration_name, m.phase, m.error_text,
+                   m.source_table, m.total_rows, m.rows_loaded
             FROM schema_migrations sm
             JOIN migration_plan_items mpi ON mpi.plan_id = sm.plan_id
             JOIN migrations m ON m.migration_id = mpi.migration_id
@@ -360,12 +363,14 @@ def get_objects(conn, sm_id: str) -> list[dict]:
             # synchronising them is pointless. Existing snapshots from before
             # the catalog-side filter still contain them, so we filter again
             # here as a defensive measure.
+            # Skip ddl_compare_results.diff (heavy JSONB blob) in the listing —
+            # it's only ever consumed by /objects/:id/detail. Saves up to MBs
+            # of payload per poll for schemas with thousands of objects.
             cur.execute("""
                 SELECT s.object_type, s.object_name,
                        s.oracle_status        AS src_status,
                        tg.oracle_status       AS tgt_status,
-                       COALESCE(c.match_status, 'UNKNOWN') AS match_status,
-                       c.diff
+                       COALESCE(c.match_status, 'UNKNOWN') AS match_status
                 FROM   ddl_objects s
                 LEFT   JOIN ddl_objects tg
                        ON tg.snapshot_id = s.snapshot_id
@@ -387,11 +392,13 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                 ORDER BY s.object_type, s.object_name
             """, (snapshot_id,))
             for r in cur.fetchall():
-                otype, oname = r[0], r[1]
+                otype, oname, src_status, tgt_status, match_status = r
                 # Skip TABLE rows already represented by a migration
                 if otype == "TABLE" and oname.upper() in migrated_table_names:
                     continue
-                ddl_objects.append(_build_ddl_object(*r))
+                ddl_objects.append(_build_ddl_object(
+                    otype, oname, src_status, tgt_status, match_status, None,
+                ))
 
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get
     # synthetic "ddl-<TYPE>-<NAME>" IDs to avoid collisions.

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { SchemaHeader } from "./SchemaHeader";
 import { KpiRow, KpiCard } from "./KpiRow";
 import { ObjectFilters, type SortKey, type StatusFilter } from "./ObjectFilters";
@@ -14,7 +14,7 @@ import type { SSEEvent } from "../hooks/useSSE";
 import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
 import {
   type SchemaMigrationListItem,
-  createSchemaMigration, pause as pauseApi, rollback as rollbackApi,
+  createSchemaMigration,
 } from "./api";
 
 interface Props {
@@ -33,6 +33,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [sort,         setSort]         = useState<SortKey>("priority");
   const [openObject,   setOpenObject]   = useState<SchemaObject | null>(null);
   const [wizardOpen,   setWizardOpen]   = useState(false);
+  const [page,         setPage]         = useState(1);
+  const [pageSize,     setPageSize]     = useState(25);
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
   const objectsApi = useApi<SchemaObject[]>(
@@ -125,6 +127,15 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
 
   // Reset drawer when switching schemas
   useEffect(() => { setOpenObject(null); }, [selectedId]);
+  // Reset to page 1 when filters change so the user always sees the matches
+  useEffect(() => { setPage(1); }, [typeFilter, statusFilter, search, sort, pageSize, selectedId]);
+
+  // Stable handlers (so React.memo on ObjectRow can skip re-renders)
+  const handleOpen = useCallback((o: SchemaObject) => setOpenObject(o), []);
+  const handleRowAction = useCallback(
+    (o: SchemaObject, a: "pause" | "retry" | "more") => console.log("object action", a, o.name),
+    [],
+  );
 
   // Empty state
   if (!schema) {
@@ -153,24 +164,11 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
     );
   }
 
-  const onPause = async () => {
-    if (!selectedId) return;
-    try { await pauseApi(selectedId, !schema.paused); } catch (e) { console.error(e); }
-  };
-  const onRollback = async () => {
-    if (!selectedId) return;
-    if (!window.confirm("Откатить миграцию? Все активные таблицы будут CANCELLING.")) return;
-    try { await rollbackApi(selectedId); } catch (e) { console.error(e); }
-  };
-
   return (
     <>
       <SchemaHeader
         schema={schema}
         progress={schema.kpi.progress}
-        onPause={onPause}
-        onRollback={onRollback}
-        onNew={() => setWizardOpen(true)}
       />
 
       <KpiRow>
@@ -234,7 +232,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           schemaMigrationId={selectedId}
           srcSchema={schema.src_schema || ""}
           tgtSchema={schema.tgt_schema || ""}
-          onOpen={o => setOpenObject(o)}
+          onOpen={handleOpen}
           onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
         />
       )}
@@ -242,8 +240,12 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
 
       <ObjectTable
         objects={filtered}
-        onOpen={o => setOpenObject(o)}
-        onAction={(o, a) => console.log("object action", a, o.name)}
+        onOpen={handleOpen}
+        onAction={handleRowAction}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
       />
 
       {openObject && selectedId && (

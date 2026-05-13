@@ -12,6 +12,11 @@ interface Props {
   layout?:   "flat" | "grouped";
   onOpen:    (o: SchemaObject) => void;
   onAction:  (o: SchemaObject, action: "pause" | "retry" | "more") => void;
+  /** Client-side pagination (omit to render everything). */
+  page?:         number;       // 1-based
+  pageSize?:     number;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
 }
 
 const TYPE_COLORS: Record<ObjectType, { bg: string; fg: string }> = {
@@ -31,12 +36,22 @@ const TYPE_COLORS: Record<ObjectType, { bg: string; fg: string }> = {
   JOB:       { bg: "color-mix(in oklab, oklch(0.65 0.11 240) 14%, transparent)", fg: "oklch(0.5 0.13 240)" },
 };
 
-export function ObjectTable({ objects, layout = "flat", onOpen, onAction }: Props) {
-  // Group by category when layout=grouped
+export function ObjectTable({
+  objects, layout = "flat", onOpen, onAction,
+  page, pageSize, onPageChange, onPageSizeChange,
+}: Props) {
+  const total = objects.length;
+  const pagingOn  = !!(page && pageSize && onPageChange);
+  const startIdx  = pagingOn ? (page! - 1) * pageSize! : 0;
+  const endIdx    = pagingOn ? Math.min(startIdx + pageSize!, total) : total;
+  const pageItems = pagingOn ? objects.slice(startIdx, endIdx) : objects;
+  const totalPages = pagingOn ? Math.max(1, Math.ceil(total / pageSize!)) : 1;
+
+  // Group by category when layout=grouped — applied AFTER pagination slice
   const grouped: [string, SchemaObject[]][] = (() => {
     if (layout !== "grouped") return [];
     const map = new Map<string, SchemaObject[]>();
-    objects.forEach(o => {
+    pageItems.forEach(o => {
       const g = OBJECT_TYPES[o.type].group;
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(o);
@@ -85,16 +100,118 @@ export function ObjectTable({ objects, layout = "flat", onOpen, onAction }: Prop
                 </tr>,
                 ...rows.map(o => <ObjectRow key={o.id} o={o} onOpen={onOpen} onAction={onAction}/>),
               ])
-            : objects.map(o => <ObjectRow key={o.id} o={o} onOpen={onOpen} onAction={onAction}/>)
+            : pageItems.map(o => <ObjectRow key={o.id} o={o} onOpen={onOpen} onAction={onAction}/>)
           }
-          {objects.length === 0 && (
+          {total === 0 && (
             <tr><td colSpan={11} style={{
               textAlign: "center", padding: 40, color: t.text.muted,
             }}>Нет объектов под текущие фильтры</td></tr>
           )}
         </tbody>
       </table>
+      {pagingOn && total > 0 && (
+        <PaginationBar
+          page={page!}
+          pageSize={pageSize!}
+          total={total}
+          totalPages={totalPages}
+          startIdx={startIdx}
+          endIdx={endIdx}
+          onPageChange={onPageChange!}
+          onPageSizeChange={onPageSizeChange}
+        />
+      )}
     </div>
+  );
+}
+
+function PaginationBar({
+  page, pageSize, total, totalPages, startIdx, endIdx,
+  onPageChange, onPageSizeChange,
+}: {
+  page:            number;
+  pageSize:        number;
+  total:           number;
+  totalPages:      number;
+  startIdx:        number;
+  endIdx:          number;
+  onPageChange:    (p: number) => void;
+  onPageSizeChange?: (n: number) => void;
+}) {
+  const canPrev = page > 1;
+  const canNext = page < totalPages;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      gap: 12, padding: "8px 14px",
+      background: t.bg.s2,
+      borderTop: `1px solid ${t.border.subtle}`,
+      fontSize: 12,
+    }}>
+      <span style={{ color: t.text.muted, fontFamily: t.font.mono, fontSize: "11.5px" }}>
+        {startIdx + 1}–{endIdx} из {total}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {onPageSizeChange && (
+          <>
+            <span style={{ color: t.text.muted, fontSize: 11 }}>по</span>
+            <select
+              value={pageSize}
+              onChange={e => onPageSizeChange(Number(e.target.value))}
+              style={{
+                padding: "3px 6px", fontSize: 12,
+                background: t.bg.s1, color: t.text.primary,
+                border: `1px solid ${t.border.subtle}`,
+                borderRadius: t.radius.sm,
+                fontFamily: t.font.mono,
+              }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+            <span style={{ width: 10 }}/>
+          </>
+        )}
+        <PageBtn label="‹" disabled={!canPrev} onClick={() => onPageChange(page - 1)}/>
+        <span style={{
+          fontFamily: t.font.mono, fontSize: "11.5px",
+          padding: "3px 8px",
+          color: t.text.primary,
+        }}>
+          {page} / {totalPages}
+        </span>
+        <PageBtn label="›" disabled={!canNext} onClick={() => onPageChange(page + 1)}/>
+      </div>
+    </div>
+  );
+}
+
+function PageBtn({ label, disabled, onClick }: {
+  label:    string;
+  disabled: boolean;
+  onClick:  () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: "3px 9px",
+        background: t.bg.s1,
+        border: `1px solid ${t.border.subtle}`,
+        borderRadius: t.radius.sm,
+        color: disabled ? t.text.muted : t.text.primary,
+        cursor: disabled ? "default" : "pointer",
+        fontFamily: t.font.mono,
+        fontSize: 13,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -114,7 +231,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
   );
 }
 
-function ObjectRow({ o, onOpen, onAction }: {
+const ObjectRow = React.memo(function ObjectRow({ o, onOpen, onAction }: {
   o: SchemaObject;
   onOpen:   (o: SchemaObject) => void;
   onAction: (o: SchemaObject, a: "pause" | "retry" | "more") => void;
@@ -254,7 +371,7 @@ function ObjectRow({ o, onOpen, onAction }: {
       </Td>
     </tr>
   );
-}
+});
 
 function Td({ children, right, mono }: {
   children?: React.ReactNode;

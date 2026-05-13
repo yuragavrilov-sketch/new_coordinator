@@ -1,20 +1,15 @@
 import React from "react";
 import { t } from "../theme";
-import {
-  Icon, ProgressBar, StagePipeline, Endpoint,
-} from "../components/ui";
+import { Icon, ProgressBar, Endpoint } from "../components/ui";
 import { fmtGb } from "../utils/format";
-import { STAGES, type SchemaInfo } from "./types";
+import { type SchemaInfo } from "./types";
 
 interface Props {
-  schema:    SchemaInfo;
-  progress:  number;    // 0–100
-  onPause:    () => void;
-  onRollback: () => void;
-  onNew:      () => void;
+  schema:   SchemaInfo;
+  progress: number;    // 0–100
 }
 
-export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: Props) {
+export function SchemaHeader({ schema, progress }: Props) {
   return (
     <div style={{
       background:   t.bg.s1,
@@ -58,12 +53,6 @@ export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: P
             <Endpoint label="TARGET" value={`${schema.target.host} · ${schema.target.version}`}/>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-          <HeaderBtn icon="pause"  label="Пауза"   onClick={onPause}/>
-          <HeaderBtn icon="rotate" label="Откатить" onClick={onRollback}/>
-          <HeaderBtn icon="bell"/>
-          <HeaderBtn icon="plus" label="Новая миграция" primary onClick={onNew}/>
-        </div>
       </div>
 
       <div style={{
@@ -80,7 +69,6 @@ export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: P
             {progress.toFixed(1)}%
           </span>
         </div>
-        <StagePipeline stages={STAGES} current={schema.stage} status={schema.status === "error" ? "error" : "running"}/>
         <div style={{
           display: "flex", gap: 10, flexWrap: "wrap",
           fontSize: "11.5px", color: t.text.muted,
@@ -100,32 +88,4 @@ export function SchemaHeader({ schema, progress, onPause, onRollback, onNew }: P
 
 function Mono({ children }: { children: React.ReactNode }) {
   return <span style={{ fontFamily: t.font.mono, color: t.text.secondary }}>{children}</span>;
-}
-
-function HeaderBtn({ icon, label, onClick, primary }: {
-  icon:     "pause" | "rotate" | "bell" | "plus";
-  label?:   string;
-  onClick?: () => void;
-  primary?: boolean;
-}) {
-  const isIconOnly = !label;
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 6,
-        padding: isIconOnly ? "6px" : "6px 11px",
-        borderRadius: t.radius.sm,
-        fontSize: "12.5px",
-        cursor: "pointer",
-        background: primary ? t.text.primary : (isIconOnly ? "transparent" : t.bg.s1),
-        color: primary ? t.text.inverse : t.text.secondary,
-        border: `1px solid ${primary ? t.text.primary : (isIconOnly ? "transparent" : t.border.subtle)}`,
-        transition: "background 80ms, border-color 80ms",
-      }}
-    >
-      <Icon name={icon} size={15}/>
-      {label && <span>{label}</span>}
-    </button>
-  );
 }
