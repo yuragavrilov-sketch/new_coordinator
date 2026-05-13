@@ -134,6 +134,7 @@ def _aggregate_status(children_phases: list[str], any_failed: bool, paused: bool
 
 # Oracle object_type (as stored in ddl_objects) → frontend ObjectType enum
 _DDL_TYPE_MAP = {
+    "TABLE":             "TABLE",
     "MATERIALIZED VIEW": "MVIEW",
     "PACKAGE":           "PACKAGE",
     "PROCEDURE":         "PROCEDURE",
@@ -280,8 +281,13 @@ def get_schema_migration(conn, sm_id: str) -> dict | None:
 
 
 def get_objects(conn, sm_id: str) -> list[dict]:
-    """Return SchemaObject[]: TABLE rows from migrations + DDL objects from the
-    latest ddl_snapshot for this schema_migration's src/tgt schemas (if any)."""
+    """Return SchemaObject[]: union of
+       (a) TABLE rows from migrations linked to this schema_migration's plan,
+       (b) all source-side objects from the latest ddl_snapshot for this
+           schema pair — TABLE rows already covered by (a) are skipped to
+           avoid duplicates, non-TABLE DDL is always included.
+    Tables present in the snapshot but not yet in any migration appear as
+    `queued` — they're known to exist on source but not planned yet."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT src_schema, tgt_schema FROM schema_migrations WHERE schema_migration_id = %s",
@@ -292,7 +298,7 @@ def get_objects(conn, sm_id: str) -> list[dict]:
             return []
         src_schema, tgt_schema = row
 
-    # TABLE objects — driven by `migrations` (state machine, progress, errors)
+    # (a) TABLE objects driven by migrations — they have phase/progress/errors
     tables: list[dict] = []
     with conn.cursor() as cur:
         cur.execute("""
@@ -305,8 +311,9 @@ def get_objects(conn, sm_id: str) -> list[dict]:
         """, (sm_id,))
         cols = [d[0] for d in cur.description]
         tables = [_build_object(dict(zip(cols, r))) for r in cur.fetchall()]
+    migrated_table_names = {t["name"].upper() for t in tables}
 
-    # DDL objects (PACKAGE/VIEW/MVIEW/etc) from the most recent snapshot
+    # (b) DDL objects from the most recent snapshot
     ddl_objects: list[dict] = []
     with conn.cursor() as cur:
         cur.execute("""
@@ -329,10 +336,13 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                        AND c.object_name = o.object_name
                 WHERE  o.snapshot_id = %s
                   AND  o.db_side = 'source'
-                  AND  o.object_type <> 'TABLE'
                 ORDER BY o.object_type, o.object_name
             """, (snapshot_id,))
             for r in cur.fetchall():
+                otype, oname = r[0], r[1]
+                # Skip TABLE rows already represented by a migration
+                if otype == "TABLE" and oname.upper() in migrated_table_names:
+                    continue
                 ddl_objects.append(_build_ddl_object(*r))
 
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get

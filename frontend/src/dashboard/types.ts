@@ -23,6 +23,8 @@ export interface SchemaInfo {
   name:      string;
   source:    { host: string; version: string; tns: string };
   target:    { host: string; version: string; tns: string };
+  src_schema?: string;
+  tgt_schema?: string;
   owner:     string;
   priority:  Priority;
   status:    SchemaStatus;

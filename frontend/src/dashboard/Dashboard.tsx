@@ -6,6 +6,7 @@ import { ObjectTable } from "./ObjectTable";
 import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
 import { DashboardEmptyState } from "./EmptyState";
+import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
 import { fmtCompactNum } from "../utils/format";
 import { useApi } from "../hooks/useApi";
 import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
@@ -192,6 +193,14 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
         search={search}             onSearch={setSearch}
         sort={sort}                 onSort={setSort}
       />
+
+      {objects.length === 0 && !objectsApi.loading && (
+        <LoadSnapshotBanner
+          srcSchema={schema.src_schema || ""}
+          tgtSchema={schema.tgt_schema || ""}
+          onLoaded={() => objectsApi.reload()}
+        />
+      )}
 
       <ObjectTable
         objects={filtered}
