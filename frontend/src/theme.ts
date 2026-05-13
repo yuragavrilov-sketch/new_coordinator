@@ -97,31 +97,31 @@ export const t = {
  */
 export const themeCss = `
   :root {
-    /* surfaces */
-    --bg-app:    #0f172a;
-    --bg-s1:     #0a111f;
-    --bg-s2:     #1e293b;
-    --bg-s3:     #1e3a5f;
-    --bg-deep:   #060e1a;
+    /* surfaces — graphite-slate, slightly warmer than pure slate */
+    --bg-app:    #0c1322;
+    --bg-s1:     #0a0f1c;
+    --bg-s2:     #1b2435;
+    --bg-s3:     #1d2a4a;
+    --bg-deep:   #050a14;
 
-    /* borders */
-    --border-subtle: #1e293b;
-    --border-base:   #334155;
-    --border-strong: #475569;
+    /* borders — softer than slate-700 */
+    --border-subtle: #1a2233;
+    --border-base:   #2d3a52;
+    --border-strong: #475061;
 
-    /* text */
-    --text-primary:   #e2e8f0;
+    /* text — primary slightly brighter, rest tuned for readability on darker surface */
+    --text-primary:   #edf1f7;
     --text-secondary: #94a3b8;
     --text-muted:     #64748b;
     --text-disabled:  #475569;
     --text-faint:     #334155;
     --text-inverse:   #ffffff;
 
-    /* blue */
-    --blue:     #3b82f6;
-    --blue-dim: #1d4ed8;
-    --blue-bg:  #1e3a5f;
-    --blue-fg:  #93c5fd;
+    /* accent: indigo (replaces blue) — more modern, cleaner contrast on graphite */
+    --blue:     #6366f1;
+    --blue-dim: #4f46e5;
+    --blue-bg:  #1e2050;
+    --blue-fg:  #a5b4fc;
 
     /* green */
     --green:        #22c55e;
