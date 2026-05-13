@@ -25,10 +25,11 @@ const REPLACEABLE_TYPES = new Set([
 ]);
 
 interface ApplyOpt {
-  action: DdlApplyAction;
-  label:  string;
-  type:   string;   // Oracle canonical or frontend alias — backend accepts both
-  name:   string;
+  action:      DdlApplyAction;
+  label:       string;
+  type:        string;     // Oracle canonical or frontend alias — backend accepts both
+  name:        string;
+  destructive: boolean;    // adds data-loss warning to confirm dialog
 }
 
 /** Decide which apply action makes sense, prefer the loaded detail (most
@@ -44,24 +45,32 @@ function detectApplyAction(
     const oname = detail.object_name;
     const srcInvalid = (detail.source?.oracle_status || "").toUpperCase() === "INVALID";
     const tgtInvalid = (detail.target?.oracle_status || "").toUpperCase() === "INVALID";
+    const isTable = otype === "TABLE" || otype === "MATERIALIZED VIEW";
     if (ms === "MISSING")
-      return { action: "create_missing", label: "Создать на target", type: otype, name: oname };
+      return { action: "create_missing", label: "Создать на target", type: otype, name: oname, destructive: false };
     if (ms === "DIFF" && REPLACEABLE_TYPES.has(otype))
-      return { action: "sync_diff", label: "Засинкать DDL", type: otype, name: oname };
+      return { action: "sync_diff", label: "Засинкать DDL", type: otype, name: oname, destructive: false };
     if (ms === "DIFF")
-      return { action: "recreate", label: "Пересоздать", type: otype, name: oname };
+      return { action: "recreate", label: "Пересоздать", type: otype, name: oname, destructive: isTable };
     if (tgtInvalid && !srcInvalid)
-      return { action: "recreate", label: "Пересоздать", type: otype, name: oname };
+      return { action: "recreate", label: "Пересоздать", type: otype, name: oname, destructive: isTable };
     return null;
   }
 
-  // 2) Migration-kind — only act if its ddl_diff says MISSING (recreate on TABLE
-  //    would drop data — refused).
+  // 2) Migration-kind — when detail.ddl_diff has a verdict, offer matching action.
+  //    DIFF on TABLE is allowed but flagged destructive (DROP+CREATE loses data).
   if (detail && detail.kind === "migration" && detail.found) {
     const d = detail.ddl_diff;
-    if (d && d.found && d.match_status === "MISSING") {
-      return { action: "create_missing", label: "Создать на target",
-               type: d.object_type, name: d.object_name };
+    if (d && d.found) {
+      const dt = d.object_type;
+      const dn = d.object_name;
+      const isTable = dt === "TABLE" || dt === "MATERIALIZED VIEW";
+      if (d.match_status === "MISSING")
+        return { action: "create_missing", label: "Создать на target", type: dt, name: dn, destructive: false };
+      if (d.match_status === "DIFF" && REPLACEABLE_TYPES.has(dt))
+        return { action: "sync_diff", label: "Засинкать DDL", type: dt, name: dn, destructive: false };
+      if (d.match_status === "DIFF")
+        return { action: "recreate", label: "Пересоздать на target", type: dt, name: dn, destructive: isTable };
     }
     return null;
   }
@@ -69,14 +78,15 @@ function detectApplyAction(
   // 3) Fallback before detail loads — use SchemaObject note (DDL-only)
   if (!o.id.startsWith("ddl-")) return null;
   const note = (o.note || "").toLowerCase();
+  const isTable = o.type === "TABLE" || o.type === "MVIEW";
   if (note.startsWith("нет в target"))
-    return { action: "create_missing", label: "Создать на target", type: o.type, name: o.name };
+    return { action: "create_missing", label: "Создать на target", type: o.type, name: o.name, destructive: false };
   if (note.startsWith("ddl отличается"))
-    return { action: REPLACEABLE_TYPES.has(o.type) ? "sync_diff" : "recreate",
-             label: REPLACEABLE_TYPES.has(o.type) ? "Засинкать DDL" : "Пересоздать",
-             type: o.type, name: o.name };
+    return REPLACEABLE_TYPES.has(o.type)
+      ? { action: "sync_diff", label: "Засинкать DDL", type: o.type, name: o.name, destructive: false }
+      : { action: "recreate",  label: "Пересоздать",   type: o.type, name: o.name, destructive: isTable };
   if (note.includes("invalid в target"))
-    return { action: "recreate", label: "Пересоздать", type: o.type, name: o.name };
+    return { action: "recreate", label: "Пересоздать", type: o.type, name: o.name, destructive: isTable };
   return null;
 }
 
@@ -90,7 +100,11 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
 
   const runApply = async () => {
     if (!applyOpt) return;
-    if (!window.confirm(`${applyOpt.label}: ${applyOpt.type} ${applyOpt.name} на target. Продолжить?`)) return;
+    const baseMsg = `${applyOpt.label}: ${applyOpt.type} ${applyOpt.name} на target.`;
+    const warning = applyOpt.destructive
+      ? "\n\n⚠ ОБЪЕКТ БУДЕТ DROP-нут на target до пересоздания.\n   Данные в существующей таблице будут потеряны.\n\nПродолжить?"
+      : "\n\nПродолжить?";
+    if (!window.confirm(baseMsg + warning)) return;
     setApplyBusy(true);
     setApplyFeedback(null);
     try {
@@ -206,20 +220,23 @@ export function ObjectDrawer({ schemaMigrationId, object: o, events, onClose, on
               <button
                 onClick={runApply}
                 disabled={applyBusy}
-                title={`${applyOpt.label} на target через worker`}
+                title={applyOpt.destructive
+                  ? `${applyOpt.label} на target — DROP+CREATE (потеря данных)`
+                  : `${applyOpt.label} на target через worker`}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
                   padding: "6px 12px",
                   borderRadius: t.radius.sm,
                   fontSize: 12, fontWeight: 600,
                   cursor: applyBusy ? "default" : "pointer",
-                  background: applyBusy ? t.bg.s2 : t.tone.accent,
+                  background: applyBusy ? t.bg.s2 :
+                              applyOpt.destructive ? t.tone.error : t.tone.accent,
                   color:      applyBusy ? t.text.muted : t.text.inverse,
-                  border:     `1px solid ${t.tone.accent}`,
+                  border:     `1px solid ${applyOpt.destructive ? t.tone.error : t.tone.accent}`,
                   opacity:    applyBusy ? 0.7 : 1,
                 }}
               >
-                <Icon name="rotate" size={13}/>
+                <Icon name={applyOpt.destructive ? "warn" : "rotate"} size={13}/>
                 {applyBusy ? "очередь…" : applyOpt.label}
               </button>
             )}
