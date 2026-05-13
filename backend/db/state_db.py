@@ -594,6 +594,43 @@ def init_db() -> None:
                     ON migrations(group_id)
             """)
 
+            # ── schema_migrations ────────────────────────────────────────
+            # Operational unit for the dashboard: "BILLING → BILLING_19".
+            # 1:1 with a migration_plan (the planner-level entity). State (status/
+            # stage/progress) is *computed* from child migrations at read time, so
+            # this table stores only metadata + presentation prefs.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    schema_migration_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name                 TEXT NOT NULL,
+                    src_schema           TEXT NOT NULL,
+                    tgt_schema           TEXT NOT NULL,
+                    source_host          TEXT,
+                    source_version       TEXT,
+                    target_host          TEXT,
+                    target_version       TEXT,
+                    priority             VARCHAR(2)  NOT NULL DEFAULT 'P2',
+                    owner                VARCHAR(128),
+                    description          TEXT,
+                    plan_id              INTEGER REFERENCES migration_plans(plan_id),
+                    group_id             UUID    REFERENCES connector_groups(group_id),
+                    paused               BOOLEAN NOT NULL DEFAULT FALSE,
+                    started_at           TIMESTAMPTZ,
+                    window_at            TIMESTAMPTZ,
+                    completed_at         TIMESTAMPTZ,
+                    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_schema_migrations_plan
+                    ON schema_migrations(plan_id)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_schema_migrations_created
+                    ON schema_migrations(created_at DESC)
+            """)
+
         conn.commit()
         print("[state_db] schema init complete")
     finally:

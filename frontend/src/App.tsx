@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useSSE } from "./hooks/useSSE";
+import { useApi } from "./hooks/useApi";
 import { SettingsModal } from "./components/SettingsModal";
 import { MigrationList } from "./components/MigrationList";
 import { ConnectorGroupsPanel } from "./components/ConnectorGroupsPanel";
@@ -7,7 +8,9 @@ import { Sidebar, type NavKey } from "./shell/Sidebar";
 import { RightRail } from "./shell/RightRail";
 import { RulesTabs } from "./shell/RulesTabs";
 import { Dashboard } from "./dashboard/Dashboard";
-import { schemaInfo, initialMetrics, initialEvents } from "./dashboard/mockData";
+import { initialMetrics } from "./dashboard/mockData";
+import type { SchemaMigrationListItem } from "./dashboard/api";
+import type { MigrationEvent, LiveMetrics } from "./dashboard/types";
 import { t } from "./theme";
 
 const SSE_URL = "/api/events";
@@ -34,8 +37,36 @@ export default function App() {
   const backendStatus = useBackendHealth();
   const [nav, setNav] = useState<NavKey>("dashboard");
   const [showSettings, setShowSettings] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Settings is special — clicking sidebar opens modal, doesn't switch view
+  // Schema migration list — auto-poll every 10s
+  const listApi = useApi<SchemaMigrationListItem[]>("/api/schema-migrations", {
+    intervalMs: 10_000,
+  });
+  const list = listApi.data || [];
+
+  // Auto-select first schema migration when list arrives and nothing selected
+  useEffect(() => {
+    if (selectedId === null && list.length > 0) {
+      setSelectedId(list[0].id);
+    }
+  }, [list, selectedId]);
+
+  const selectedSchema: SchemaMigrationListItem | null =
+    list.find(s => s.id === selectedId) || null;
+
+  // Events for right rail (filtered to selected schema)
+  const eventsApi = useApi<MigrationEvent[]>(
+    selectedId ? `/api/schema-migrations/${selectedId}/events?limit=50` : null,
+    { intervalMs: 5000 },
+  );
+  const metricsApi = useApi<LiveMetrics>(
+    selectedId ? `/api/schema-migrations/${selectedId}/metrics` : null,
+    { intervalMs: 5000 },
+  );
+  const rightRailEvents  = eventsApi.data  || [];
+  const rightRailMetrics = metricsApi.data || initialMetrics;
+
   const onNavChange = (key: NavKey) => {
     if (key === "settings") { setShowSettings(true); return; }
     setNav(key);
@@ -53,8 +84,8 @@ export default function App() {
       <Sidebar
         active={nav}
         onChange={onNavChange}
-        schemaName={schemaInfo.name}
-        migrationId={schemaInfo.id}
+        schemaName={selectedSchema?.name || "—"}
+        migrationId={selectedSchema ? selectedSchema.id.slice(0, 8) : "—"}
         userName="Антон Волков"
         userInitials="АВ"
         userRole="DBA · admin"
@@ -74,16 +105,23 @@ export default function App() {
           </div>
         )}
 
-        {nav === "dashboard" && <Dashboard/>}
+        {nav === "dashboard" && (
+          <Dashboard
+            selectedId={selectedId}
+            schema={selectedSchema}
+            onCreated={id => { setSelectedId(id); listApi.reload(); }}
+            showEmptyState={backendStatus === "ok" && !listApi.loading && list.length === 0}
+          />
+        )}
         {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}
         {nav === "clusters"  && <ConnectorGroupsPanel/>}
         {nav === "rules"     && <RulesTabs/>}
       </main>
 
       <RightRail
-        schemaName={schemaInfo.name}
-        metrics={initialMetrics}
-        events={initialEvents}
+        schemaName={selectedSchema?.name || "—"}
+        metrics={rightRailMetrics}
+        events={rightRailEvents}
       />
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)}/>}

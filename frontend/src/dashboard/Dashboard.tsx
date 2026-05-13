@@ -1,17 +1,28 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { SchemaHeader } from "./SchemaHeader";
 import { KpiRow, KpiCard } from "./KpiRow";
 import { ObjectFilters, type SortKey, type StatusFilter } from "./ObjectFilters";
 import { ObjectTable } from "./ObjectTable";
 import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
+import { DashboardEmptyState } from "./EmptyState";
 import { fmtCompactNum } from "../utils/format";
-import { OBJECT_TYPES, type SchemaObject, type ObjectType } from "./types";
-import { schemaInfo, initialObjects, initialEvents } from "./mockData";
+import { useApi } from "../hooks/useApi";
+import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
+import {
+  type SchemaMigrationListItem,
+  createSchemaMigration, pause as pauseApi, rollback as rollbackApi,
+} from "./api";
 
-export function Dashboard() {
-  const [objects]   = useState<SchemaObject[]>(initialObjects);
-  const [events]    = useState(initialEvents);
+interface Props {
+  selectedId:        string | null;
+  schema:            SchemaMigrationListItem | null;
+  onCreated:         (newId: string) => void;
+  /** When `true` and `schema` is null, render the empty state with CTA. */
+  showEmptyState:    boolean;
+}
+
+export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search,       setSearch]       = useState("");
@@ -19,7 +30,20 @@ export function Dashboard() {
   const [openObject,   setOpenObject]   = useState<SchemaObject | null>(null);
   const [wizardOpen,   setWizardOpen]   = useState(false);
 
-  // Aggregate KPIs
+  // Fetch objects and events for this schema migration (auto-poll 5s)
+  const objectsApi = useApi<SchemaObject[]>(
+    selectedId ? `/api/schema-migrations/${selectedId}/objects` : null,
+    { intervalMs: 5000 },
+  );
+  const eventsApi = useApi<MigrationEvent[]>(
+    selectedId ? `/api/schema-migrations/${selectedId}/events?limit=200` : null,
+    { intervalMs: 5000 },
+  );
+
+  const objects = objectsApi.data || [];
+  const events  = eventsApi.data  || [];
+
+  // Aggregate KPIs from current objects (or use server-side KPI from schema header)
   const overall = useMemo(() => {
     const done       = objects.filter(o => o.status === "done" || o.status === "skipped").length;
     const err        = objects.reduce((a, o) => a + o.err, 0);
@@ -42,7 +66,7 @@ export function Dashboard() {
     return c;
   }, [objects]);
 
-  // Filtered + sorted objects
+  // Filtered + sorted
   const filtered = useMemo(() => {
     let arr = objects;
     if (typeFilter !== "all") arr = arr.filter(o => o.type === typeFilter);
@@ -58,7 +82,9 @@ export function Dashboard() {
     }
     arr = [...arr].sort((a, b) => {
       if (sort === "priority") {
-        const rank = { error: 0, warn: 1, running: 2, validating: 3, paused: 4, queued: 5, done: 6, skipped: 7 } as const;
+        const rank: Record<string, number> = {
+          error: 0, warn: 1, running: 2, validating: 3, paused: 4, queued: 5, done: 6, skipped: 7,
+        };
         const sa = rank[a.status] ?? 9;
         const sb = rank[b.status] ?? 9;
         if (sa !== sb) return sa - sb;
@@ -73,30 +99,69 @@ export function Dashboard() {
     return arr;
   }, [objects, typeFilter, statusFilter, search, sort]);
 
+  // Reset drawer when switching schemas
+  useEffect(() => { setOpenObject(null); }, [selectedId]);
+
+  // Empty state
+  if (!schema) {
+    return (
+      <>
+        {showEmptyState && <DashboardEmptyState onCreate={() => setWizardOpen(true)}/>}
+        {wizardOpen && (
+          <NewMigrationWizard
+            onClose={() => setWizardOpen(false)}
+            onSubmit={async d => {
+              const id = await createSchemaMigration({
+                name:           d.sourceSchema || "—",
+                src_schema:     d.sourceSchema,
+                tgt_schema:     d.targetSchema,
+                source_host:    d.sourceCluster,
+                source_version: d.sourceVersion,
+                target_host:    d.targetCluster,
+                target_version: d.targetVersion,
+                priority:       d.priority,
+                window_at:      d.cutoverAt || undefined,
+              });
+              setWizardOpen(false);
+              onCreated(id);
+            }}
+          />
+        )}
+      </>
+    );
+  }
+
+  const onPause = async () => {
+    if (!selectedId) return;
+    try { await pauseApi(selectedId, !schema.paused); } catch (e) { console.error(e); }
+  };
+  const onRollback = async () => {
+    if (!selectedId) return;
+    if (!window.confirm("Откатить миграцию? Все активные таблицы будут CANCELLING.")) return;
+    try { await rollbackApi(selectedId); } catch (e) { console.error(e); }
+  };
+
   return (
     <>
       <SchemaHeader
-        schema={schemaInfo}
-        progress={overall.progress}
-        onPause={()    => console.log("pause schema")}
-        onRollback={() => console.log("rollback schema")}
-        onNew={()      => setWizardOpen(true)}
+        schema={schema}
+        progress={schema.kpi.progress}
+        onPause={onPause}
+        onRollback={onRollback}
+        onNew={() => setWizardOpen(true)}
       />
 
       <KpiRow>
         <KpiCard
           label="Прогресс схемы"
-          value={`${overall.progress.toFixed(1)}%`}
-          sub={`${overall.done}/${overall.total} объектов готово`}
-          spark={[12, 18, 24, 32, 40, 45, 52, 58, 62, 66, 70, 72, 75, 78, 80, 82, 84, 86, 87, overall.progress]}
+          value={`${schema.kpi.progress.toFixed(1)}%`}
+          sub={`${schema.kpi.doneObjects}/${schema.kpi.totalObjects} объектов готово`}
           tone="info"
-          delta={+8}
         />
         <KpiCard
           label="Объектов в работе"
           value={statusCounts.running}
           sub={`${statusCounts.queued} в очереди · ${statusCounts.done} готовы`}
-          spark={[2, 3, 4, 4, 3, 5, 6, 5, 4, 4, 5, 6, 7, 6, 5, 4, 3, 3, 2, statusCounts.running]}
           tone="info"
           mono={false}
         />
@@ -104,22 +169,18 @@ export function Dashboard() {
           label="Скорость"
           value={fmtCompactNum(overall.rowsPerSec)}
           sub={`rows/s · ${overall.mbPerSec} MB/s`}
-          spark={[180, 210, 240, 260, 250, 280, 310, 290, 320, 340, 360, 355, 380, 400, 420, 415, 450, 470, 485, 490]}
           tone="ok"
-          delta={+5}
         />
         <KpiCard
           label="Совместимость"
-          value={`${schemaInfo.schemaCompat.toFixed(1)}%`}
+          value={`${(schema.schemaCompat || 100).toFixed(1)}%`}
           sub="по PL/SQL и view"
-          spark={[88, 89, 90, 90, 91, 91, 92, 92, 93, 93, 93, 94, 94, 94, 94, 95, 95, 96, 96, 97]}
           tone="warn"
         />
         <KpiCard
           label="Ошибки"
-          value={overall.err}
+          value={schema.kpi.errorObjects}
           sub={`${overall.warn} предупреждений`}
-          spark={[0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, overall.err]}
           tone="error"
           mono={false}
         />
@@ -151,7 +212,21 @@ export function Dashboard() {
       {wizardOpen && (
         <NewMigrationWizard
           onClose={() => setWizardOpen(false)}
-          onSubmit={d => { console.log("create migration", d); setWizardOpen(false); }}
+          onSubmit={async d => {
+            const id = await createSchemaMigration({
+              name:           d.sourceSchema || "—",
+              src_schema:     d.sourceSchema,
+              tgt_schema:     d.targetSchema,
+              source_host:    d.sourceCluster,
+              source_version: d.sourceVersion,
+              target_host:    d.targetCluster,
+              target_version: d.targetVersion,
+              priority:       d.priority,
+              window_at:      d.cutoverAt || undefined,
+            });
+            setWizardOpen(false);
+            onCreated(id);
+          }}
         />
       )}
     </>

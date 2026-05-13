@@ -205,6 +205,17 @@ workers_mod.init(
 )
 app.register_blueprint(workers_bp)
 
+# ── Schema migrations (dashboard) ─────────────────────────────────────────────
+import routes.schema_migrations as schema_mig_mod
+from routes.schema_migrations import bp as schema_mig_bp
+
+schema_mig_mod.init(
+    get_conn_fn=get_conn,
+    db_available_ref=_db_available,
+    broadcast_fn=broadcast,
+)
+app.register_blueprint(schema_mig_bp)
+
 # ── Status poller ─────────────────────────────────────────────────────────────
 from services.status_poller import start_poller
 
