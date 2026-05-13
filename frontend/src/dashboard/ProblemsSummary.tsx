@@ -4,6 +4,7 @@ import { Icon } from "../components/ui";
 import { OBJECT_TYPES, type SchemaObject } from "./types";
 import { applyDdl, listDdlJobs, type DdlApplyAction } from "./api";
 import { SyncDdlDialog, type SyncGroup } from "./SyncDdlDialog";
+import { primaryActionStyle } from "./buttonStyles";
 
 interface Props {
   missing:      SchemaObject[];
@@ -203,17 +204,7 @@ export function ProblemsSummary({
             <button
               onClick={() => setDialogOpen(true)}
               title={`Синхронизировать DDL: до ${actionable} объект(ов)`}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "7px 14px",
-                borderRadius: t.radius.sm,
-                fontSize: 12.5, fontWeight: 700,
-                cursor: "pointer",
-                background: "#2563eb",
-                color:      "#ffffff",
-                border:     `1px solid #1d4ed8`,
-                boxShadow:  "0 1px 0 rgba(37,99,235,.15), 0 4px 12px -2px rgba(37,99,235,.35)",
-              }}
+              style={primaryActionStyle(false)}
             >
               <Icon name="rotate" size={13}/>
               Синхронизировать весь DDL · {actionable}

@@ -3,6 +3,7 @@ import { t } from "../theme";
 import { Icon } from "../components/ui";
 import { OBJECT_TYPES, type SchemaObject } from "./types";
 import type { DdlApplyAction } from "./api";
+import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 
 /** A planned action plus its candidate objects. */
 export interface SyncGroup {
@@ -188,38 +189,14 @@ export function SyncDdlDialog({ groups, onClose, onSubmit }: Props) {
             <button
               onClick={onClose}
               disabled={busy}
-              style={{
-                padding: "7px 14px",
-                borderRadius: t.radius.sm,
-                fontSize: 12.5, fontWeight: 500,
-                background: t.bg.s2,
-                color: t.text.primary,
-                border: `1px solid ${t.border.subtle}`,
-                cursor: busy ? "default" : "pointer",
-              }}
+              style={secondaryActionStyle(busy)}
             >
               Отмена
             </button>
             <button
               onClick={submit}
               disabled={busy || totalSelected === 0}
-              style={{
-                padding: "7px 16px",
-                borderRadius: t.radius.sm,
-                fontSize: 12.5, fontWeight: 700,
-                background: (busy || totalSelected === 0) ? "#cfcfcf" :
-                            dangerousSelected > 0 ? "#dc2626" : "#2563eb",
-                color: (busy || totalSelected === 0) ? "#666" : "#ffffff",
-                border: `1px solid ${
-                  (busy || totalSelected === 0) ? "#cfcfcf" :
-                  dangerousSelected > 0 ? "#b91c1c" : "#1d4ed8"
-                }`,
-                cursor: (busy || totalSelected === 0) ? "default" : "pointer",
-                boxShadow: (busy || totalSelected === 0) ? "none" :
-                           dangerousSelected > 0
-                             ? "0 1px 0 rgba(220,38,38,.15), 0 4px 12px -2px rgba(220,38,38,.35)"
-                             : "0 1px 0 rgba(37,99,235,.15), 0 4px 12px -2px rgba(37,99,235,.35)",
-              }}
+              style={primaryActionStyle(busy || totalSelected === 0, dangerousSelected > 0)}
             >
               {busy ? "в очередь…" : `Применить · ${totalSelected}`}
             </button>
@@ -376,19 +353,19 @@ function CheckboxBox({ checked, partial, onClick }: {
         display: "inline-grid", placeItems: "center",
         width: 16, height: 16, flexShrink: 0,
         borderRadius: 4,
-        background: isOn ? "#2563eb" : t.bg.s1,
-        border: `1.5px solid ${isOn ? "#1d4ed8" : t.border.strong}`,
+        background: isOn ? t.text.primary : t.bg.s1,
+        border: `1.5px solid ${isOn ? t.text.primary : t.border.strong}`,
         cursor: "pointer",
         transition: "background 80ms ease",
       }}
     >
       {checked && !partial && (
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-          <path d="M2 5 L4 7 L8 3" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M2 5 L4 7 L8 3" stroke={t.text.inverse} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       )}
       {partial && (
-        <span style={{ width: 7, height: 2, background: "#fff", borderRadius: 1 }}/>
+        <span style={{ width: 7, height: 2, background: t.text.inverse, borderRadius: 1 }}/>
       )}
     </span>
   );
