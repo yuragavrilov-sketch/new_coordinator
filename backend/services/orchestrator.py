@@ -35,6 +35,7 @@ import services.job_queue       as job_queue
 import services.kafka_topics    as kafka_topics
 import services.connector_groups as connector_groups_svc
 import db.oracle_browser        as oracle_browser
+from services.strategy import Strategy
 
 TICK_INTERVAL = 5  # seconds
 
@@ -410,11 +411,14 @@ def _handle_bulk_loading(mid: str, m: dict) -> None:
 
 
 def _handle_bulk_loaded(mid: str, m: dict) -> None:
-    strategy = (m.get("migration_strategy") or "STAGE").upper()
-    if strategy == "DIRECT":
-        # Skip stage validate / publish / drop — data is already in the target table
+    try:
+        strategy = Strategy.parse(m.get("strategy"))
+    except ValueError:
+        _fail(mid, f"Неизвестная стратегия: {m.get('strategy')!r}", "UNKNOWN_STRATEGY")
+        return
+    if not strategy.uses_stage:
         _transition(mid, "INDEXES_ENABLING",
-                    message="DIRECT стратегия: данные загружены напрямую, включение индексов")
+                    message="DIRECT: данные загружены напрямую, включение индексов")
     else:
         _transition(mid, "STAGE_VALIDATING")
 
@@ -900,12 +904,17 @@ def _handle_steady_state(mid: str, m: dict) -> None:
 def _handle_new(mid: str, m: dict) -> None:
     """Validate keys, queue gate, create stage, → TOPIC_CREATING (CDC)
     или → CHUNKING (BULK).  Коннектор управляется на уровне группы."""
-    mode = (m.get("migration_mode") or "CDC").upper()
+    try:
+        strategy = Strategy.parse(m.get("strategy"))
+    except ValueError:
+        _fail(mid, f"Неизвестная стратегия: {m.get('strategy')!r}", "UNKNOWN_STRATEGY")
+        return
+
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
     key_cols = json.loads(m.get("effective_key_columns_json") or "[]")
 
-    if mode != "BULK_ONLY" and not pk and not uk and not key_cols:
+    if strategy.has_cdc and not pk and not uk and not key_cols:
         _fail(mid,
               "Таблица не имеет PK/UK и ключевые колонки не заданы.",
               "NO_KEY_COLUMNS")
@@ -948,9 +957,8 @@ def _handle_new(mid: str, m: dict) -> None:
         _update_queue_positions()
         return
 
-    # Verify group connector is RUNNING (for CDC mode)
-    mode = (m.get("migration_mode") or "CDC").upper()
-    if mode != "BULK_ONLY":
+    # Verify group connector is RUNNING (for CDC strategies)
+    if strategy.has_cdc:
         group = connector_groups_svc.get_group(m["group_id"])
         if not group:
             _fail(mid, "Группа коннектора не найдена", "GROUP_NOT_FOUND")
@@ -973,9 +981,8 @@ def _handle_new(mid: str, m: dict) -> None:
         try:
             src_cfg = _oracle_cfg(m["source_connection_id"])
             dst_cfg = _oracle_cfg(m["target_connection_id"])
-            strategy = (m.get("migration_strategy") or "STAGE").upper()
 
-            if mode != "BULK_ONLY":
+            if strategy.has_cdc:
                 try:
                     has_supp = oracle_scn.check_supplemental_logging(
                         src_cfg, m["source_schema"], m["source_table"]
@@ -988,7 +995,7 @@ def _handle_new(mid: str, m: dict) -> None:
                 except Exception as exc:
                     print(f"[orchestrator] supplemental logging check failed: {exc}")
 
-            if strategy == "STAGE":
+            if strategy.uses_stage:
                 ts = m.get("stage_tablespace") or ""
                 oracle_stage.create_stage_table(
                     src_cfg, dst_cfg,
@@ -1000,11 +1007,9 @@ def _handle_new(mid: str, m: dict) -> None:
             else:
                 stage_msg = "Прямая загрузка (без stage)"
 
-            if mode == "BULK_ONLY":
-                # Skip topic creation — go straight to chunking
+            if not strategy.has_cdc:
                 _safe_transition(mid, "NEW", "CHUNKING",
-                                 message=f"{stage_msg}, BULK_ONLY → нарезка чанков")
-                # Create chunks inline
+                                 message=f"{stage_msg}, без CDC → нарезка чанков")
                 _unmark_in_prog(mid)
                 _create_chunks_and_transition(mid, m)
                 return
@@ -1109,8 +1114,13 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
             n_idx = len(result["enabled"]["indexes"])
             n_con = len(result["enabled"]["constraints"])
 
-            mode = (m.get("migration_mode") or "CDC").upper()
-            if mode == "BULK_ONLY":
+            try:
+                strategy = Strategy.parse(m.get("strategy"))
+            except ValueError:
+                _fail(mid, f"Неизвестная стратегия: {m.get('strategy')!r}", "UNKNOWN_STRATEGY")
+                return
+
+            if not strategy.has_cdc:
                 try:
                     oracle_browser.enable_triggers(
                         oracle_scn.open_oracle_conn(dst_cfg),
@@ -1123,12 +1133,11 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                     mid, "INDEXES_ENABLING", "DATA_VERIFYING",
                     message=(
                         f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
-                        "Режим BULK_ONLY — запуск сверки данных"
+                        "Без CDC — запуск сверки данных"
                     ),
                     extra_fields={"error_code": None, "error_text": None},
                 )
             else:
-                # Group-based CDC → CDC_APPLYING (not CDC_APPLY_STARTING)
                 _safe_transition(
                     mid, "INDEXES_ENABLING", "CDC_APPLYING",
                     message=(
@@ -1476,7 +1485,7 @@ def _check_group_connectors() -> None:
                         SELECT migration_id FROM migrations
                         WHERE  group_id = %s
                           AND  phase NOT IN ('DRAFT', 'COMPLETED', 'CANCELLED', 'FAILED')
-                          AND  migration_mode != 'BULK_ONLY'
+                          AND  strategy LIKE 'CDC_%'
                     """, (group_id,))
                     for row in cur.fetchall():
                         _fail(row[0],
