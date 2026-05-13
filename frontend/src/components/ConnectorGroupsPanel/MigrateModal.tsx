@@ -3,6 +3,8 @@ import ReactDOM from "react-dom";
 import { t } from "../../theme";
 import type { GroupTable, MigrateParams } from "./types";
 import { MIGRATE_DEFAULTS } from "./helpers";
+import { StrategyPicker } from "../StrategyPicker";
+import { usesStage } from "../../types/migration";
 
 interface Props {
   groupId:   string;
@@ -48,26 +50,6 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
       setSubmitting(false);
     }
   };
-
-  function ModeBtn({ value, label, activeColor }: {
-    value: string; label: string; activeColor: string;
-  }) {
-    const field   = value === "CDC" || value === "BULK_ONLY" ? "migration_mode" : "migration_strategy";
-    const current = field === "migration_mode" ? params.migration_mode : params.migration_strategy;
-    const active  = current === value;
-    return (
-      <button
-        onClick={() => set({ [field]: value } as Partial<MigrateParams>)}
-        style={{
-          flex: 1, padding: "7px 10px", borderRadius: t.radius.md, cursor: "pointer",
-          border:     `1px solid ${active ? activeColor : t.border.base}`,
-          background: active ? activeColor + "20" : t.bg.s2,
-          color:      active ? activeColor : t.text.muted,
-          fontWeight: 700, fontSize: t.size.sm,
-        }}
-      >{label}</button>
-    );
-  }
 
   return ReactDOM.createPortal(
     <div
@@ -123,36 +105,14 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
             </div>
           </div>
 
-          {/* Mode */}
-          <div>
-            <div style={lbl}>Режим</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <ModeBtn value="CDC"       label="CDC (Debezium)"     activeColor={t.purple.base} />
-              <ModeBtn value="BULK_ONLY" label="Разовая переливка" activeColor={t.green.base} />
-            </div>
-            <div style={hint}>
-              {params.migration_mode === "CDC"
-                ? "Bulk-загрузка + CDC через Debezium до полного catchup"
-                : "Однократная переливка без отслеживания изменений"}
-            </div>
-          </div>
-
           {/* Strategy */}
-          <div>
-            <div style={lbl}>Стратегия</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <ModeBtn value="STAGE"  label="STAGE"  activeColor={t.blue.base} />
-              <ModeBtn value="DIRECT" label="DIRECT" activeColor={t.green.base} />
-            </div>
-            <div style={hint}>
-              {params.migration_strategy === "STAGE"
-                ? "Через промежуточную stage-таблицу с валидацией"
-                : "Прямая загрузка в целевую таблицу"}
-            </div>
-          </div>
+          <StrategyPicker
+            value={params.strategy}
+            onChange={(s) => setParams({ ...params, strategy: s })}
+          />
 
           {/* Stage tablespace */}
-          {params.migration_strategy === "STAGE" && (
+          {usesStage(params.strategy) && (
             <div>
               <div style={lbl}>Stage tablespace</div>
               <input

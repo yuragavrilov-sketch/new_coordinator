@@ -1,5 +1,5 @@
 import React from "react";
-import type { GroupStatus } from "../../types/migration";
+import type { GroupStatus, Strategy } from "../../types/migration";
 import { t } from "../../theme";
 import type { MigrateParams } from "./types";
 
@@ -26,8 +26,7 @@ export function actionBtn(bg: string, border: string): React.CSSProperties {
 }
 
 export const MIGRATE_DEFAULTS: MigrateParams = {
-  migration_mode:           "CDC",
-  migration_strategy:       "STAGE",
+  strategy:                 "CDC_STAGE" as Strategy,
   chunk_size:               1_000_000,
   max_parallel_workers:     1,
   baseline_parallel_degree: 4,

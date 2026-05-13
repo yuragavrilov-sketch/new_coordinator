@@ -265,7 +265,7 @@ export function ConnectorGroupsPanel() {
                               {m.source_schema}.{m.source_table}
                             </td>
                             <td style={{ padding: "4px 8px", color: t.text.secondary }}>{m.phase}</td>
-                            <td style={{ padding: "4px 8px", color: t.text.muted }}>{m.migration_mode}</td>
+                            <td style={{ padding: "4px 8px", color: t.text.muted }}>{m.strategy ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>

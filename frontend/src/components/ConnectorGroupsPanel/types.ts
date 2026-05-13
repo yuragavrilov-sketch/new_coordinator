@@ -1,3 +1,5 @@
+import { Strategy } from "../../types/migration";
+
 export interface TopicCount {
   topic_name: string;
   count:      number;
@@ -22,8 +24,7 @@ export interface GroupHistoryEntry {
 }
 
 export interface MigrateParams {
-  migration_mode:           "CDC" | "BULK_ONLY";
-  migration_strategy:       "STAGE" | "DIRECT";
+  strategy:                 Strategy;
   chunk_size:               number;
   max_parallel_workers:     number;
   baseline_parallel_degree: number;
