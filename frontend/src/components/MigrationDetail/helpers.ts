@@ -1,4 +1,5 @@
 /** Shared phase sets and predicates used by MigrationDetail tabs. */
+import { Strategy, hasCdc } from "../../types/migration";
 
 export const BULK_PHASES = new Set([
   "CHUNKING", "BULK_LOADING", "BULK_LOADED",
@@ -35,6 +36,6 @@ export const ACTIVE_PHASES = new Set([
 
 export const DELETABLE_PHASES = new Set(["DRAFT", "CANCELLING", "CANCELLED", "FAILED"]);
 
-export function isCdcMode(detail: { migration_mode?: string }): boolean {
-  return (detail.migration_mode ?? "CDC").toUpperCase() !== "BULK_ONLY";
+export function isCdcMode(detail: { strategy?: Strategy }): boolean {
+  return detail.strategy ? hasCdc(detail.strategy) : true;
 }

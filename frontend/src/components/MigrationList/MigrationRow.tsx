@@ -1,5 +1,6 @@
 import React from "react";
 import type { MigrationSummary } from "../../types/migration";
+import { hasCdc, strategyLabel } from "../../types/migration";
 import { PhaseBadge } from "../PhaseBadge";
 import { ACTIVE_PHASES, DELETABLE_PHASES } from "../MigrationDetail/helpers";
 import { t } from "../../theme";
@@ -51,14 +52,15 @@ export function MigrationRow({
           {m.migration_name}
         </span>
         <PhaseBadge phase={m.phase} size="sm" />
-        {m.migration_mode === "BULK_ONLY" && (
+        {m.strategy && (
           <span style={{
-            background: t.green.bg, color: t.green.fg,
-            border: `1px solid ${t.green.base}`, borderRadius: t.radius.sm,
-            fontSize: 9, fontWeight: 700, padding: "1px 5px",
-            textTransform: "uppercase", letterSpacing: 0.4,
+            marginLeft: 8, padding: "2px 6px", borderRadius: 4,
+            fontSize: 11,
+            background: hasCdc(m.strategy) ? t.purple.bg : t.green.bg,
+            color: hasCdc(m.strategy) ? t.purple.fg : t.green.fg,
+            border: `1px solid ${hasCdc(m.strategy) ? t.purple.base : t.green.dim}`,
           }}>
-            BULK
+            {strategyLabel(m.strategy)}
           </span>
         )}
         {m.phase === "NEW" && m.queue_position != null && (

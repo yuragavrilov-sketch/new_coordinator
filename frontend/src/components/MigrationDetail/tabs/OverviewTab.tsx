@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { MigrationDetail } from "../../../types/migration";
+import { strategyLabel } from "../../../types/migration";
 import type { SSEEvent } from "../../../hooks/useSSE";
 import { t } from "../../../theme";
 import { fmtTs, fmtNum } from "../../../utils/format";
@@ -247,7 +248,7 @@ export function OverviewTab({
             {isCdcMode(detail) ? "CDC (Debezium)" : "Разовая переливка"}
           </span>
         } />
-        <InfoRow label="Стратегия" value={detail.migration_strategy} />
+        <InfoRow label="Стратегия" value={strategyLabel(detail.strategy)} />
       </InfoGrid>
 
       {isCdcMode(detail) && (
