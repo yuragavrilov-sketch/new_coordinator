@@ -264,6 +264,47 @@ def init_db() -> None:
                 col_name = col_sql.split("IF NOT EXISTS")[1].strip().split()[0]
                 print(f"[state_db]   column ok: migrations.{col_name}")
 
+            # ── New `strategy` enum column (replaces migration_mode + migration_strategy) ──
+            cur.execute("""
+                ALTER TABLE migrations
+                    ADD COLUMN IF NOT EXISTS strategy TEXT
+                        NOT NULL DEFAULT 'CDC_STAGE'
+            """)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.check_constraints
+                        WHERE constraint_name = 'migrations_strategy_check'
+                    ) THEN
+                        ALTER TABLE migrations
+                            ADD CONSTRAINT migrations_strategy_check
+                            CHECK (strategy IN ('CDC_STAGE','CDC_DIRECT','BULK_STAGE','BULK_DIRECT'));
+                    END IF;
+                END$$
+            """)
+            print("[state_db]   column ok: migrations.strategy")
+
+            # Backfill from legacy columns (only if they still exist)
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.columns
+                               WHERE table_name='migrations' AND column_name='migration_mode')
+                    THEN
+                        UPDATE migrations SET strategy =
+                            CASE
+                                WHEN migration_mode = 'BULK_ONLY' AND migration_strategy = 'DIRECT' THEN 'BULK_DIRECT'
+                                WHEN migration_mode = 'BULK_ONLY'                                    THEN 'BULK_STAGE'
+                                WHEN migration_strategy = 'DIRECT'                                   THEN 'CDC_DIRECT'
+                                ELSE 'CDC_STAGE'
+                            END
+                        WHERE TRUE;
+                    END IF;
+                END$$
+            """)
+            print("[state_db]   strategy backfilled")
+
             # ── migration_chunks ──────────────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS migration_chunks (
