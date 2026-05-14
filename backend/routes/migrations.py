@@ -127,6 +127,14 @@ def create_migration():
                 except ValueError as exc:
                     return jsonify({"error": f"Invalid strategy: {exc}"}), 400
 
+                # ── truncate_target: default TRUE; STAGE forces TRUE ──
+                truncate_target = bool(body.get("truncate_target", True))
+                if strategy.uses_stage and truncate_target is False:
+                    return jsonify({
+                        "error": "STAGE-стратегия требует TRUNCATE target (поведение неизменяемо). "
+                                 "Используйте DIRECT, если нужно сохранить существующие данные."
+                    }), 400
+
                 # group_id is now MANDATORY (no more Legacy per-migration connector)
                 group_id = body.get("group_id") or None
                 if not group_id:
@@ -164,7 +172,7 @@ def create_migration():
                         validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
-                        strategy,
+                        strategy, truncate_target,
                         group_id,
                         created_at, updated_at
                     ) VALUES (
@@ -177,7 +185,7 @@ def create_migration():
                         %s,
                         %s, %s,
                         %s, %s, %s,
-                        %s,
+                        %s, %s,
                         %s,
                         %s, %s
                     )
@@ -199,7 +207,7 @@ def create_migration():
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
                     body.get("effective_key_columns_json", "[]"),
-                    strategy.value,
+                    strategy.value, truncate_target,
                     group_id,
                     now, now,
                 ))
