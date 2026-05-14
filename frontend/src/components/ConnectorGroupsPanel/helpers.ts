@@ -27,6 +27,7 @@ export function actionBtn(bg: string, border: string): React.CSSProperties {
 
 export const MIGRATE_DEFAULTS: MigrateParams = {
   strategy:                 "CDC_STAGE" as Strategy,
+  truncate_target:          true,
   chunk_size:               1_000_000,
   max_parallel_workers:     1,
   baseline_parallel_degree: 4,

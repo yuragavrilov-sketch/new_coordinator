@@ -109,6 +109,8 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
           <StrategyPicker
             value={params.strategy}
             onChange={(s) => setParams({ ...params, strategy: s })}
+            truncateTarget={params.truncate_target}
+            onTruncateChange={(b) => setParams({ ...params, truncate_target: b })}
           />
 
           {/* Stage tablespace */}

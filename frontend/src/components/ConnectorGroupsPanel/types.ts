@@ -25,6 +25,7 @@ export interface GroupHistoryEntry {
 
 export interface MigrateParams {
   strategy:                 Strategy;
+  truncate_target:          boolean;
   chunk_size:               number;
   max_parallel_workers:     number;
   baseline_parallel_degree: number;

@@ -249,6 +249,7 @@ export function OverviewTab({
           </span>
         } />
         <InfoRow label="Стратегия" value={strategyLabel(detail.strategy)} />
+        <InfoRow label="TRUNCATE target" value={detail.truncate_target ? "да" : "нет"} />
       </InfoGrid>
 
       {isCdcMode(detail) && (
