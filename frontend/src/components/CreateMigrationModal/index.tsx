@@ -193,7 +193,7 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
     setSubmitErr("");
     const truncateTarget = usesStage(form.strategy) ? true : form.truncate_target;
     const payload = {
-      initial_phase:              "DRAFT",
+      initial_phase:              "NEW",
       migration_name:             form.migration_name.trim(),
       strategy:                   form.strategy,
       truncate_target:            truncateTarget,
