@@ -57,6 +57,58 @@ def _db_ok() -> bool:
     return _state["db_available"]["value"]
 
 
+def _link_to_schema_migration(cur, migration_id: str,
+                              source_schema: str, target_schema: str,
+                              source_table: str, strategy: Strategy) -> None:
+    """Линкует только что созданную миграцию к подходящему schema_migration.
+
+    Использует ту же cursor/transaction, что и INSERT в migrations. Если
+    подходящего schema_migration нет — тихо выходит (миграция остаётся orphan,
+    но всё равно подхватится дашбордом через UPPER-match по схемам).
+
+    Если у найденного schema_migration plan_id ещё NULL — создаёт `migration_plans`
+    запись (status=READY, defaults пустые) и обновляет sm.plan_id.
+    Затем вставляет строку в migration_plan_items.
+    """
+    src = (source_schema or "").strip()
+    tgt = (target_schema or "").strip()
+    if not src or not tgt:
+        return
+
+    cur.execute("""
+        SELECT schema_migration_id, name, plan_id
+        FROM   schema_migrations
+        WHERE  UPPER(src_schema) = UPPER(%s)
+          AND  UPPER(tgt_schema) = UPPER(%s)
+        ORDER  BY created_at DESC
+        LIMIT  1
+    """, (src, tgt))
+    row = cur.fetchone()
+    if not row:
+        return
+    sm_id, sm_name, plan_id = row
+
+    if plan_id is None:
+        cur.execute("""
+            INSERT INTO migration_plans (name, src_schema, tgt_schema, status)
+            VALUES (%s, %s, %s, 'READY')
+            RETURNING plan_id
+        """, (sm_name or f"{src}→{tgt}", src, tgt))
+        plan_id = cur.fetchone()[0]
+        cur.execute("""
+            UPDATE schema_migrations
+            SET    plan_id = %s, updated_at = NOW()
+            WHERE  schema_migration_id = %s
+        """, (plan_id, sm_id))
+
+    cur.execute("""
+        INSERT INTO migration_plan_items
+            (plan_id, table_name, mode, batch_order, sort_order,
+             overrides_json, migration_id, status)
+        VALUES (%s, %s, %s, 1, 0, '{}', %s, 'RUNNING')
+    """, (plan_id, source_table or "", strategy.value, migration_id))
+
+
 @bp.get("/api/migrations")
 def list_migrations():
     if not _db_ok():
@@ -215,6 +267,22 @@ def create_migration():
                         (migration_id, from_phase, to_phase, message, actor_type)
                     VALUES (%s, NULL, %s, %s, 'USER')
                 """, (mid, initial_phase, "Migration created"))
+
+                # Best-effort: привязать миграцию к подходящему schema_migration
+                # (по совпадению пары схем). Это даёт корректный link через
+                # plan_id → migration_plan_items, благодаря которому миграция
+                # попадает в дашборд штатным путём.
+                try:
+                    _link_to_schema_migration(
+                        cur, mid,
+                        body.get("source_schema", ""),
+                        body.get("target_schema", ""),
+                        body.get("source_table", ""),
+                        strategy,
+                    )
+                except Exception as link_exc:
+                    print(f"[migrations] schema-link failed (non-fatal): {link_exc}")
+
             conn.commit()
         finally:
             conn.close()

@@ -276,7 +276,8 @@ def list_schema_migrations(conn) -> list[dict]:
         result = []
         for r in rows:
             sm = dict(zip(cols, r))
-            child = _load_children(conn, sm["plan_id"])
+            child = _load_children(conn, sm["plan_id"],
+                                   sm.get("src_schema"), sm.get("tgt_schema"))
             result.append(_to_dashboard_view(sm, child))
         return result
 
@@ -299,7 +300,8 @@ def get_schema_migration(conn, sm_id: str) -> dict | None:
             return None
         cols = [d[0] for d in cur.description]
         sm = dict(zip(cols, row))
-        child = _load_children(conn, sm["plan_id"])
+        child = _load_children(conn, sm["plan_id"],
+                               sm.get("src_schema"), sm.get("tgt_schema"))
         return _to_dashboard_view(sm, child)
 
 
@@ -324,17 +326,28 @@ def get_objects(conn, sm_id: str) -> list[dict]:
     # (a) TABLE objects driven by migrations — they have phase/progress/errors.
     # Project only the columns _build_object actually reads — avoids dragging
     # 30+ migration metadata columns over the wire on every 5s poll.
+    #
+    # Источники миграций: (1) явно прилинкованные через plan_id →
+    # migration_plan_items (планнер); (2) созданные напрямую через
+    # POST /api/migrations с совпадающей парой schema (source_schema/target_schema =
+    # sm.src_schema/tgt_schema) — такие миграции могут быть orphan-row без plan_id,
+    # но логически принадлежат этому schema_migration.
     tables: list[dict] = []
     with conn.cursor() as cur:
         cur.execute("""
             SELECT m.migration_id, m.migration_name, m.phase, m.error_text,
                    m.source_table, m.total_rows, m.rows_loaded
-            FROM schema_migrations sm
-            JOIN migration_plan_items mpi ON mpi.plan_id = sm.plan_id
-            JOIN migrations m ON m.migration_id = mpi.migration_id
-            WHERE sm.schema_migration_id = %s
+            FROM migrations m
+            WHERE m.migration_id IN (
+                SELECT mpi.migration_id
+                FROM   migration_plan_items mpi
+                JOIN   schema_migrations sm ON sm.plan_id = mpi.plan_id
+                WHERE  sm.schema_migration_id = %s
+            )
+               OR (UPPER(m.source_schema) = UPPER(%s)
+                   AND UPPER(m.target_schema) = UPPER(%s))
             ORDER BY m.created_at
-        """, (sm_id,))
+        """, (sm_id, src_schema or "", tgt_schema or ""))
         cols = [d[0] for d in cur.description]
         tables = [_build_object(dict(zip(cols, r))) for r in cur.fetchall()]
     migrated_table_names = {t["name"].upper() for t in tables}
@@ -527,6 +540,15 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
     events such as DDL apply jobs), ordered by time, newest first."""
     events: list[tuple] = []  # (created_at, obj, level, msg)
 
+    # Get schema pair to also pick up orphan migrations matched by schema.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT src_schema, tgt_schema FROM schema_migrations WHERE schema_migration_id = %s",
+            (sm_id,),
+        )
+        row = cur.fetchone()
+        src_schema, tgt_schema = (row[0], row[1]) if row else ("", "")
+
     with conn.cursor() as cur:
         cur.execute("""
             SELECT
@@ -534,14 +556,19 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
                 msh.created_at,
                 msh.from_phase, msh.to_phase, msh.transition_status,
                 msh.transition_reason, msh.message
-            FROM schema_migrations sm
-            JOIN migration_plan_items mpi ON mpi.plan_id = sm.plan_id
-            JOIN migrations m ON m.migration_id = mpi.migration_id
+            FROM migrations m
             JOIN migration_state_history msh ON msh.migration_id = m.migration_id
-            WHERE sm.schema_migration_id = %s
+            WHERE m.migration_id IN (
+                SELECT mpi.migration_id
+                FROM   migration_plan_items mpi
+                JOIN   schema_migrations sm ON sm.plan_id = mpi.plan_id
+                WHERE  sm.schema_migration_id = %s
+            )
+               OR (UPPER(m.source_schema) = UPPER(%s)
+                   AND UPPER(m.target_schema) = UPPER(%s))
             ORDER BY msh.created_at DESC
             LIMIT %s
-        """, (sm_id, limit))
+        """, (sm_id, src_schema or "", tgt_schema or "", limit))
         for r in cur.fetchall():
             obj, created_at, from_phase, to_phase, status, _reason, message = r
             level = "error" if status == "FAILED" else "warn" if to_phase == "DATA_MISMATCH" else "info"
@@ -697,18 +724,50 @@ def set_paused(conn, sm_id: str, paused: bool) -> bool:
 
 # ── Internal helpers ────────────────────────────────────────────────────────
 
-def _load_children(conn, plan_id: int | None) -> list[dict]:
-    """Fetch child migrations linked to this schema_migration via plan_id."""
-    if plan_id is None:
+def _load_children(conn, plan_id: int | None,
+                   src_schema: str | None = None,
+                   tgt_schema: str | None = None) -> list[dict]:
+    """Fetch child migrations: union of (1) plan-linked via migration_plan_items
+    and (2) orphan migrations matched by (source_schema, target_schema) pair."""
+    has_plan = plan_id is not None
+    has_pair = bool(src_schema and tgt_schema)
+    if not has_plan and not has_pair:
         return []
-    with conn.cursor() as cur:
-        cur.execute("""
+
+    if has_plan and has_pair:
+        sql = """
+            SELECT m.migration_id, m.phase, m.error_text,
+                   m.total_rows, m.rows_loaded, m.source_table
+            FROM migrations m
+            WHERE m.migration_id IN (
+                SELECT mpi.migration_id FROM migration_plan_items mpi
+                WHERE mpi.plan_id = %s
+            )
+               OR (UPPER(m.source_schema) = UPPER(%s)
+                   AND UPPER(m.target_schema) = UPPER(%s))
+        """
+        params = (plan_id, src_schema, tgt_schema)
+    elif has_plan:
+        sql = """
             SELECT m.migration_id, m.phase, m.error_text,
                    m.total_rows, m.rows_loaded, m.source_table
             FROM migration_plan_items mpi
             JOIN migrations m ON m.migration_id = mpi.migration_id
             WHERE mpi.plan_id = %s
-        """, (plan_id,))
+        """
+        params = (plan_id,)
+    else:
+        sql = """
+            SELECT m.migration_id, m.phase, m.error_text,
+                   m.total_rows, m.rows_loaded, m.source_table
+            FROM migrations m
+            WHERE UPPER(m.source_schema) = UPPER(%s)
+              AND UPPER(m.target_schema) = UPPER(%s)
+        """
+        params = (src_schema, tgt_schema)
+
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
