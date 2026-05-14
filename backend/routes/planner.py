@@ -299,6 +299,15 @@ def execute_plan():
                         strategy = Strategy.parse(raw_strategy)
                     except ValueError as exc:
                         return jsonify({"error": f"Invalid strategy for {table_name}: {exc}"}), 400
+                    raw_truncate = overrides.get("truncate_target")
+                    if raw_truncate is None:
+                        raw_truncate = defaults.get("truncate_target", True)
+                    truncate_target = bool(raw_truncate)
+                    if strategy.uses_stage and truncate_target is False:
+                        return jsonify({
+                            "error": f"Invalid truncate_target for {table_name}: "
+                                     "STAGE-стратегия требует TRUNCATE target (поведение неизменяемо)."
+                        }), 400
                     baseline_pd = overrides.get("baseline_parallel_degree", defaults.get("baseline_parallel_degree", 4))
 
                     mid = str(uuid.uuid4())
@@ -312,6 +321,7 @@ def execute_plan():
                             chunk_size, max_parallel_workers,
                             baseline_parallel_degree,
                             strategy,
+                            truncate_target,
                             group_id,
                             created_at, updated_at
                         ) VALUES (
@@ -320,6 +330,7 @@ def execute_plan():
                             %s, %s,
                             %s, %s,
                             %s, %s,
+                            %s,
                             %s,
                             %s,
                             %s,
@@ -332,6 +343,7 @@ def execute_plan():
                         chunk_size, max(1, int(max_workers)),
                         max(1, int(baseline_pd)),
                         strategy.value,
+                        truncate_target,
                         group_id if strategy.has_cdc else None,
                         now, now,
                     ))

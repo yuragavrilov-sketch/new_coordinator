@@ -375,6 +375,13 @@ def create_migration_from_table(group_id: str):
     except ValueError as exc:
         return jsonify({"error": f"Invalid strategy: {exc}"}), 400
 
+    truncate_target = bool(body.get("truncate_target", True))
+    if strategy.uses_stage and truncate_target is False:
+        return jsonify({
+            "error": "STAGE-стратегия требует TRUNCATE target (поведение неизменяемо). "
+                     "Используйте DIRECT, если нужно сохранить существующие данные."
+        }), 400
+
     stage_name       = f"STG_{src_schema}_{src_table}" if strategy.uses_stage else ""
     stage_tablespace = body.get("stage_tablespace", "PAYSTAGE") if strategy.uses_stage else ""
 
@@ -401,6 +408,7 @@ def create_migration_from_table(group_id: str):
                     source_pk_exists, source_uk_exists,
                     effective_key_type, effective_key_source, effective_key_columns_json,
                     strategy,
+                    truncate_target,
                     group_id,
                     created_at, updated_at
                 ) VALUES (
@@ -413,6 +421,7 @@ def create_migration_from_table(group_id: str):
                     %s,
                     %s, %s,
                     %s, %s, %s,
+                    %s,
                     %s,
                     %s,
                     %s, %s
@@ -430,6 +439,7 @@ def create_migration_from_table(group_id: str):
                 pk_exists, uk_exists,
                 ekt, key_source_map.get(ekt, "NONE"), ekc_json,
                 strategy.value,
+                truncate_target,
                 group_id,
                 now, now,
             ))
