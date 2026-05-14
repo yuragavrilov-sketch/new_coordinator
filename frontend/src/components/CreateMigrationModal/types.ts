@@ -37,6 +37,7 @@ export interface FormData {
   effective_key_type:       string;
   effective_key_columns:    string[];
   selected_uk_index:        number;
+  truncate_target:          boolean;
 }
 
 export interface EnsureResult {

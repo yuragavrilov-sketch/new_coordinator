@@ -33,6 +33,7 @@ export const INIT: FormData = {
   target_schema:            "",
   target_table:             "",
   strategy:                 "CDC_STAGE" as Strategy,
+  truncate_target:          true,
   group_id:                 "",
   connector_name:           "",
   topic_prefix:             "",

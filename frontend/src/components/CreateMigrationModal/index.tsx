@@ -194,10 +194,12 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
     if (!validate()) return;
     setSubmit(true);
     setSubmitErr("");
+    const truncateTarget = usesStage(form.strategy) ? true : form.truncate_target;
     const payload = {
       initial_phase:              "DRAFT",
       migration_name:             form.migration_name.trim(),
       strategy:                   form.strategy,
+      truncate_target:            truncateTarget,
       source_connection_id:       "oracle_source",
       target_connection_id:       "oracle_target",
       source_schema:              form.source_schema,
@@ -337,6 +339,8 @@ export function CreateMigrationModal({ onClose, onCreated }: Props) {
             <StrategyPicker
               value={form.strategy}
               onChange={(s) => setF({ strategy: s })}
+              truncateTarget={form.truncate_target}
+              onTruncateChange={(b) => setF({ truncate_target: b })}
             />
           </Section>
 
