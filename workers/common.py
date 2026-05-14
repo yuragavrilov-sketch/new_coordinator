@@ -194,7 +194,7 @@ def claim_chunk(conn) -> Optional[dict]:
             SELECT source_connection_id, target_connection_id,
                    source_schema, source_table,
                    target_schema, target_table, stage_table_name,
-                   start_scn, migration_strategy
+                   start_scn, strategy
             FROM   migrations
             WHERE  migration_id = %s
         """, (migration_id,))
@@ -206,7 +206,7 @@ def claim_chunk(conn) -> Optional[dict]:
         (src_conn_id, dst_conn_id,
          src_schema, src_table,
          tgt_schema, tgt_table, stage_table,
-         start_scn, migration_strategy) = mrow
+         start_scn, strategy) = mrow
 
     conn.commit()
     return {
@@ -224,7 +224,7 @@ def claim_chunk(conn) -> Optional[dict]:
         "target_table":         tgt_table,
         "stage_table":          stage_table,
         "start_scn":            str(start_scn) if start_scn is not None else None,
-        "migration_strategy":   (migration_strategy or "STAGE").upper(),
+        "strategy":             (strategy or "CDC_STAGE").upper(),
     }
 
 

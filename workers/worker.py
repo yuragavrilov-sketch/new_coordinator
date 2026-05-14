@@ -113,8 +113,9 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     src_schema  = chunk["source_schema"]
     src_table   = chunk["source_table"]
     tgt_schema  = chunk["target_schema"]
-    strategy    = chunk.get("migration_strategy", "STAGE")
-    dest_table  = chunk["target_table"] if strategy == "DIRECT" else chunk["stage_table"]
+    strategy    = chunk.get("strategy", "CDC_STAGE")
+    uses_stage  = strategy.endswith("_STAGE")
+    dest_table  = chunk["stage_table"] if uses_stage else chunk["target_table"]
     raw_scn     = chunk.get("start_scn")
     start_scn   = int(raw_scn) if raw_scn else None
     rowid_start = chunk["rowid_start"]
