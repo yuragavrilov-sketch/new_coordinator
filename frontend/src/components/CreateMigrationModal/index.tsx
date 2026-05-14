@@ -4,16 +4,27 @@ import { hasCdc, usesStage } from "../../types/migration";
 import { t } from "../../theme";
 import { StrategyPicker } from "../StrategyPicker";
 import { S } from "./styles";
-import type { FormData, TableInfo, EnsureResult } from "./types";
+import type { FormData, TableInfo, EnsureResult, MigrationPrefill } from "./types";
 import { INIT, KEY_SOURCE_MAP, autoFields } from "./helpers";
 import { Section, Field, TextInput, Chip, KeyTypeBtn } from "./ui";
 import { SchemaTablePair } from "./SchemaTablePair";
 import { EnsureChips } from "./EnsureChips";
 
-interface Props { onClose: () => void; onCreated: () => void }
+interface Props {
+  onClose: () => void;
+  onCreated: () => void;
+  prefill?: MigrationPrefill;
+}
 
-export function CreateMigrationModal({ onClose, onCreated }: Props) {
-  const [form,         setFormRaw]    = useState<FormData>(INIT);
+export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
+  const initialForm = useMemo<FormData>(() => ({
+    ...INIT,
+    source_schema: prefill?.source_schema ?? INIT.source_schema,
+    source_table:  prefill?.source_table  ?? INIT.source_table,
+    target_schema: prefill?.target_schema ?? INIT.target_schema,
+    target_table:  prefill?.target_table  ?? INIT.target_table,
+  }), []);  // eslint-disable-line react-hooks/exhaustive-deps -- prefill captured on mount
+  const [form,         setFormRaw]    = useState<FormData>(initialForm);
   const [tableInfo,    setTableInfo]  = useState<TableInfo | null>(null);
   const [loadingInfo,  setLoadInfo]   = useState(false);
   const [infoErr,      setInfoErr]    = useState("");
