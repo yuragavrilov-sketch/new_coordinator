@@ -17,14 +17,7 @@ interface Props {
 }
 
 export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
-  const initialForm = useMemo<FormData>(() => ({
-    ...INIT,
-    source_schema: prefill?.source_schema ?? INIT.source_schema,
-    source_table:  prefill?.source_table  ?? INIT.source_table,
-    target_schema: prefill?.target_schema ?? INIT.target_schema,
-    target_table:  prefill?.target_table  ?? INIT.target_table,
-  }), []);  // eslint-disable-line react-hooks/exhaustive-deps -- prefill captured on mount
-  const [form,         setFormRaw]    = useState<FormData>(initialForm);
+  const [form,         setFormRaw]    = useState<FormData>(() => ({ ...INIT, ...prefill }));
   const [tableInfo,    setTableInfo]  = useState<TableInfo | null>(null);
   const [loadingInfo,  setLoadInfo]   = useState(false);
   const [infoErr,      setInfoErr]    = useState("");
