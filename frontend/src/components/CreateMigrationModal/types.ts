@@ -45,3 +45,10 @@ export interface EnsureResult {
   columns: any;
   objects: any;
 }
+
+export interface MigrationPrefill {
+  source_schema: string;
+  source_table:  string;
+  target_schema: string;
+  target_table:  string;
+}
