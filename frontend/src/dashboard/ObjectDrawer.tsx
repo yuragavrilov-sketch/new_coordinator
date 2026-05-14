@@ -283,8 +283,8 @@ export function ObjectDrawer({
                 title="Создать миграцию данных этой таблицы"
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
-                  background: `color-mix(in oklab, ${t.green.dim} 65%, black)`,
-                  border: `1px solid color-mix(in oklab, ${t.green.dim} 50%, black)`,
+                  background: "#2f7d52",
+                  border: "1px solid #1f5a3a",
                   borderRadius: t.radius.sm, color: "#fff",
                   padding: "5px 12px", fontSize: 12,
                   cursor: "pointer", fontWeight: 700,

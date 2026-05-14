@@ -336,8 +336,8 @@ function TableDetail({
         target_table:  obj.object_name,
       })}
       style={{
-        background: `color-mix(in oklab, ${t.green.dim} 65%, black)`,
-        border: `1px solid color-mix(in oklab, ${t.green.dim} 50%, black)`,
+        background: "#2f7d52",
+        border: "1px solid #1f5a3a",
         borderRadius: t.radius.sm, color: "#fff",
         padding: "3px 12px", fontSize: t.size.xs,
         cursor: "pointer", fontWeight: 700,

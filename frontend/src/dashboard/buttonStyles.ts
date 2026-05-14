@@ -36,9 +36,9 @@ export function primaryActionStyle(
       borderRadius: t.radius.sm,
       fontSize: 12.5, fontWeight: 600,
       cursor: "pointer",
-      background: `color-mix(in oklab, ${t.tone.error} 65%, black)`,
+      background: "#b04823",
       color:      "#fff",
-      border:     `1px solid color-mix(in oklab, ${t.tone.error} 50%, black)`,
+      border:     "1px solid #7e3018",
       boxShadow:  "0 1px 2px rgba(20,20,20,0.18)",
     };
   }
