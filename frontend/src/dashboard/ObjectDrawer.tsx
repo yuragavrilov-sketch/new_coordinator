@@ -9,6 +9,7 @@ import { STATUS_MAP, OBJECT_TYPES, type SchemaObject, type MigrationEvent } from
 import { applyDdl, type DdlApplyAction, type ObjectDetailResp, type DdlDetailResp, type MigrationDetailResp } from "./api";
 import { DiffSections } from "./DiffSections";
 import { primaryActionStyle } from "./buttonStyles";
+import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
 
 interface Props {
   schemaMigrationId: string;
@@ -19,6 +20,7 @@ interface Props {
   onClose:           () => void;
   onAction:          (o: SchemaObject, action: "pause" | "retry" | "rollback") => void;
   onApplied?:        () => void;
+  onMigrate?:        (prefill: MigrationPrefill) => void;
 }
 
 interface OracleError {
@@ -106,8 +108,22 @@ function detectApplyAction(
 export function ObjectDrawer({
   schemaMigrationId, object: o, events,
   srcSchema, tgtSchema,
-  onClose, onAction, onApplied,
+  onClose, onAction, onApplied, onMigrate,
 }: Props) {
+  const canMigrate =
+    !!onMigrate
+    && (o.type === "TABLE" || o.type === "MVIEW")
+    && !!srcSchema && !!tgtSchema;
+  const handleMigrate = () => {
+    if (!onMigrate || !srcSchema || !tgtSchema) return;
+    onMigrate({
+      source_schema: srcSchema,
+      source_table:  o.name,
+      target_schema: tgtSchema,
+      target_table:  o.name,
+    });
+    onClose();
+  };
   const detail = useApi<ObjectDetailResp>(
     `/api/schema-migrations/${schemaMigrationId}/objects/${encodeURIComponent(o.id)}/detail`,
   );
@@ -261,6 +277,21 @@ export function ObjectDrawer({
             )}
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+            {canMigrate && (
+              <button
+                onClick={handleMigrate}
+                title="Создать миграцию данных этой таблицы"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  background: t.green.bg, border: `1px solid ${t.green.dim}`,
+                  borderRadius: t.radius.sm, color: t.green.fg,
+                  padding: "5px 12px", fontSize: 12,
+                  cursor: "pointer", fontWeight: 700,
+                }}
+              >
+                Создать миграцию
+              </button>
+            )}
             {applyOpt && (
               <button
                 onClick={runApply}

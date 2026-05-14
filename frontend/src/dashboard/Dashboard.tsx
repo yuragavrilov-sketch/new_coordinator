@@ -16,6 +16,8 @@ import {
   type SchemaMigrationListItem,
   createSchemaMigration,
 } from "./api";
+import { CreateMigrationModal } from "../components/CreateMigrationModal";
+import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
 
 interface Props {
   selectedId:        string | null;
@@ -35,6 +37,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [wizardOpen,   setWizardOpen]   = useState(false);
   const [page,         setPage]         = useState(1);
   const [pageSize,     setPageSize]     = useState(25);
+  const [migrateModalPrefill, setMigrateModalPrefill] = useState<MigrationPrefill | null>(null);
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
   const objectsApi = useApi<SchemaObject[]>(
@@ -258,6 +261,18 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           onClose={() => setOpenObject(null)}
           onAction={(o, a) => console.log("drawer action", a, o.name)}
           onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
+          onMigrate={setMigrateModalPrefill}
+        />
+      )}
+      {migrateModalPrefill && (
+        <CreateMigrationModal
+          prefill={migrateModalPrefill}
+          onClose={() => setMigrateModalPrefill(null)}
+          onCreated={() => {
+            setMigrateModalPrefill(null);
+            objectsApi.reload();
+            eventsApi.reload();
+          }}
         />
       )}
       {wizardOpen && (
