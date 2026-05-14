@@ -53,9 +53,11 @@ export function SchemaTablePair({
   useEffect(() => {
     if (availableTables !== prevTables.current) {
       prevTables.current = availableTables;
+      // Don't wipe value while list is still loading or empty — would clobber prefill.
+      if (lTab || availableTables.length === 0) return;
       if (table && !availableTables.includes(table)) onTable("");
     }
-  }, [availableTables]); // eslint-disable-line
+  }, [availableTables, lTab]); // eslint-disable-line
 
   return (
     <div style={S.row2}>
