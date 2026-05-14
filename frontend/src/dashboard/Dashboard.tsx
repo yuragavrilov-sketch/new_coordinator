@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { SchemaHeader } from "./SchemaHeader";
 import { KpiRow, KpiCard } from "./KpiRow";
 import { ObjectFilters, type SortKey, type StatusFilter } from "./ObjectFilters";
@@ -16,8 +16,11 @@ import {
   type SchemaMigrationListItem,
   createSchemaMigration,
 } from "./api";
-import { CreateMigrationModal } from "../components/CreateMigrationModal";
 import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
+
+const CreateMigrationModal = React.lazy(() =>
+  import("../components/CreateMigrationModal").then(m => ({ default: m.CreateMigrationModal }))
+);
 
 interface Props {
   selectedId:        string | null;
@@ -265,15 +268,17 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         />
       )}
       {migrateModalPrefill && (
-        <CreateMigrationModal
-          prefill={migrateModalPrefill}
-          onClose={() => setMigrateModalPrefill(null)}
-          onCreated={() => {
-            setMigrateModalPrefill(null);
-            objectsApi.reload();
-            eventsApi.reload();
-          }}
-        />
+        <Suspense fallback={null}>
+          <CreateMigrationModal
+            prefill={migrateModalPrefill}
+            onClose={() => setMigrateModalPrefill(null)}
+            onCreated={() => {
+              setMigrateModalPrefill(null);
+              objectsApi.reload();
+              eventsApi.reload();
+            }}
+          />
+        </Suspense>
       )}
       {wizardOpen && (
         <NewMigrationWizard

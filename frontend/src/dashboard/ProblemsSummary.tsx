@@ -353,13 +353,14 @@ function Bucket({
               }}
               aria-disabled={busy}
               style={{
-                fontSize: 11, padding: "3px 9px",
+                fontSize: 11, fontWeight: 600, padding: "3px 10px",
                 borderRadius: t.radius.pill,
-                background:  busy ? t.bg.s2 : t.tone.accentSoft,
-                color:       busy ? t.text.muted : t.tone.accent,
-                border:      `1px solid ${t.border.subtle}`,
+                background:  busy ? t.bg.s2 : dotColor,
+                color:       busy ? t.text.muted : "#fff",
+                border:      `1px solid ${busy ? t.border.subtle : dotColor}`,
                 cursor:      busy ? "default" : "pointer",
                 userSelect:  "none",
+                boxShadow:   busy ? "none" : "0 1px 2px rgba(20,20,20,0.08)",
               }}
             >
               {busy ? "…" : actionLabel}

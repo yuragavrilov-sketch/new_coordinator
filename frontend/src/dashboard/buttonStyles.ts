@@ -37,8 +37,9 @@ export function primaryActionStyle(
       fontSize: 12.5, fontWeight: 600,
       cursor: "pointer",
       background: t.tone.error,
-      color:      t.text.inverse,
-      border:     `1px solid ${t.tone.error}`,
+      color:      "#fff",
+      border:     `1px solid color-mix(in oklab, ${t.tone.error} 80%, black)`,
+      boxShadow:  "0 1px 2px rgba(20,20,20,0.12)",
     };
   }
   return {
@@ -50,6 +51,7 @@ export function primaryActionStyle(
     background: t.text.primary,
     color:      t.text.inverse,
     border:     `1px solid ${t.text.primary}`,
+    boxShadow:  "0 1px 2px rgba(20,20,20,0.12)",
   };
 }
 
