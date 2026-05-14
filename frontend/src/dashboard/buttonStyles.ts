@@ -36,10 +36,10 @@ export function primaryActionStyle(
       borderRadius: t.radius.sm,
       fontSize: 12.5, fontWeight: 600,
       cursor: "pointer",
-      background: t.tone.error,
+      background: `color-mix(in oklab, ${t.tone.error} 65%, black)`,
       color:      "#fff",
-      border:     `1px solid color-mix(in oklab, ${t.tone.error} 80%, black)`,
-      boxShadow:  "0 1px 2px rgba(20,20,20,0.12)",
+      border:     `1px solid color-mix(in oklab, ${t.tone.error} 50%, black)`,
+      boxShadow:  "0 1px 2px rgba(20,20,20,0.18)",
     };
   }
   return {
