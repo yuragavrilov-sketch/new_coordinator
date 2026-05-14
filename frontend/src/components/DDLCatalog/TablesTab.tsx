@@ -4,6 +4,7 @@ import { MatchBadge, MigrationBadge } from "./StatusBadges";
 import { ObjectActions } from "./ObjectActions";
 import { Pagination, usePagination } from "./Pagination";
 import { t } from "../../theme";
+import type { MigrationPrefill } from "../CreateMigrationModal/types";
 
 export interface CatalogObject {
   object_name: string;
@@ -25,6 +26,9 @@ interface Props {
   syncBusy: Set<string>;
   onCompare: (type: string, name: string) => void;
   onSync: (type: string, name: string, action: string) => void;
+  srcSchema: string;
+  tgtSchema: string;
+  onMigrate: (prefill: MigrationPrefill) => void;
 }
 
 type StatusFilter = "ALL" | "OK" | "DIFF" | "MISSING";
@@ -279,7 +283,15 @@ function TargetCompare({ srcCols, tgtCols }: { srcCols: Record<string, unknown>[
   );
 }
 
-function TableDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: number | null }) {
+function TableDetail({
+  obj, snapshotId, srcSchema, tgtSchema, onMigrate,
+}: {
+  obj: CatalogObject;
+  snapshotId: number | null;
+  srcSchema: string;
+  tgtSchema: string;
+  onMigrate: (prefill: MigrationPrefill) => void;
+}) {
   const [tgtMeta, setTgtMeta] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
@@ -315,6 +327,50 @@ function TableDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numb
 
   return (
     <td colSpan={6} style={{ padding: "8px 16px 12px 32px", background: t.bg.s2 }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 4px 8px",
+      }}>
+        <span style={{ fontSize: 12, color: t.text.disabled }}>
+          Карточка таблицы
+        </span>
+        {(() => {
+          const blocked = obj.migration_status === "PLANNED" || obj.migration_status === "IN_PROGRESS";
+          const canMigrate = !blocked && !!srcSchema && !!tgtSchema;
+          if (canMigrate) {
+            return (
+              <button
+                onClick={() => onMigrate({
+                  source_schema: srcSchema,
+                  source_table:  obj.object_name,
+                  target_schema: tgtSchema,
+                  target_table:  obj.object_name,
+                })}
+                style={{
+                  background: t.green.bg, border: `1px solid ${t.green.dim}`,
+                  borderRadius: t.radius.sm, color: t.green.fg,
+                  padding: "3px 12px", fontSize: t.size.xs,
+                  cursor: "pointer", fontWeight: 700,
+                }}
+              >
+                Создать миграцию
+              </button>
+            );
+          }
+          if (blocked) {
+            return (
+              <span style={{
+                background: t.amber.base + "22", color: t.amber.base,
+                padding: "2px 10px", borderRadius: t.radius.sm,
+                fontSize: t.size.xs, fontWeight: 600,
+              }}>
+                Миграция: {obj.migration_status}
+              </span>
+            );
+          }
+          return null;
+        })()}
+      </div>
       {obj.match_status === "DIFF" && <DiffSummary diff={obj.diff} />}
       {obj.match_status === "DIFF" && tgtMeta && (
         <TargetCompare
@@ -350,7 +406,10 @@ function TableDetail({ obj, snapshotId }: { obj: CatalogObject; snapshotId: numb
   );
 }
 
-export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll, syncBusy, onCompare, onSync }: Props) {
+export function TablesTab({
+  objects, snapshotId, selected, onToggle, onToggleAll,
+  syncBusy, onCompare, onSync, srcSchema, tgtSchema, onMigrate,
+}: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedObj, setExpandedObj] = useState<string | null>(null);
@@ -466,7 +525,11 @@ export function TablesTab({ objects, snapshotId, selected, onToggle, onToggleAll
                 </tr>
                 {expanded && (
                   <tr style={{ background: t.bg.s2 }}>
-                    <TableDetail obj={obj} snapshotId={snapshotId} />
+                    <TableDetail
+                      obj={obj} snapshotId={snapshotId}
+                      srcSchema={srcSchema} tgtSchema={tgtSchema}
+                      onMigrate={onMigrate}
+                    />
                   </tr>
                 )}
               </React.Fragment>

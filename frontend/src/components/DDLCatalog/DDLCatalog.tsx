@@ -6,6 +6,8 @@ import { ViewsTab } from "./ViewsTab";
 import { CodeTab } from "./CodeTab";
 import { OtherTab } from "./OtherTab";
 import { PlannerWizard } from "./PlannerWizard";
+import { CreateMigrationModal } from "../CreateMigrationModal";
+import type { MigrationPrefill } from "../CreateMigrationModal/types";
 import { t } from "../../theme";
 
 // ── SearchSelect ────────────────────────────────────────────────────────────
@@ -120,6 +122,7 @@ export function DDLCatalog() {
   const [syncBusy, setSyncBusy] = useState<Set<string>>(new Set());
 
   const [showWizard, setShowWizard] = useState(false);
+  const [migrateModalPrefill, setMigrateModalPrefill] = useState<MigrationPrefill | null>(null);
 
   useEffect(() => {
     fetch("/api/db/source/schemas").then(r => r.json()).then(d => Array.isArray(d) && setSrcSchemas(d)).catch(() => {});
@@ -290,6 +293,8 @@ export function DDLCatalog() {
                   objects={grouped.tables} snapshotId={snapshotId} selected={selected}
                   onToggle={toggleTable} onToggleAll={toggleAllTables}
                   syncBusy={syncBusy} onCompare={doCompare} onSync={doSync}
+                  srcSchema={srcSchema} tgtSchema={tgtSchema}
+                  onMigrate={setMigrateModalPrefill}
                 />
               )}
               {activeTab === "views" && (
@@ -323,6 +328,16 @@ export function DDLCatalog() {
                 />
               </div>
             </>
+          )}
+          {migrateModalPrefill && (
+            <CreateMigrationModal
+              prefill={migrateModalPrefill}
+              onClose={() => setMigrateModalPrefill(null)}
+              onCreated={() => {
+                setMigrateModalPrefill(null);
+                loadObjectsForTab(activeTab);
+              }}
+            />
           )}
         </>
       )}
