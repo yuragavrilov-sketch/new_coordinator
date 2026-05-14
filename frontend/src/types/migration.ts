@@ -83,6 +83,7 @@ export interface Migration {
   queue_position: number | null;
   group_id: string | null;
   data_compare_task_id?: string;
+  truncate_target: boolean;
 }
 
 // ── Connector Groups ──────────────────────────────────────────────────────────
