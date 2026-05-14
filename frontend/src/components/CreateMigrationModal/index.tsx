@@ -24,11 +24,14 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
   const [submitting,   setSubmit]     = useState(false);
   const [submitErr,    setSubmitErr]  = useState("");
   const [fieldErrs,    setFieldErrs]  = useState<Partial<Record<keyof FormData, string>>>({});
-  const [dupWarning,   setDupWarning] = useState<string | null>(null);
   const [ensureBusy,   setEnsureBusy] = useState(false);
   const [ensureResult, setEnsureResult] = useState<EnsureResult | null>(null);
   const [ensureErr,    setEnsureErr]  = useState("");
-  const [existingMigrations, setExistingMigrations] = useState<{ source_schema: string; source_table: string; phase: string }[]>([]);
+  const [existingMigrations, setExistingMigrations] = useState<{
+    migration_name: string; phase: string;
+    source_schema: string; source_table: string;
+    target_schema: string; target_table: string;
+  }[]>([]);
   const [connGroups, setConnGroups] = useState<ConnectorGroup[]>([]);
   const nameTouched = useRef(false);
 
@@ -43,11 +46,15 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
   const setF = useCallback((up: Partial<FormData>) =>
     setFormRaw(f => ({ ...f, ...up })), []);
 
-  // Load existing migrations to exclude already-used tables
+  // Load existing migrations to exclude already-used tables and detect duplicates
   useEffect(() => {
     fetch("/api/migrations")
       .then(r => r.json())
-      .then((data: { source_schema: string; source_table: string; phase: string }[]) =>
+      .then((data: {
+        migration_name: string; phase: string;
+        source_schema: string; source_table: string;
+        target_schema: string; target_table: string;
+      }[]) =>
         setExistingMigrations(data.filter(m =>
           m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
         ))
@@ -108,31 +115,17 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
     });
   }, [form.source_schema, form.source_table, form.target_schema, form.target_table, setF]);
 
-  // Duplicate detection
-  useEffect(() => {
-    if (!form.source_schema || !form.source_table || !form.target_schema || !form.target_table) {
-      setDupWarning(null);
-      return;
-    }
-    fetch("/api/migrations")
-      .then(r => r.json())
-      .then((data: {
-        migration_name: string; phase: string;
-        source_schema: string; source_table: string;
-        target_schema: string; target_table: string;
-      }[]) => {
-        const dup = data.find(m =>
-          m.source_schema === form.source_schema && m.source_table === form.source_table &&
-          m.target_schema === form.target_schema && m.target_table === form.target_table &&
-          m.phase !== "CANCELLED" && m.phase !== "FAILED" && m.phase !== "COMPLETED"
-        );
-        setDupWarning(dup
-          ? `Уже есть активная миграция "${dup.migration_name}" (${dup.phase}) для этой пары`
-          : null
-        );
-      })
-      .catch(() => setDupWarning(null));
-  }, [form.source_schema, form.source_table, form.target_schema, form.target_table]);
+  // Duplicate detection (derived from existingMigrations — already loaded above)
+  const dupWarning = useMemo(() => {
+    if (!form.source_schema || !form.source_table || !form.target_schema || !form.target_table) return null;
+    const dup = existingMigrations.find(m =>
+      m.source_schema === form.source_schema && m.source_table === form.source_table &&
+      m.target_schema === form.target_schema && m.target_table === form.target_table
+    );
+    return dup
+      ? `Уже есть активная миграция "${dup.migration_name}" (${dup.phase}) для этой пары`
+      : null;
+  }, [form.source_schema, form.source_table, form.target_schema, form.target_table, existingMigrations]);
 
   // Auto-suggest target schema from source
   const onSourceSchema = useCallback((v: string) => {

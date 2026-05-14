@@ -243,11 +243,11 @@ function TargetCompare({ srcCols, tgtCols }: { srcCols: Record<string, unknown>[
   const rows: { name: string; srcType: string; tgtType: string; status: string }[] = [];
   for (const name of allNames) {
     const s = srcMap.get(name);
-    const t = tgtMap.get(name);
-    if (s && !t) rows.push({ name, srcType: fmtType(s), tgtType: "—", status: "missing" });
-    else if (!s && t) rows.push({ name, srcType: "—", tgtType: fmtType(t), status: "extra" });
-    else if (s && t) {
-      const st = fmtType(s), tt = fmtType(t);
+    const tgt = tgtMap.get(name);
+    if (s && !tgt) rows.push({ name, srcType: fmtType(s), tgtType: "—", status: "missing" });
+    else if (!s && tgt) rows.push({ name, srcType: "—", tgtType: fmtType(tgt), status: "extra" });
+    else if (s && tgt) {
+      const st = fmtType(s), tt = fmtType(tgt);
       rows.push({ name, srcType: st, tgtType: tt, status: st === tt ? "ok" : "type" });
     }
   }

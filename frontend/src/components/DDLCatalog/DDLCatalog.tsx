@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { S } from "./styles";
 import { ObjectTabs, ObjectTabId } from "./ObjectTabs";
 import { TablesTab, CatalogObject } from "./TablesTab";
@@ -6,9 +6,12 @@ import { ViewsTab } from "./ViewsTab";
 import { CodeTab } from "./CodeTab";
 import { OtherTab } from "./OtherTab";
 import { PlannerWizard } from "./PlannerWizard";
-import { CreateMigrationModal } from "../CreateMigrationModal";
 import type { MigrationPrefill } from "../CreateMigrationModal/types";
 import { t } from "../../theme";
+
+const CreateMigrationModal = React.lazy(() =>
+  import("../CreateMigrationModal").then(m => ({ default: m.CreateMigrationModal }))
+);
 
 // ── SearchSelect ────────────────────────────────────────────────────────────
 
@@ -330,14 +333,16 @@ export function DDLCatalog() {
             </>
           )}
           {migrateModalPrefill && (
-            <CreateMigrationModal
-              prefill={migrateModalPrefill}
-              onClose={() => setMigrateModalPrefill(null)}
-              onCreated={() => {
-                setMigrateModalPrefill(null);
-                loadObjectsForTab(activeTab);
-              }}
-            />
+            <Suspense fallback={null}>
+              <CreateMigrationModal
+                prefill={migrateModalPrefill}
+                onClose={() => setMigrateModalPrefill(null)}
+                onCreated={() => {
+                  setMigrateModalPrefill(null);
+                  loadObjectsForTab(activeTab);
+                }}
+              />
+            </Suspense>
           )}
         </>
       )}

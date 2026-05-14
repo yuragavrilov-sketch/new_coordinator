@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, Suspense } from "react";
 import type { MigrationSummary } from "../../types/migration";
 import type { SSEEvent } from "../../hooks/useSSE";
 import { MigrationDetailPanel } from "../MigrationDetail";
-import { CreateMigrationModal } from "../CreateMigrationModal";
 import { EmptyState } from "../ui";
+
+const CreateMigrationModal = React.lazy(() =>
+  import("../CreateMigrationModal").then(m => ({ default: m.CreateMigrationModal }))
+);
 import { ACTIVE_PHASES } from "../MigrationDetail/helpers";
 import { t } from "../../theme";
 import type { FilterKey, SpeedSnapshot } from "./helpers";
@@ -116,10 +119,12 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
   return (
     <>
       {showCreate && (
-        <CreateMigrationModal
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); load(); }}
-        />
+        <Suspense fallback={null}>
+          <CreateMigrationModal
+            onClose={() => setShowCreate(false)}
+            onCreated={() => { setShowCreate(false); load(); }}
+          />
+        </Suspense>
       )}
       <div style={{ display: "flex", gap: 12, height: "calc(100vh - 180px)", minHeight: 400 }}>
         {/* List panel */}
