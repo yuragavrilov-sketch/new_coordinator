@@ -34,9 +34,10 @@ export function TableSelectionStep({
       if (next.has(table)) {
         next.delete(table);
         onTableSetting(table, {
-          strategy:   defaults.strategy,
-          chunk_size: defaults.chunk_size,
-          workers:    defaults.workers,
+          strategy:        defaults.strategy,
+          truncate_target: defaults.truncate_target,
+          chunk_size:      defaults.chunk_size,
+          workers:         defaults.workers,
         });
       } else {
         next.add(table);
@@ -73,6 +74,8 @@ export function TableSelectionStep({
             <StrategyPicker
               value={defaults.strategy}
               onChange={(s) => onDefaults({ ...defaults, strategy: s })}
+              truncateTarget={defaults.truncate_target}
+              onTruncateChange={(b) => onDefaults({ ...defaults, truncate_target: b })}
             />
           </div>
         </div>
@@ -166,6 +169,8 @@ export function TableSelectionStep({
                           <StrategyPicker
                             value={ts.strategy}
                             onChange={(s) => onTableSetting(table, { strategy: s })}
+                            truncateTarget={ts.truncate_target}
+                            onTruncateChange={(b) => onTableSetting(table, { truncate_target: b })}
                           />
                         ) : (
                           <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.strategy}</span>

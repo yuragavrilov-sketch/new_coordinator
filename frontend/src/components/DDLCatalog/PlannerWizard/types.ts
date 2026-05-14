@@ -18,10 +18,11 @@ export interface TableKeyEntry {
 }
 
 export interface BatchItem {
-  table:      string;
-  strategy:   Strategy;
-  chunk_size: number;
-  workers:    number;
+  table:           string;
+  strategy:        Strategy;
+  truncate_target: boolean;
+  chunk_size:      number;
+  workers:         number;
 }
 
 export interface Batch {
@@ -30,9 +31,10 @@ export interface Batch {
 }
 
 export interface PlanDefaults {
-  chunk_size: number;
-  workers:    number;
-  strategy:   Strategy;
+  chunk_size:      number;
+  workers:         number;
+  strategy:        Strategy;
+  truncate_target: boolean;
 }
 
 export interface FKDep {

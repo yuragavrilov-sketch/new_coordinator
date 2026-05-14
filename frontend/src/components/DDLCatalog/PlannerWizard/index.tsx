@@ -24,13 +24,13 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
 
   // Step 0 state
   const [defaults, setDefaults] = useState<PlanDefaults>({
-    chunk_size: 50000, workers: 4, strategy: "CDC_STAGE" as Strategy,
+    chunk_size: 50000, workers: 4, strategy: "CDC_STAGE" as Strategy, truncate_target: true,
   });
   const [tableSettings, setTableSettings] = useState<Map<string, BatchItem>>(() => {
     const map = new Map<string, BatchItem>();
     for (const table of selectedTables) {
       map.set(table, {
-        table, strategy: "CDC_STAGE" as Strategy, chunk_size: 50000, workers: 4,
+        table, strategy: "CDC_STAGE" as Strategy, truncate_target: true, chunk_size: 50000, workers: 4,
       });
     }
     return map;
@@ -144,7 +144,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         const items: BatchItem[] = sorted.map(table => {
           const ts = tableSettings.get(table);
           return ts ?? {
-            table, strategy: defaults.strategy,
+            table, strategy: defaults.strategy, truncate_target: defaults.truncate_target,
             chunk_size: defaults.chunk_size, workers: defaults.workers,
           };
         });
@@ -155,7 +155,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         const items: BatchItem[] = selectedTables.map(table => {
           const ts = tableSettings.get(table);
           return ts ?? {
-            table, strategy: defaults.strategy,
+            table, strategy: defaults.strategy, truncate_target: defaults.truncate_target,
             chunk_size: defaults.chunk_size, workers: defaults.workers,
           };
         });
@@ -176,6 +176,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         chunk_size:           defaults.chunk_size,
         max_parallel_workers: defaults.workers,
         strategy:             defaults.strategy,
+        truncate_target:      defaults.truncate_target,
       },
       batches: batches.map(b => ({
         batch_order: b.id,
@@ -185,6 +186,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
             source_table:          it.table,
             target_table:          it.table,
             strategy:              it.strategy,
+            truncate_target:       it.truncate_target,
             chunk_size:            it.chunk_size,
             max_parallel_workers:  it.workers,
             effective_key_type:    keyEntry?.effective_key_type ?? "",
