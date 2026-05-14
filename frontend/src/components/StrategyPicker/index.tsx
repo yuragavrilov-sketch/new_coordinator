@@ -5,11 +5,13 @@ import { Strategy, hasCdc, usesStage, composeStrategy } from "../../types/migrat
 interface Props {
   value: Strategy;
   onChange: (s: Strategy) => void;
+  truncateTarget: boolean;
+  onTruncateChange: (b: boolean) => void;
   /** Disable «С CDC» если коннектор группы не RUNNING */
   cdcDisabledReason?: string;
 }
 
-export function StrategyPicker({ value, onChange, cdcDisabledReason }: Props) {
+export function StrategyPicker({ value, onChange, truncateTarget, onTruncateChange, cdcDisabledReason }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const cdc = hasCdc(value);
   const stage = usesStage(value);
@@ -105,6 +107,22 @@ export function StrategyPicker({ value, onChange, cdcDisabledReason }: Props) {
             {stage
               ? "Через промежуточную stage-таблицу (валидация + TRUNCATE + baseline). Надёжнее."
               : "Прямая загрузка в target. Быстрее, но без stage-валидации."}
+          </div>
+          <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+            <label style={{ fontWeight: 500, fontSize: 13, cursor: usesStage(value) ? "not-allowed" : "pointer" }}>
+              <input
+                type="checkbox"
+                checked={usesStage(value) ? true : truncateTarget}
+                disabled={usesStage(value)}
+                onChange={(e) => onTruncateChange(e.target.checked)}
+              />
+              {" "}Очистить target перед загрузкой (TRUNCATE TABLE)
+            </label>
+            <div style={{ fontSize: 12, color: t.text.muted }}>
+              {usesStage(value)
+                ? "Всегда ON для STAGE — таблица очищается перед публикацией baseline."
+                : "Если выключено — данные дописываются поверх существующего (возможны PK-конфликты)."}
+            </div>
           </div>
         </div>
       )}
