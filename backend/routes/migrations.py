@@ -135,16 +135,15 @@ def create_migration():
                                  "Используйте DIRECT, если нужно сохранить существующие данные."
                     }), 400
 
-                # group_id is now MANDATORY (no more Legacy per-migration connector)
+                # group_id обязателен только для CDC-стратегий — BULK его не использует.
                 group_id = body.get("group_id") or None
-                if not group_id:
-                    return jsonify({"error": "group_id is required (Legacy per-migration connector is no longer supported)"}), 400
-
                 connector_name = ""
                 topic_prefix = ""
                 consumer_group = ""
 
                 if strategy.has_cdc:
+                    if not group_id:
+                        return jsonify({"error": "group_id is required for CDC strategies (Legacy per-migration connector is no longer supported)"}), 400
                     from services.connector_groups import get_group as _get_group, _active_topic_prefix
                     group = _get_group(group_id)
                     if not group:
