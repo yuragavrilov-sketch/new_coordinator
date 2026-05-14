@@ -325,6 +325,35 @@ function TableDetail({
     borderBottom: `1px solid ${t.border.subtle}`,
   };
 
+  const blocked = obj.migration_status === "PLANNED" || obj.migration_status === "IN_PROGRESS";
+  const canMigrate = !blocked && !!srcSchema && !!tgtSchema;
+  const migrateAction = canMigrate ? (
+    <button
+      onClick={() => onMigrate({
+        source_schema: srcSchema,
+        source_table:  obj.object_name,
+        target_schema: tgtSchema,
+        target_table:  obj.object_name,
+      })}
+      style={{
+        background: t.green.bg, border: `1px solid ${t.green.dim}`,
+        borderRadius: t.radius.sm, color: t.green.fg,
+        padding: "3px 12px", fontSize: t.size.xs,
+        cursor: "pointer", fontWeight: 700,
+      }}
+    >
+      Создать миграцию
+    </button>
+  ) : blocked ? (
+    <span style={{
+      background: t.amber.base + "22", color: t.amber.base,
+      padding: "2px 10px", borderRadius: t.radius.sm,
+      fontSize: t.size.xs, fontWeight: 600,
+    }}>
+      Миграция: {obj.migration_status}
+    </span>
+  ) : null;
+
   return (
     <td colSpan={6} style={{ padding: "8px 16px 12px 32px", background: t.bg.s2 }}>
       <div style={{
@@ -334,42 +363,7 @@ function TableDetail({
         <span style={{ fontSize: 12, color: t.text.disabled }}>
           Карточка таблицы
         </span>
-        {(() => {
-          const blocked = obj.migration_status === "PLANNED" || obj.migration_status === "IN_PROGRESS";
-          const canMigrate = !blocked && !!srcSchema && !!tgtSchema;
-          if (canMigrate) {
-            return (
-              <button
-                onClick={() => onMigrate({
-                  source_schema: srcSchema,
-                  source_table:  obj.object_name,
-                  target_schema: tgtSchema,
-                  target_table:  obj.object_name,
-                })}
-                style={{
-                  background: t.green.bg, border: `1px solid ${t.green.dim}`,
-                  borderRadius: t.radius.sm, color: t.green.fg,
-                  padding: "3px 12px", fontSize: t.size.xs,
-                  cursor: "pointer", fontWeight: 700,
-                }}
-              >
-                Создать миграцию
-              </button>
-            );
-          }
-          if (blocked) {
-            return (
-              <span style={{
-                background: t.amber.base + "22", color: t.amber.base,
-                padding: "2px 10px", borderRadius: t.radius.sm,
-                fontSize: t.size.xs, fontWeight: 600,
-              }}>
-                Миграция: {obj.migration_status}
-              </span>
-            );
-          }
-          return null;
-        })()}
+        {migrateAction}
       </div>
       {obj.match_status === "DIFF" && <DiffSummary diff={obj.diff} />}
       {obj.match_status === "DIFF" && tgtMeta && (
