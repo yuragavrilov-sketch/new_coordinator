@@ -1007,6 +1007,19 @@ def _handle_new(mid: str, m: dict) -> None:
             else:
                 stage_msg = "Прямая загрузка (без stage)"
 
+            # ── TRUNCATE target для DIRECT-стратегий ──
+            if not strategy.uses_stage and m.get("truncate_target", True):
+                tgt_quoted = f'"{m["target_schema"].upper()}"."{m["target_table"].upper()}"'
+                ora_conn = oracle_scn.open_oracle_conn(dst_cfg)
+                try:
+                    with ora_conn.cursor() as cur:
+                        cur.execute(f"TRUNCATE TABLE {tgt_quoted}")
+                    ora_conn.commit()
+                    print(f"[orchestrator] {mid}: truncated {tgt_quoted}")
+                    stage_msg += ", target очищен"
+                finally:
+                    ora_conn.close()
+
             if not strategy.has_cdc:
                 _safe_transition(mid, "NEW", "CHUNKING",
                                  message=f"{stage_msg}, без CDC → нарезка чанков")
