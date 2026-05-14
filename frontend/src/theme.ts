@@ -133,22 +133,24 @@ export const themeCss = `
     --fg-faint: #b8b5ad;
     --fg-inverse: #ffffff;
 
-    /* accent — interactive primary (focus rings, links) */
-    --accent:      oklch(0.55 0.13 250);
-    --accent-soft: oklch(0.93 0.04 250);
+    /* accent — interactive primary (focus rings, links).
+       sRGB hex, чтобы не зависеть от поддержки oklch() — был случай,
+       когда oklch не парсился в браузере и background падал в transparent. */
+    --accent:      #2a75ba;
+    --accent-soft: #d4ebff;
     --accent-fg:   #ffffff;
 
     /* status tones */
-    --tone-info:        oklch(0.58 0.12 250);
-    --tone-info-soft:   oklch(0.95 0.03 250);
-    --tone-ok:          oklch(0.6  0.11 150);
-    --tone-ok-soft:     oklch(0.95 0.04 150);
-    --tone-warn:        oklch(0.66 0.13 75);
-    --tone-warn-soft:   oklch(0.96 0.05 80);
-    --tone-error:       oklch(0.6  0.16 27);
-    --tone-error-soft:  oklch(0.96 0.04 27);
-    --tone-violet:      oklch(0.55 0.13 290);
-    --tone-violet-soft: oklch(0.95 0.03 290);
+    --tone-info:        #3c7ebe;
+    --tone-info-soft:   #e0f1ff;
+    --tone-ok:          #4a925c;
+    --tone-ok-soft:     #dcf7e1;
+    --tone-warn:        #c0851f;
+    --tone-warn-soft:   #ffefcd;
+    --tone-error:       #ce5249;
+    --tone-error-soft:  #ffe8e3;
+    --tone-violet:      #7262b7;
+    --tone-violet-soft: #eeecff;
 
     /* shadows */
     --shadow-1: 0 1px 0 rgba(20,20,20,0.04), 0 1px 2px rgba(20,20,20,0.03);
