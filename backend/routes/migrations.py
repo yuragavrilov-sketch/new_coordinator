@@ -418,6 +418,12 @@ def delete_migration(migration_id: str):
                     "DELETE FROM migration_state_history WHERE migration_id = %s",
                     (migration_id,),
                 )
+                # migration_plan_items.migration_id ссылается без ON DELETE
+                # CASCADE — иначе DELETE FROM migrations упрётся в FK.
+                cur.execute(
+                    "DELETE FROM migration_plan_items WHERE migration_id = %s",
+                    (migration_id,),
+                )
                 cur.execute(
                     "DELETE FROM migrations WHERE migration_id = %s",
                     (migration_id,),
