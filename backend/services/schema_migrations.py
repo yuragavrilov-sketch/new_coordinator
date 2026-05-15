@@ -402,9 +402,18 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                 # Skip TABLE rows already represented by a migration
                 if otype == "TABLE" and oname.upper() in migrated_table_names:
                     continue
-                ddl_objects.append(_build_ddl_object(
+                obj = _build_ddl_object(
                     otype, oname, src_status, tgt_status, match_status, None,
-                ))
+                )
+                # Для TABLE без миграции совпадение DDL не означает перенос
+                # данных — таблица может быть пустой или хранить устаревшие
+                # данные. Понижаем "done" до "queued", сохраняя error/warn
+                # для сломанных/расходящихся DDL.
+                if otype == "TABLE" and obj["status"] == "done":
+                    obj["status"]   = "queued"
+                    obj["progress"] = 0
+                    obj["note"]     = obj["note"] or "миграция данных не запущена"
+                ddl_objects.append(obj)
 
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get
     # synthetic "ddl-<TYPE>-<NAME>" IDs to avoid collisions.
