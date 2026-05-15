@@ -36,11 +36,25 @@ def validate_stage(
             message="Валидация пропущена (hash_sample не включён)",
         )
 
+    # В group-based миграциях per-migration start_scn не фиксируется —
+    # за CDC-консистентность отвечает коннектор группы. AS OF SCN сравнение
+    # без фиксированного SCN бессмысленно: данные на source могут уйти
+    # вперёд. Пропускаем hash-sample с понятным сообщением вместо краша.
+    start_scn = migration.get("start_scn")
+    if start_scn is None:
+        return ValidationResult(
+            ok=True,
+            message=(
+                "Hash-sample пропущен: start_scn не зафиксирован "
+                "(group-based миграция использует connector-group SCN)"
+            ),
+        )
+
     source_schema = migration["source_schema"]
     source_table  = migration["source_table"]
     target_schema = migration["target_schema"]
     stage_table   = migration["stage_table_name"]
-    scn           = int(migration["start_scn"])
+    scn           = int(start_scn)
 
     key_columns: list[str] = json.loads(migration.get("effective_key_columns_json") or "[]")
     if not key_columns:
