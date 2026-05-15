@@ -1250,6 +1250,16 @@ def _handle_data_verifying(mid: str, m: dict) -> None:
         return
 
     if status not in ("DONE", "COMPLETED"):
+        # Self-heal: пустая таблица → 0 чанков → воркеры не дёргают
+        # try_aggregate, задача висит в RUNNING вечно. Пытаемся
+        # дофинализировать её отсюда. try_aggregate безопасна для
+        # повторного вызова (берёт FOR UPDATE и проверяет status).
+        if status == "RUNNING" and (total or 0) == 0:
+            try:
+                from routes.data_compare import try_aggregate
+                try_aggregate(task_id)
+            except Exception as exc:
+                print(f"[orchestrator] {mid}: empty-table self-heal failed: {exc}")
         return  # Still running
 
     # Verification complete — check results

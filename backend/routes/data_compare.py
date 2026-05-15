@@ -190,6 +190,12 @@ def _create_chunks_and_start(task_id: str, configs: dict,
               f"{len(src_chunks)} src + {len(tgt_chunks)} tgt = {total}")
         _state["broadcast"]({"type": "data_compare", "task_id": task_id, "status": "RUNNING"})
 
+        # Пустая таблица: 0 чанков → воркеры не запускаются → try_aggregate
+        # никто не дёргает и task висит в RUNNING вечно. Финализируем сразу:
+        # обе стороны пустые, counts/hash совпадают по определению.
+        if total == 0:
+            try_aggregate(task_id)
+
     except Exception as exc:
         traceback.print_exc()
         try:
