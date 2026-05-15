@@ -739,14 +739,37 @@ def execute_target_action(conn, action: str, schema: str, table: str, object_nam
     conn.commit()
 
 
+def is_temporary_table(conn, schema: str, table: str) -> bool:
+    """Return True if {schema}.{table} is a Global Temporary Table.
+
+    Temp tables не поддерживают LOGGING/NOLOGGING (ORA-14451), а у их
+    индексов нет UNUSABLE-состояния в обычном смысле — поэтому везде
+    скипаем перестроение и переключение логирования.
+    """
+    s, t = schema.upper(), table.upper()
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT temporary FROM all_tables WHERE owner = :s AND table_name = :t",
+            {"s": s, "t": t},
+        )
+        row = cur.fetchone()
+    return bool(row) and (row[0] or "N").upper() == "Y"
+
+
 def set_table_logging(conn, schema: str, table: str, nologging: bool) -> None:
     """Switch the target table between NOLOGGING and LOGGING mode.
 
     NOLOGGING before baseline load skips redo generation for direct-path
     inserts (APPEND hint), dramatically reducing I/O.  Restore to LOGGING
     afterwards so normal DML is protected.
+
+    Skips silently for Global Temporary Tables — Oracle отклоняет
+    ALTER TABLE LOGGING/NOLOGGING на GTT с ORA-14451.
     """
     s, t = schema.upper(), table.upper()
+    if is_temporary_table(conn, s, t):
+        print(f"[oracle_browser] set_table_logging skipped: {s}.{t} is a temporary table")
+        return
     mode = "NOLOGGING" if nologging else "LOGGING"
     with conn.cursor() as cur:
         cur.execute(f'ALTER TABLE "{s}"."{t}" {mode}')
@@ -807,12 +830,14 @@ def rebuild_unusable_constraint_indexes(conn, schema: str, table: str) -> list[s
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
     protected = _constraint_backing_indexes(conn, schema, table)
+    # NOLOGGING не поддерживается на индексах GTT (ORA-14451).
+    rebuild_clause = "REBUILD" if is_temporary_table(conn, s, table) else "REBUILD NOLOGGING"
     rebuilt: list[str] = []
     with conn.cursor() as cur:
         for idx in info["indexes"]:
             if idx["name"].upper() in protected and idx["status"] == "UNUSABLE":
                 try:
-                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
+                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" {rebuild_clause}')
                     rebuilt.append(idx["name"])
                 except Exception as exc:
                     print(f"[oracle_browser] could not rebuild {idx['name']}: {exc}")
@@ -892,6 +917,10 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()
     t = table.upper()
+    # NOLOGGING недопустим на индексах GTT (ORA-14451). Для temp-таблиц
+    # используем обычный REBUILD без NOLOGGING.
+    is_temp = is_temporary_table(conn, s, t)
+    rebuild_clause = "REBUILD" if is_temp else "REBUILD NOLOGGING"
     enabled: dict = {"indexes": [], "constraints": []}
     errors:  dict = {"indexes": [], "constraints": []}
 
@@ -899,7 +928,7 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
         for idx in info["indexes"]:
             if idx["status"] == "UNUSABLE":
                 try:
-                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" REBUILD NOLOGGING')
+                    cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" {rebuild_clause}')
                     enabled["indexes"].append(idx["name"])
                 except Exception as exc:
                     errors["indexes"].append({"name": idx["name"], "error": str(exc)})
