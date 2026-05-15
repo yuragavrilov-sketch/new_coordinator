@@ -143,12 +143,17 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   // Clear bulk-selection when switching schemas
   useEffect(() => { setSelectedIds(new Set()); }, [selectedId]);
 
-  // Bulk-select: only TABLEs without a migration (status=queued).
-  // Backend treats queued TABLE rows as "not yet migrated" — same rule.
+  // Bulk-select: все TABLE-объекты без миграции. Backend в get_objects
+  // отдельно отдаёт TABLE-строки из DDL-снэпшота только для тех таблиц, у
+  // которых ещё нет migration-row (services/schema_migrations.get_objects),
+  // и присваивает им синтетический id "ddl-TABLE-<NAME>". Поэтому
+  // подходящий маркер «нет миграции» — id, а не status: расхождения по
+  // индексам/констрейнтам делают status=warn, но миграцию для такой
+  // таблицы создавать всё равно можно.
   const selectableIds = useMemo(() => {
     const s = new Set<string>();
     for (const o of objects) {
-      if (o.type === "TABLE" && o.status === "queued") s.add(o.id);
+      if (o.type === "TABLE" && o.id.startsWith("ddl-TABLE-")) s.add(o.id);
     }
     return s;
   }, [objects]);
