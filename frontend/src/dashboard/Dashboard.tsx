@@ -8,6 +8,9 @@ import { NewMigrationWizard } from "./NewMigrationWizard";
 import { DashboardEmptyState } from "./EmptyState";
 import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
 import { ProblemsSummary } from "./ProblemsSummary";
+import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
+import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
+import { t } from "../theme";
 import { fmtCompactNum } from "../utils/format";
 import { useApi } from "../hooks/useApi";
 import type { SSEEvent } from "../hooks/useSSE";
@@ -41,6 +44,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [page,         setPage]         = useState(1);
   const [pageSize,     setPageSize]     = useState(25);
   const [migrateModalPrefill, setMigrateModalPrefill] = useState<MigrationPrefill | null>(null);
+  const [selectedIds,         setSelectedIds]         = useState<Set<string>>(() => new Set());
+  const [bulkOpen,            setBulkOpen]            = useState(false);
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
   const objectsApi = useApi<SchemaObject[]>(
@@ -135,6 +140,69 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   useEffect(() => { setOpenObject(null); }, [selectedId]);
   // Reset to page 1 when filters change so the user always sees the matches
   useEffect(() => { setPage(1); }, [typeFilter, statusFilter, search, sort, pageSize, selectedId]);
+  // Clear bulk-selection when switching schemas
+  useEffect(() => { setSelectedIds(new Set()); }, [selectedId]);
+
+  // Bulk-select: only TABLEs without a migration (status=queued).
+  // Backend treats queued TABLE rows as "not yet migrated" — same rule.
+  const selectableIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const o of objects) {
+      if (o.type === "TABLE" && o.status === "queued") s.add(o.id);
+    }
+    return s;
+  }, [objects]);
+
+  // Keep selection in sync if objects list changes (drop stale ids)
+  useEffect(() => {
+    setSelectedIds(prev => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach(id => {
+        if (selectableIds.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [selectableIds]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllPage = useCallback((ids: string[], allSelected: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) ids.forEach(id => next.delete(id));
+      else             ids.forEach(id => next.add(id));
+      return next;
+    });
+  }, []);
+
+  // Resolve selected ids → bulk-modal payload
+  const selectedTables = useMemo(() => {
+    if (selectedIds.size === 0 || !schema) return [];
+    const byId = new Map(objects.map(o => [o.id, o]));
+    const src = schema.src_schema || "";
+    const tgt = schema.tgt_schema || "";
+    const out: { source_schema: string; source_table: string; target_schema: string; target_table: string }[] = [];
+    selectedIds.forEach(id => {
+      const o = byId.get(id);
+      if (!o) return;
+      out.push({
+        source_schema: src,
+        source_table:  o.name,
+        target_schema: tgt,
+        target_table:  o.name,
+      });
+    });
+    return out;
+  }, [selectedIds, objects, schema]);
 
   // Stable handlers (so React.memo on ObjectRow can skip re-renders)
   const handleOpen = useCallback((o: SchemaObject) => setOpenObject(o), []);
@@ -252,7 +320,32 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         pageSize={pageSize}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
+        selectableIds={selectableIds}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        onSelectAllPage={selectAllPage}
       />
+
+      {selectedIds.size > 0 && (
+        <BulkSelectionBar
+          count={selectedIds.size}
+          onClear={() => setSelectedIds(new Set())}
+          onCreate={() => setBulkOpen(true)}
+        />
+      )}
+
+      {bulkOpen && selectedTables.length > 0 && (
+        <BulkCreateMigrationModal
+          tables={selectedTables}
+          onClose={() => setBulkOpen(false)}
+          onCreated={() => {
+            setBulkOpen(false);
+            setSelectedIds(new Set());
+            objectsApi.reload();
+            eventsApi.reload();
+          }}
+        />
+      )}
 
       {openObject && selectedId && (
         <ObjectDrawer
@@ -299,5 +392,35 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         />
       )}
     </>
+  );
+}
+
+function BulkSelectionBar({ count, onClear, onCreate }: {
+  count: number; onClear: () => void; onCreate: () => void;
+}) {
+  return (
+    <div style={{
+      position:   "fixed",
+      bottom:     20,
+      left:       "50%",
+      transform:  "translateX(-50%)",
+      zIndex:     900,
+      display:    "flex",
+      alignItems: "center",
+      gap:        12,
+      padding:    "10px 16px",
+      background: t.bg.s1,
+      border:     `1px solid ${t.border.base}`,
+      borderRadius: t.radius.md,
+      boxShadow:  "0 8px 24px rgba(0,0,0,.35)",
+    }}>
+      <span style={{ fontSize: 13, color: t.text.primary }}>
+        Выбрано: <strong style={{ fontFamily: t.font.mono }}>{count}</strong>
+      </span>
+      <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
+      <button onClick={onCreate} style={primaryActionStyle(false)}>
+        Создать миграции ({count})
+      </button>
+    </div>
   );
 }

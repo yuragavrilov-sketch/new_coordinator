@@ -307,6 +307,260 @@ def create_migration():
         return jsonify({"error": str(exc)}), 500
 
 
+@bp.post("/api/migrations/bulk")
+def create_migrations_bulk():
+    """Создать пачку миграций таблиц с общими параметрами.
+
+    Body: {
+        tables: [
+            { source_schema, source_table, target_schema, target_table?,
+              source_connection_id?, target_connection_id? }, ...
+        ],
+        strategy:             "CDC_STAGE" | "CDC_DIRECT" | "BULK_STAGE" | "BULK_DIRECT",
+        group_id?:            UUID (обязательно для CDC),
+        truncate_target?:     bool (default true; STAGE форсит true),
+        validate_hash_sample?: bool,
+        stage_tablespace?:    str (default "PAYSTAGE"),
+        chunk_size?:          int,
+        max_parallel_workers?: int,
+        baseline_parallel_degree?: int,
+    }
+
+    Per-table: PK/UK подбирается автоматически (PK → UK → NONE), стейдж-имя
+    `STG_<schema>_<table>`. Целевая таблица по умолчанию совпадает с
+    исходной. Per-table вставки изолированы SAVEPOINT'ом — частичные сбои
+    не валят всю пачку.
+
+    Ответ: { created: [{table, migration_id}], failed: [{table, error}],
+             total: N } HTTP 201 если есть хоть один success, 207 если все упали.
+    """
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+
+    body = request.get_json(force=True) or {}
+    tables = body.get("tables") or []
+    if not isinstance(tables, list) or not tables:
+        return jsonify({"error": "tables list is required"}), 400
+    if len(tables) > 500:
+        return jsonify({"error": "Too many tables (max 500 per bulk)"}), 400
+
+    try:
+        strategy = Strategy.parse(body.get("strategy"))
+    except ValueError as exc:
+        return jsonify({"error": f"Invalid strategy: {exc}"}), 400
+
+    truncate_target = bool(body.get("truncate_target", True))
+    if strategy.uses_stage and truncate_target is False:
+        return jsonify({
+            "error": "STAGE-стратегия требует TRUNCATE target. "
+                     "Используйте DIRECT, если нужно сохранить существующие данные."
+        }), 400
+
+    validate_hash_sample      = bool(body.get("validate_hash_sample", False))
+    stage_tablespace          = (body.get("stage_tablespace") or "PAYSTAGE").strip().upper()
+    chunk_size                = int(body.get("chunk_size", 1_000_000) or 1_000_000)
+    max_parallel_workers      = max(1, int(body.get("max_parallel_workers", 1) or 1))
+    baseline_parallel_degree  = max(1, int(body.get("baseline_parallel_degree", 4) or 4))
+    src_conn_id_default       = body.get("source_connection_id") or "oracle_source"
+    tgt_conn_id_default       = body.get("target_connection_id") or "oracle_target"
+
+    # Validate group once for CDC strategies
+    group_id = body.get("group_id") or None
+    group = None
+    if strategy.has_cdc:
+        if not group_id:
+            return jsonify({"error": "group_id is required for CDC strategies"}), 400
+        from services.connector_groups import get_group as _get_group
+        group = _get_group(group_id)
+        if not group:
+            return jsonify({"error": f"Группа {group_id} не найдена"}), 404
+        if group.get("status") != "RUNNING":
+            return jsonify({"error": (
+                f"Коннектор группы не запущен (status={group.get('status')}). "
+                "Запустите коннектор группы перед созданием CDC-миграций."
+            )}), 409
+
+    # Lazy Oracle source connection — only opened if we actually need to
+    # fetch PK/UK info (i.e. there is at least one table to process).
+    load_configs = _state.get("load_configs")
+    src_oconn = None
+
+    def _ora_src():
+        nonlocal src_oconn
+        if src_oconn is None and load_configs is not None:
+            from db.oracle_browser import get_oracle_conn
+            src_oconn = get_oracle_conn("source", load_configs())
+        return src_oconn
+
+    created: list[dict] = []
+    failed:  list[dict] = []
+    now = datetime.utcnow()
+
+    try:
+        conn = _state["get_conn"]()
+        try:
+            for t in tables:
+                src_schema = (t.get("source_schema") or "").strip().upper()
+                src_table  = (t.get("source_table")  or "").strip().upper()
+                tgt_schema = (t.get("target_schema") or "").strip().upper()
+                tgt_table  = (t.get("target_table")  or src_table).strip().upper()
+                key_label  = f"{src_schema}.{src_table}"
+
+                if not src_schema or not src_table or not tgt_schema:
+                    failed.append({"table": key_label or "—",
+                                   "error": "source_schema/source_table/target_schema обязательны"})
+                    continue
+
+                # Lookup PK/UK on source
+                pk_columns:     list = []
+                uk_constraints: list = []
+                try:
+                    oconn = _ora_src()
+                    if oconn is None:
+                        raise RuntimeError("load_configs not wired")
+                    from db.oracle_browser import get_table_info
+                    info = get_table_info(oconn, src_schema, src_table)
+                    pk_columns     = info.get("pk_columns")     or []
+                    uk_constraints = info.get("uk_constraints") or []
+                except Exception as info_exc:
+                    failed.append({"table": key_label,
+                                   "error": f"Не удалось получить PK/UK: {info_exc}"})
+                    continue
+
+                # Auto-derive effective key: PK → UK → NONE
+                if pk_columns:
+                    eff_type   = "PRIMARY_KEY"
+                    eff_source = "PK"
+                    eff_cols   = pk_columns
+                elif uk_constraints:
+                    eff_type   = "UNIQUE_KEY"
+                    eff_source = "UK"
+                    eff_cols   = uk_constraints[0].get("columns") or []
+                else:
+                    eff_type   = "NONE"
+                    eff_source = "NONE"
+                    eff_cols   = []
+
+                # Per-table wiring
+                stage_table_name = f"STG_{src_schema}_{src_table}" if strategy.uses_stage else ""
+                connector_name   = ""
+                topic_prefix     = ""
+                consumer_group   = ""
+                if strategy.has_cdc and group:
+                    from services.connector_groups import _active_topic_prefix
+                    connector_name = group["connector_name"]
+                    topic_prefix   = _active_topic_prefix(group)
+                    prefix         = group.get("consumer_group_prefix") or group["topic_prefix"]
+                    consumer_group = f"{prefix}_{src_schema}_{src_table}"
+
+                mid = str(uuid.uuid4())
+                migration_name = f"{src_schema}.{src_table}"
+
+                # SAVEPOINT — изолируем per-table сбой, чтобы остальные
+                # таблицы успешно вставились.
+                with conn.cursor() as cur:
+                    cur.execute("SAVEPOINT bulk_item")
+                    try:
+                        cur.execute("""
+                            INSERT INTO migrations (
+                                migration_id, migration_name, phase, state_changed_at,
+                                source_connection_id, target_connection_id,
+                                source_schema, source_table, target_schema, target_table,
+                                stage_table_name, stage_tablespace,
+                                connector_name, topic_prefix, consumer_group,
+                                chunk_size, max_parallel_workers, baseline_parallel_degree,
+                                validate_hash_sample,
+                                source_pk_exists, source_uk_exists,
+                                effective_key_type, effective_key_source, effective_key_columns_json,
+                                strategy, truncate_target,
+                                group_id,
+                                created_at, updated_at
+                            ) VALUES (
+                                %s, %s, 'DRAFT', %s,
+                                %s, %s,
+                                %s, %s, %s, %s,
+                                %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s,
+                                %s,
+                                %s, %s,
+                                %s, %s, %s,
+                                %s, %s,
+                                %s,
+                                %s, %s
+                            )
+                        """, (
+                            mid, migration_name, now,
+                            src_conn_id_default, tgt_conn_id_default,
+                            src_schema, src_table, tgt_schema, tgt_table,
+                            stage_table_name, stage_tablespace,
+                            connector_name, topic_prefix, consumer_group,
+                            chunk_size, max_parallel_workers, baseline_parallel_degree,
+                            validate_hash_sample,
+                            bool(pk_columns), bool(uk_constraints),
+                            eff_type, eff_source, json.dumps(eff_cols),
+                            strategy.value, truncate_target,
+                            group_id,
+                            now, now,
+                        ))
+                        cur.execute("""
+                            INSERT INTO migration_state_history
+                                (migration_id, from_phase, to_phase, message, actor_type)
+                            VALUES (%s, NULL, 'DRAFT', 'Bulk-created', 'USER')
+                        """, (mid,))
+                        try:
+                            _link_to_schema_migration(
+                                cur, mid, src_schema, tgt_schema, src_table, strategy)
+                        except Exception as link_exc:
+                            # Линковка best-effort — её сбой не валит item.
+                            print(f"[migrations/bulk] schema-link failed for {key_label}: {link_exc}")
+                        cur.execute("RELEASE SAVEPOINT bulk_item")
+                        created.append({"table": key_label, "migration_id": mid})
+                    except Exception as ins_exc:
+                        try:
+                            cur.execute("ROLLBACK TO SAVEPOINT bulk_item")
+                        except Exception:
+                            pass
+                        failed.append({"table": key_label, "error": str(ins_exc)})
+
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        if src_oconn is not None:
+            try: src_oconn.close()
+            except Exception: pass
+        return jsonify({"error": str(exc)}), 500
+
+    if src_oconn is not None:
+        try: src_oconn.close()
+        except Exception: pass
+
+    # Refresh connector tables once for the whole batch (CDC only)
+    if strategy.has_cdc and created:
+        try:
+            from services.connector_groups import refresh_connector_tables
+            refresh_connector_tables(group_id)
+        except Exception as exc:
+            print(f"[migrations/bulk] refresh_connector_tables warning: {exc}")
+
+    # Per-migration broadcast
+    for c in created:
+        _state["broadcast"]({
+            "type":         "migration_phase",
+            "migration_id": c["migration_id"],
+            "phase":        "DRAFT",
+            "ts":           now.isoformat() + "Z",
+        })
+
+    status = 201 if created else 207  # 207 — multi-status: all failed
+    return jsonify({
+        "created": created,
+        "failed":  failed,
+        "total":   len(tables),
+    }), status
+
+
 @bp.patch("/api/migrations/<migration_id>/phase")
 def transition_phase(migration_id: str):
     if not _db_ok():

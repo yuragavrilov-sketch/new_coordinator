@@ -17,6 +17,12 @@ interface Props {
   pageSize?:     number;
   onPageChange?: (page: number) => void;
   onPageSizeChange?: (size: number) => void;
+  /** Bulk-selection. selectableIds — текущая страница, среди которых row можно выбрать
+   *  (например TABLE+queued). selectedIds — Set всех выбранных id (включая страницы вне видимости). */
+  selectableIds?: Set<string>;
+  selectedIds?:   Set<string>;
+  onToggleSelect?: (id: string) => void;
+  onSelectAllPage?: (ids: string[], allSelected: boolean) => void;
 }
 
 const TYPE_COLORS: Record<ObjectType, { bg: string; fg: string }> = {
@@ -39,6 +45,7 @@ const TYPE_COLORS: Record<ObjectType, { bg: string; fg: string }> = {
 export function ObjectTable({
   objects, layout = "flat", onOpen, onAction,
   page, pageSize, onPageChange, onPageSizeChange,
+  selectableIds, selectedIds, onToggleSelect, onSelectAllPage,
 }: Props) {
   const total = objects.length;
   const pagingOn  = !!(page && pageSize && onPageChange);
@@ -46,6 +53,18 @@ export function ObjectTable({
   const endIdx    = pagingOn ? Math.min(startIdx + pageSize!, total) : total;
   const pageItems = pagingOn ? objects.slice(startIdx, endIdx) : objects;
   const totalPages = pagingOn ? Math.max(1, Math.ceil(total / pageSize!)) : 1;
+
+  // Bulk-select state for the visible page
+  const selectionOn = !!(selectableIds && selectedIds && onToggleSelect);
+  const pageSelectableIds = selectionOn
+    ? pageItems.filter(o => selectableIds!.has(o.id)).map(o => o.id)
+    : [];
+  const pageSelectedCount = selectionOn
+    ? pageSelectableIds.filter(id => selectedIds!.has(id)).length
+    : 0;
+  const pageAllSelected  = selectionOn && pageSelectableIds.length > 0
+    && pageSelectedCount === pageSelectableIds.length;
+  const pageSomeSelected = selectionOn && pageSelectedCount > 0 && !pageAllSelected;
 
   // Group by category when layout=grouped — applied AFTER pagination slice
   const grouped: [string, SchemaObject[]][] = (() => {
@@ -70,6 +89,16 @@ export function ObjectTable({
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr>
+            {selectionOn && (
+              <Th>
+                <SelectAllCheckbox
+                  checked={pageAllSelected}
+                  indeterminate={pageSomeSelected}
+                  disabled={pageSelectableIds.length === 0}
+                  onChange={() => onSelectAllPage?.(pageSelectableIds, pageAllSelected)}
+                />
+              </Th>
+            )}
             <Th>Тип</Th>
             <Th>Имя</Th>
             <Th>Статус</Th>
@@ -84,10 +113,23 @@ export function ObjectTable({
           </tr>
         </thead>
         <tbody>
-          {layout === "grouped" && grouped.length > 0
-            ? grouped.flatMap(([group, rows]) => [
+          {(() => {
+            const colSpan = selectionOn ? 12 : 11;
+            const rowOf = (o: SchemaObject) => (
+              <ObjectRow
+                key={o.id}
+                o={o}
+                onOpen={onOpen}
+                onAction={onAction}
+                selectable={selectionOn && selectableIds!.has(o.id)}
+                selected={selectionOn && selectedIds!.has(o.id)}
+                onToggle={selectionOn ? onToggleSelect : undefined}
+              />
+            );
+            if (layout === "grouped" && grouped.length > 0) {
+              return grouped.flatMap(([group, rows]) => [
                 <tr key={`g-${group}`} style={{ background: t.bg.s2 }}>
-                  <td colSpan={11} style={{ padding: "6px 12px" }}>
+                  <td colSpan={colSpan} style={{ padding: "6px 12px" }}>
                     <span style={{
                       fontSize: "10.5px", fontWeight: 700,
                       textTransform: "uppercase", letterSpacing: "0.08em",
@@ -98,12 +140,13 @@ export function ObjectTable({
                     </span>
                   </td>
                 </tr>,
-                ...rows.map(o => <ObjectRow key={o.id} o={o} onOpen={onOpen} onAction={onAction}/>),
-              ])
-            : pageItems.map(o => <ObjectRow key={o.id} o={o} onOpen={onOpen} onAction={onAction}/>)
-          }
+                ...rows.map(rowOf),
+              ]);
+            }
+            return pageItems.map(rowOf);
+          })()}
           {total === 0 && (
-            <tr><td colSpan={11} style={{
+            <tr><td colSpan={selectionOn ? 12 : 11} style={{
               textAlign: "center", padding: 40, color: t.text.muted,
             }}>Нет объектов под текущие фильтры</td></tr>
           )}
@@ -231,10 +274,16 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
   );
 }
 
-const ObjectRow = React.memo(function ObjectRow({ o, onOpen, onAction }: {
+const ObjectRow = React.memo(function ObjectRow({
+  o, onOpen, onAction,
+  selectable, selected, onToggle,
+}: {
   o: SchemaObject;
   onOpen:   (o: SchemaObject) => void;
   onAction: (o: SchemaObject, a: "pause" | "retry" | "more") => void;
+  selectable?: boolean;
+  selected?:   boolean;
+  onToggle?:   (id: string) => void;
 }) {
   const isData = o.type === "TABLE" || o.type === "INDEX" || o.type === "MVIEW";
   const status: ObjectStatus = o.status;
@@ -268,6 +317,21 @@ const ObjectRow = React.memo(function ObjectRow({ o, onOpen, onAction }: {
         (e.currentTarget as HTMLTableRowElement).style.background = rowBg;
       }}
     >
+      {onToggle !== undefined && (
+        <Td>
+          <div onClick={e => e.stopPropagation()} style={{ display: "inline-flex" }}>
+            <input
+              type="checkbox"
+              disabled={!selectable}
+              checked={!!selected}
+              onChange={() => selectable && onToggle(o.id)}
+              style={{ cursor: selectable ? "pointer" : "not-allowed", margin: 0 }}
+              aria-label={selectable ? `Выбрать ${o.name}` : "Недоступно для выбора"}
+              title={selectable ? "" : "Недоступно: нужна TABLE без миграции"}
+            />
+          </div>
+        </Td>
+      )}
       <Td>
         <span style={{
           display: "inline-block",
@@ -390,6 +454,32 @@ function Td({ children, right, mono }: {
     }}>
       {children}
     </td>
+  );
+}
+
+function SelectAllCheckbox({
+  checked, indeterminate, disabled, onChange,
+}: {
+  checked:        boolean;
+  indeterminate:  boolean;
+  disabled:       boolean;
+  onChange:       () => void;
+}) {
+  const ref = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      disabled={disabled}
+      checked={checked}
+      onChange={onChange}
+      style={{ cursor: disabled ? "not-allowed" : "pointer", margin: 0 }}
+      aria-label="Выбрать все на странице"
+      title={disabled ? "Нет таблиц для выбора" : "Выбрать все таблицы на странице"}
+    />
   );
 }
 
