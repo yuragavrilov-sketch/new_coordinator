@@ -127,12 +127,18 @@ export function MigrateModal({ groupId, table, onClose, onCreated }: Props) {
           )}
 
           {/* Numeric params */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
-              <div style={lbl}>Chunk size</div>
+              <div style={lbl}>Chunk size (BULK)</div>
               <input style={inp} type="number" value={params.chunk_size} min={1}
                 onChange={e => set({ chunk_size: parseInt(e.target.value) || 0 })} />
-              <div style={hint}>Строк на чанк</div>
+              <div style={hint}>Строк на BULK-чанк</div>
+            </div>
+            <div>
+              <div style={lbl}>Baseline batch size</div>
+              <input style={inp} type="number" value={params.baseline_batch_size} min={1000}
+                onChange={e => set({ baseline_batch_size: Math.max(1000, parseInt(e.target.value) || 500_000) })} />
+              <div style={hint}>Строк на BASELINE-чанк</div>
             </div>
             <div>
               <div style={lbl}>Воркеры (bulk)</div>

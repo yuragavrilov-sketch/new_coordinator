@@ -29,6 +29,7 @@ export interface MigrateParams {
   chunk_size:               number;
   max_parallel_workers:     number;
   baseline_parallel_degree: number;
+  baseline_batch_size:      number;
   stage_tablespace:         string;
   validate_hash_sample:     boolean;
 }

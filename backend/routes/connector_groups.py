@@ -175,6 +175,7 @@ def create_group_wizard():
                 chunk_size=int(body.get("chunk_size") or 1_000_000),
                 max_parallel_workers=int(body.get("max_parallel_workers") or 1),
                 baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
+                baseline_batch_size=int(body.get("baseline_batch_size") or 500_000),
                 validate_hash_sample=bool(body.get("validate_hash_sample", False)),
             )
         except Exception as exc:
@@ -244,6 +245,7 @@ def add_group_tables(group_id: str):
                 chunk_size=int(body.get("chunk_size") or 1_000_000),
                 max_parallel_workers=int(body.get("max_parallel_workers") or 1),
                 baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
+                baseline_batch_size=int(body.get("baseline_batch_size") or 500_000),
                 validate_hash_sample=bool(body.get("validate_hash_sample", False)),
             )
         except Exception as exc:
@@ -496,6 +498,7 @@ def create_migration_from_table(group_id: str):
                     stage_table_name, stage_tablespace,
                     connector_name, topic_prefix, consumer_group,
                     chunk_size, max_parallel_workers, baseline_parallel_degree,
+                    baseline_batch_size,
                     validate_hash_sample,
                     source_pk_exists, source_uk_exists,
                     effective_key_type, effective_key_source, effective_key_columns_json,
@@ -510,6 +513,7 @@ def create_migration_from_table(group_id: str):
                     %s, %s,
                     %s, %s, %s,
                     %s, %s, %s,
+                    %s,
                     %s,
                     %s, %s,
                     %s, %s, %s,
@@ -527,6 +531,7 @@ def create_migration_from_table(group_id: str):
                 body.get("chunk_size", 1_000_000),
                 max(1, int(body.get("max_parallel_workers", 1) or 1)),
                 max(1, int(body.get("baseline_parallel_degree", 4) or 4)),
+                max(1000, int(body.get("baseline_batch_size", 500_000) or 500_000)),
                 body.get("validate_hash_sample", False),
                 pk_exists, uk_exists,
                 ekt, key_source_map.get(ekt, "NONE"), ekc_json,

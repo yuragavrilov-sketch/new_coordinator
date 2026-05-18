@@ -220,6 +220,7 @@ def create_migration():
                         stage_table_name, stage_tablespace,
                         connector_name, topic_prefix, consumer_group,
                         chunk_size, max_parallel_workers, baseline_parallel_degree,
+                        baseline_batch_size,
                         validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
@@ -233,6 +234,7 @@ def create_migration():
                         %s, %s,
                         %s, %s, %s,
                         %s, %s, %s,
+                        %s,
                         %s,
                         %s, %s,
                         %s, %s, %s,
@@ -254,6 +256,7 @@ def create_migration():
                     body.get("chunk_size", 1_000_000),
                     max(1, int(body.get("max_parallel_workers",          1) or 1)),
                     max(1, int(body.get("baseline_parallel_degree",      4) or 4)),
+                    max(1000, int(body.get("baseline_batch_size", 500_000) or 500_000)),
                     body.get("validate_hash_sample", False),
                     body.get("source_pk_exists", False), body.get("source_uk_exists", False),
                     body.get("effective_key_type", ""), body.get("effective_key_source", ""),
@@ -361,6 +364,7 @@ def create_migrations_bulk():
     chunk_size                = int(body.get("chunk_size", 1_000_000) or 1_000_000)
     max_parallel_workers      = max(1, int(body.get("max_parallel_workers", 1) or 1))
     baseline_parallel_degree  = max(1, int(body.get("baseline_parallel_degree", 4) or 4))
+    baseline_batch_size       = max(1000, int(body.get("baseline_batch_size", 500_000) or 500_000))
     src_conn_id_default       = body.get("source_connection_id") or "oracle_source"
     tgt_conn_id_default       = body.get("target_connection_id") or "oracle_target"
 
@@ -469,6 +473,7 @@ def create_migrations_bulk():
                                 stage_table_name, stage_tablespace,
                                 connector_name, topic_prefix, consumer_group,
                                 chunk_size, max_parallel_workers, baseline_parallel_degree,
+                                baseline_batch_size,
                                 validate_hash_sample,
                                 source_pk_exists, source_uk_exists,
                                 effective_key_type, effective_key_source, effective_key_columns_json,
@@ -483,6 +488,7 @@ def create_migrations_bulk():
                                 %s, %s, %s,
                                 %s, %s, %s,
                                 %s,
+                                %s,
                                 %s, %s,
                                 %s, %s, %s,
                                 %s, %s,
@@ -496,6 +502,7 @@ def create_migrations_bulk():
                             stage_table_name, stage_tablespace,
                             connector_name, topic_prefix, consumer_group,
                             chunk_size, max_parallel_workers, baseline_parallel_degree,
+                            baseline_batch_size,
                             validate_hash_sample,
                             bool(pk_columns), bool(uk_constraints),
                             eff_type, eff_source, json.dumps(eff_cols),
@@ -921,7 +928,7 @@ def get_migration_lag(migration_id: str):
 
 @bp.patch("/api/migrations/<migration_id>/workers")
 def update_workers(migration_id: str):
-    """Update max_parallel_workers and/or baseline_parallel_degree on the fly."""
+    """Update max_parallel_workers / baseline_parallel_degree / baseline_batch_size on the fly."""
     if not _db_ok():
         return jsonify({"error": "DB unavailable"}), 503
     body = request.get_json(force=True) or {}
@@ -931,6 +938,8 @@ def update_workers(migration_id: str):
         fields["max_parallel_workers"] = max(1, int(body["max_parallel_workers"]))
     if "baseline_parallel_degree" in body:
         fields["baseline_parallel_degree"] = max(1, int(body["baseline_parallel_degree"]))
+    if "baseline_batch_size" in body:
+        fields["baseline_batch_size"] = max(1000, int(body["baseline_batch_size"]))
     if not fields:
         return jsonify({"error": "Nothing to update"}), 400
 

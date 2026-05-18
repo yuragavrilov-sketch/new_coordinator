@@ -74,6 +74,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   const [maxParallelWorkers,     setMaxParallelWorkers]     = useState(1);
   const [baselineParallelDegree, setBaselineParallelDegree] = useState(4);
   const [chunkSize,              setChunkSize]              = useState(1_000_000);
+  const [baselineBatchSize,      setBaselineBatchSize]      = useState(500_000);
 
   // ── Existing groups ──────────────────────────────────────────────────────
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
@@ -248,6 +249,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
           max_parallel_workers:     Math.max(1, maxParallelWorkers),
           baseline_parallel_degree: Math.max(1, baselineParallelDegree),
           chunk_size:               Math.max(1_000, chunkSize),
+          baseline_batch_size:      Math.max(1_000, baselineBatchSize),
         }
       : { create_migrations: false };
   }
@@ -478,7 +480,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                 </label>
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
+                  gridTemplateColumns: "1fr 1fr", gap: 10,
                 }}>
                   <Field label="max_parallel_workers"
                     hint="Параллельные BULK-чанки на одну миграцию (внешние воркеры)">
@@ -488,18 +490,25 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                         Math.max(1, parseInt(e.target.value) || 1))}/>
                   </Field>
                   <Field label="baseline_parallel_degree"
-                    hint="Потоки INSERT в фазе BASELINE_LOADING">
+                    hint="Параллельные BASELINE-чанки воркерам">
                     <input style={S.input} type="number" min={1}
                       value={baselineParallelDegree}
                       onChange={e => setBaselineParallelDegree(
                         Math.max(1, parseInt(e.target.value) || 1))}/>
                   </Field>
-                  <Field label="chunk_size"
-                    hint="Строк в одном чанке (BULK_LOADING)">
+                  <Field label="chunk_size (BULK)"
+                    hint="Строк в одном чанке BULK_LOADING">
                     <input style={S.input} type="number" min={1000} step={1000}
                       value={chunkSize}
                       onChange={e => setChunkSize(
                         Math.max(1000, parseInt(e.target.value) || 1_000_000))}/>
+                  </Field>
+                  <Field label="baseline_batch_size"
+                    hint="Строк в одном чанке BASELINE_LOADING">
+                    <input style={S.input} type="number" min={1000} step={1000}
+                      value={baselineBatchSize}
+                      onChange={e => setBaselineBatchSize(
+                        Math.max(1000, parseInt(e.target.value) || 500_000))}/>
                   </Field>
                 </div>
                 <div style={{ fontSize: 11.5, color: t.text.muted }}>

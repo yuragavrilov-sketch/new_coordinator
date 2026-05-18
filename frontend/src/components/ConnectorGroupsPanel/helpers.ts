@@ -31,6 +31,7 @@ export const MIGRATE_DEFAULTS: MigrateParams = {
   chunk_size:               1_000_000,
   max_parallel_workers:     1,
   baseline_parallel_degree: 4,
+  baseline_batch_size:      500_000,
   stage_tablespace:         "PAYSTAGE",
   validate_hash_sample:     false,
 };

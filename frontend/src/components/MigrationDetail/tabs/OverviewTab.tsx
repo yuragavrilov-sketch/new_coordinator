@@ -278,6 +278,15 @@ export function OverviewTab({
             onSaved={loadDetail}
           />
         } />
+        <InfoRow label="Baseline batch size" value={
+          <WorkerCountEditor
+            migrationId={detail.migration_id}
+            field="baseline_batch_size"
+            value={detail.baseline_batch_size}
+            minValue={1000}
+            onSaved={loadDetail}
+          />
+        } />
         <InfoRow label="Total rows"   value={detail.total_rows != null ? fmtNum(detail.total_rows) : "—"} />
         <InfoRow label="Total chunks" value={detail.total_chunks ?? "—"} />
         <InfoRow label="Chunks done"  value={detail.chunks_done} />

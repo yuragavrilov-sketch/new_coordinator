@@ -6,12 +6,13 @@ import { ACTIVE_PHASES, DELETABLE_PHASES } from "./helpers";
 // ── WorkerCountEditor ────────────────────────────────────────────────────────
 
 export function WorkerCountEditor({
-  migrationId, field, value, onSaved,
+  migrationId, field, value, onSaved, minValue = 1,
 }: {
   migrationId: string;
-  field: "max_parallel_workers" | "baseline_parallel_degree";
+  field: "max_parallel_workers" | "baseline_parallel_degree" | "baseline_batch_size";
   value: number;
   onSaved: () => void;
+  minValue?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState(value);
@@ -20,7 +21,7 @@ export function WorkerCountEditor({
   useEffect(() => { setDraft(value); }, [value]);
 
   async function save() {
-    const v = Math.max(1, draft);
+    const v = Math.max(minValue, draft);
     if (v === value) { setEditing(false); return; }
     setSaving(true);
     try {
@@ -53,12 +54,13 @@ export function WorkerCountEditor({
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
       <input
-        type="number" min={1} value={draft}
-        onChange={e => setDraft(parseInt(e.target.value) || 1)}
+        type="number" min={minValue} value={draft}
+        onChange={e => setDraft(parseInt(e.target.value) || minValue)}
         onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
         autoFocus
         style={{
-          width: 60, background: t.bg.app, border: `1px solid ${t.blue.base}`,
+          width: minValue >= 1000 ? 100 : 60,
+          background: t.bg.app, border: `1px solid ${t.blue.base}`,
           borderRadius: 4, color: t.text.primary, fontSize: 12, padding: "2px 6px",
           textAlign: "center",
         }}

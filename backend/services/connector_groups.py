@@ -548,6 +548,7 @@ def create_migrations_for_group_tables(
     chunk_size: int = 1_000_000,
     max_parallel_workers: int = 1,
     baseline_parallel_degree: int = 4,
+    baseline_batch_size: int = 500_000,
     validate_hash_sample: bool = False,
 ) -> list[dict]:
     """Create one migration per group_tables row.
@@ -635,6 +636,7 @@ def create_migrations_for_group_tables(
                         stage_table_name, stage_tablespace,
                         connector_name, topic_prefix, consumer_group,
                         chunk_size, max_parallel_workers, baseline_parallel_degree,
+                        baseline_batch_size,
                         validate_hash_sample,
                         source_pk_exists, source_uk_exists,
                         effective_key_type, effective_key_source, effective_key_columns_json,
@@ -649,6 +651,7 @@ def create_migrations_for_group_tables(
                         %s, %s,
                         %s, %s, %s,
                         %s, %s, %s,
+                        %s,
                         %s,
                         %s, %s,
                         %s, %s, %s,
@@ -666,6 +669,7 @@ def create_migrations_for_group_tables(
                     chunk_size,
                     max(1, max_parallel_workers),
                     max(1, baseline_parallel_degree),
+                    max(1000, baseline_batch_size),
                     validate_hash_sample,
                     pk, uk,
                     ekt, key_source_map.get(ekt, "NONE"), ekc_json,
