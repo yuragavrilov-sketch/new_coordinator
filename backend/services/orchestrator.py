@@ -964,10 +964,9 @@ def _handle_new(mid: str, m: dict) -> None:
             _fail(mid, "Группа коннектора не найдена", "GROUP_NOT_FOUND")
             return
         if group["status"] != "RUNNING":
-            _fail(mid,
-                  f"Коннектор группы не запущен (status={group['status']}). "
-                  "Запустите коннектор группы перед миграцией.",
-                  "GROUP_NOT_RUNNING")
+            # Группа ещё не запущена — ждём, миграция остаётся в NEW.
+            # После /start группы оркестратор подхватит её на следующем тике.
+            _update_queue_positions()
             return
 
     _update(mid, {"queue_position": None})

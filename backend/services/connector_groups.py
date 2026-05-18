@@ -12,8 +12,10 @@ import os
 import random
 import string
 import uuid
+from datetime import datetime
 
 from . import debezium
+from .strategy import Strategy
 
 log = logging.getLogger(__name__)
 
@@ -535,6 +537,162 @@ def get_topic_message_counts(group_id: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Connector lifecycle
 # ---------------------------------------------------------------------------
+
+def create_migrations_for_group_tables(
+    group_id: str,
+    table_ids: list[str] | None,
+    *,
+    strategy: Strategy,
+    stage_tablespace: str = "PAYSTAGE",
+    truncate_target: bool = True,
+    chunk_size: int = 1_000_000,
+    max_parallel_workers: int = 1,
+    baseline_parallel_degree: int = 4,
+    validate_hash_sample: bool = False,
+) -> list[dict]:
+    """Create one migration per group_tables row.
+
+    table_ids — restrict to a subset; None means «all tables in the group».
+    Skips tables that already have a non-terminal migration in the group.
+
+    Returns list of {"table": "SCHEMA.NAME", "migration_id": ...,
+                     "skipped": "reason" | None}.
+    """
+    if strategy.uses_stage and not truncate_target:
+        raise ValueError(
+            "STAGE-стратегия требует TRUNCATE target — поведение неизменяемо")
+
+    group = get_group(group_id)
+    if not group:
+        raise ValueError(f"Группа {group_id} не найдена")
+
+    all_tables = get_group_tables(group_id)
+    if table_ids is not None:
+        wanted = set(table_ids)
+        tables = [t for t in all_tables if t["id"] in wanted]
+    else:
+        tables = all_tables
+    if not tables:
+        return []
+
+    connector_name = group["connector_name"]
+    topic_prefix   = _active_topic_prefix(group)
+    prefix         = group.get("consumer_group_prefix") or group["topic_prefix"]
+
+    key_source_map = {
+        "PRIMARY_KEY":  "PK",
+        "UNIQUE_KEY":   "UK",
+        "USER_DEFINED": "USER",
+        "NONE":         "NONE",
+    }
+
+    results: list[dict] = []
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            for tbl in tables:
+                src_schema = tbl["source_schema"].upper()
+                src_table  = tbl["source_table"].upper()
+                tgt_schema = tbl["target_schema"].upper()
+                tgt_table  = tbl["target_table"].upper()
+                full_name  = f"{src_schema}.{src_table}"
+
+                # Skip if there's already an active migration for this table
+                cur.execute("""
+                    SELECT migration_id, phase FROM migrations
+                    WHERE  group_id = %s
+                      AND  source_schema = %s AND source_table = %s
+                      AND  phase NOT IN ('CANCELLED', 'FAILED', 'COMPLETED')
+                    LIMIT 1
+                """, (group_id, src_schema, src_table))
+                dup = cur.fetchone()
+                if dup:
+                    results.append({
+                        "table":        full_name,
+                        "migration_id": dup[0],
+                        "skipped":      f"already active ({dup[1]})",
+                    })
+                    continue
+
+                ekt = tbl.get("effective_key_type", "NONE") or "NONE"
+                ekc_json = tbl.get("effective_key_columns_json") or "[]"
+                pk = bool(tbl.get("source_pk_exists", False))
+                uk = bool(tbl.get("source_uk_exists", False))
+
+                stage_name = f"STG_{src_schema}_{src_table}" if strategy.uses_stage else ""
+                stg_ts     = stage_tablespace.strip().upper() if strategy.uses_stage else ""
+                consumer_group = f"{prefix}_{src_schema}_{src_table}"
+                migration_name = f"{src_schema}.{src_table} → {tgt_schema}.{tgt_table}"
+
+                mid = str(uuid.uuid4())
+                now = datetime.utcnow()
+
+                cur.execute("""
+                    INSERT INTO migrations (
+                        migration_id, migration_name, phase, state_changed_at,
+                        source_connection_id, target_connection_id,
+                        source_schema, source_table, target_schema, target_table,
+                        stage_table_name, stage_tablespace,
+                        connector_name, topic_prefix, consumer_group,
+                        chunk_size, max_parallel_workers, baseline_parallel_degree,
+                        validate_hash_sample,
+                        source_pk_exists, source_uk_exists,
+                        effective_key_type, effective_key_source, effective_key_columns_json,
+                        strategy,
+                        truncate_target,
+                        group_id,
+                        created_at, updated_at
+                    ) VALUES (
+                        %s, %s, 'NEW', %s,
+                        %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s,
+                        %s,
+                        %s, %s,
+                        %s, %s, %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s, %s
+                    )
+                """, (
+                    mid, migration_name, now,
+                    group["source_connection_id"], "oracle_target",
+                    src_schema, src_table, tgt_schema, tgt_table,
+                    stage_name, stg_ts,
+                    connector_name, topic_prefix, consumer_group,
+                    chunk_size,
+                    max(1, max_parallel_workers),
+                    max(1, baseline_parallel_degree),
+                    validate_hash_sample,
+                    pk, uk,
+                    ekt, key_source_map.get(ekt, "NONE"), ekc_json,
+                    strategy.value,
+                    truncate_target,
+                    group_id,
+                    now, now,
+                ))
+                cur.execute("""
+                    INSERT INTO migration_state_history
+                        (migration_id, from_phase, to_phase, message, actor_type)
+                    VALUES (%s, NULL, 'NEW', 'Created from connector group', 'USER')
+                """, (mid,))
+                results.append({
+                    "table":        full_name,
+                    "migration_id": mid,
+                    "skipped":      None,
+                })
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    return results
+
 
 def check_cdc_readiness(source_connection_id: str,
                         tables: list[dict]) -> dict:

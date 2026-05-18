@@ -4,8 +4,11 @@ import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { toSnake, shortId } from "../components/CreateMigrationModal/helpers";
-import type { ConnectorGroup } from "../types/migration";
+import type { ConnectorGroup, Strategy } from "../types/migration";
 import type { TableInfo } from "../components/CreateMigrationModal/types";
+
+const STRATEGIES: Strategy[] = ["CDC_STAGE", "CDC_DIRECT", "BULK_STAGE", "BULK_DIRECT"];
+const usesStage = (s: Strategy): boolean => s.endsWith("_STAGE");
 
 export interface CdcGroupTable {
   source_schema: string;
@@ -62,6 +65,12 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   const [topicPrefix,   setTopicPrefix]   = useState("");
   const [autoStart,     setAutoStart]     = useState(true);
   const [nameTouched,   setNameTouched]   = useState(false);
+
+  // ── Migrations params ─────────────────────────────────────────────────────
+  const [createMigrations, setCreateMigrations] = useState(true);
+  const [strategy,         setStrategy]         = useState<Strategy>("CDC_STAGE");
+  const [stageTablespace,  setStageTablespace]  = useState("PAYSTAGE");
+  const [truncateTarget,   setTruncateTarget]   = useState(true);
 
   // ── Existing groups ──────────────────────────────────────────────────────
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
@@ -226,6 +235,17 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
     return true;
   }
 
+  function migrationParams() {
+    return createMigrations
+      ? {
+          create_migrations: true,
+          strategy,
+          stage_tablespace:  usesStage(strategy) ? stageTablespace.trim().toUpperCase() : "",
+          truncate_target:   truncateTarget,
+        }
+      : { create_migrations: false };
+  }
+
   async function submit() {
     if (busy || !validate()) return;
     setBusy(true);
@@ -242,10 +262,12 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             consumer_group_prefix: topicPrefix.trim(),
             source_connection_id:  "oracle_source",
             tables: buildPayloadTables(),
+            ...migrationParams(),
           }),
         });
         const d = await r.json();
-        if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); return; }
+        if (!r.ok && r.status !== 207) { setErr(d.error || `HTTP ${r.status}`); return; }
+        if (d.migrations_error) { setErr(`Группа создана, но миграции не создались: ${d.migrations_error}`); return; }
         const gid = d.group?.group_id;
         if (autoStart && gid) {
           setPhase("Запуск коннектора...");
@@ -256,20 +278,26 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             return;
           }
         }
-        onDone(autoStart
-          ? `Группа «${groupName}» создана и запущена.`
-          : `Группа «${groupName}» создана.`);
+        const mCount = (d.migrations || []).filter((x: any) => !x.skipped).length;
+        onDone(buildDoneMsg(`Группа «${groupName}»`, autoStart, mCount, tableStates.length));
       } else {
         setPhase("Добавление таблиц в группу...");
         const r = await fetch(`/api/connector-groups/${selectedGroup}/tables`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ tables: buildPayloadTables() }),
+          body:    JSON.stringify({
+            tables: buildPayloadTables(),
+            ...migrationParams(),
+          }),
         });
         const d = await r.json();
         if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); return; }
+        if (d.migrations_error) { setErr(`Таблицы добавлены, но миграции не создались: ${d.migrations_error}`); return; }
+        const addedTables = Array.isArray(d.tables) ? d.tables.length : tableStates.length;
+        const mCount = (d.migrations || []).filter((x: any) => !x.skipped).length;
         const grp = groups.find(g => g.group_id === selectedGroup);
-        onDone(`Добавлено ${Array.isArray(d) ? d.length : tableStates.length} табл. в «${grp?.group_name ?? "группу"}».`);
+        onDone(`Добавлено ${addedTables} табл. в «${grp?.group_name ?? "группу"}»`
+               + (createMigrations ? `, миграций создано: ${mCount}.` : "."));
       }
     } catch (e) {
       setErr(String(e));
@@ -400,6 +428,56 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             </Section>
           )}
 
+          {/* Migrations options */}
+          <Section title="Миграции таблиц" accent={t.purple.base}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center",
+                            fontSize: 13, color: t.text.primary }}>
+              <input type="checkbox" checked={createMigrations}
+                onChange={e => setCreateMigrations(e.target.checked)}/>
+              <span>Создать миграции и поставить в очередь</span>
+            </label>
+            {createMigrations && (
+              <>
+                <div style={S.row2}>
+                  <Field label="Стратегия" required>
+                    <select style={S.select} value={strategy}
+                      onChange={e => {
+                        const s = e.target.value as Strategy;
+                        setStrategy(s);
+                        if (usesStage(s)) setTruncateTarget(true);
+                      }}>
+                      {STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Stage tablespace"
+                    hint={usesStage(strategy) ? "Общий tablespace для STG_-таблиц" : "Только для STAGE-стратегий"}>
+                    <input style={S.input} value={stageTablespace}
+                      disabled={!usesStage(strategy)}
+                      onChange={e => setStageTablespace(e.target.value)}/>
+                  </Field>
+                </div>
+                <label style={{ display: "flex", gap: 8, alignItems: "center",
+                                fontSize: 13, color: t.text.primary }}>
+                  <input type="checkbox" checked={truncateTarget}
+                    disabled={usesStage(strategy)}
+                    onChange={e => setTruncateTarget(e.target.checked)}/>
+                  <span>
+                    TRUNCATE target перед загрузкой
+                    {usesStage(strategy) && (
+                      <span style={{ color: t.text.muted, marginLeft: 6 }}>
+                        (STAGE требует TRUNCATE)
+                      </span>
+                    )}
+                  </span>
+                </label>
+                <div style={{ fontSize: 11.5, color: t.text.muted }}>
+                  Все миграции создаются в фазе <code>NEW</code> с привязкой к группе.
+                  Оркестратор берёт их по одной (FIFO) после Start группы.
+                </div>
+              </>
+            )}
+          </Section>
+
           {/* Selected tables — keys preview */}
           <Section title="Таблицы и ключи" accent={t.green.dim}>
             {anyLoading && (
@@ -478,8 +556,8 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             {busy
               ? "…"
               : mode === "new"
-                ? `Создать группу${autoStart ? " и запустить" : ""}`
-                : `Добавить ${tableStates.length}`}
+                ? `Создать группу${autoStart ? " и запустить" : ""}${createMigrations ? " (+ миграции)" : ""}`
+                : `Добавить ${tableStates.length}${createMigrations ? " (+ миграции)" : ""}`}
           </button>
         </div>
       </div>
@@ -562,6 +640,17 @@ function KeyTypeSwitch({ info, current, onChange }: {
       ))}
     </span>
   );
+}
+
+function buildDoneMsg(prefix: string, autoStart: boolean, migrationsCount: number, tablesCount: number): string {
+  const head = autoStart ? `${prefix} создана и запущена` : `${prefix} создана`;
+  if (migrationsCount === 0) return head + ".";
+  if (migrationsCount === tablesCount) {
+    return autoStart
+      ? `${head}; ${migrationsCount} миграций в очереди — первая стартует автоматически.`
+      : `${head}; ${migrationsCount} миграций в фазе NEW (ждут Start группы).`;
+  }
+  return `${head}; миграций создано: ${migrationsCount} из ${tablesCount}.`;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {

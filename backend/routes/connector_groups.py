@@ -154,7 +154,41 @@ def create_group_wizard():
         "status": "PENDING",
     })
 
-    return jsonify({"group": group_row, "tables": table_rows}), 201
+    # ── optionally create migrations (NEW) so they queue up for orchestrator ──
+    migrations_created: list[dict] = []
+    if body.get("create_migrations"):
+        try:
+            strategy = Strategy.parse(body.get("strategy") or "CDC_STAGE")
+        except ValueError as exc:
+            return jsonify({
+                "group": group_row, "tables": table_rows,
+                "migrations": [],
+                "migrations_error": f"Invalid strategy: {exc}",
+            }), 207
+        try:
+            from services.connector_groups import create_migrations_for_group_tables
+            migrations_created = create_migrations_for_group_tables(
+                gid, table_ids=None,
+                strategy=strategy,
+                stage_tablespace=body.get("stage_tablespace") or "PAYSTAGE",
+                truncate_target=bool(body.get("truncate_target", True)),
+                chunk_size=int(body.get("chunk_size") or 1_000_000),
+                max_parallel_workers=int(body.get("max_parallel_workers") or 1),
+                baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
+                validate_hash_sample=bool(body.get("validate_hash_sample", False)),
+            )
+        except Exception as exc:
+            return jsonify({
+                "group": group_row, "tables": table_rows,
+                "migrations": [],
+                "migrations_error": str(exc),
+            }), 207
+
+    return jsonify({
+        "group":      group_row,
+        "tables":     table_rows,
+        "migrations": migrations_created,
+    }), 201
 
 
 @bp.delete("/api/connector-groups/<group_id>")
@@ -181,7 +215,10 @@ def add_group_tables(group_id: str):
     tables = body.get("tables", [])
     if not tables:
         return jsonify({"error": "Нужно указать хотя бы одну таблицу"}), 400
-    from services.connector_groups import add_tables, refresh_connector_tables
+    from services.connector_groups import (
+        add_tables, refresh_connector_tables,
+        create_migrations_for_group_tables,
+    )
     try:
         rows = add_tables(group_id, tables)
     except ValueError as exc:
@@ -191,7 +228,32 @@ def add_group_tables(group_id: str):
         refresh_connector_tables(group_id)
     except Exception as exc:
         print(f"[add_group_tables] refresh_connector_tables warning: {exc}")
-    return jsonify(rows), 201
+
+    # ── optionally create migrations for the new tables ──────────────────
+    migrations_created: list[dict] = []
+    migrations_error: str | None = None
+    if body.get("create_migrations"):
+        try:
+            strategy = Strategy.parse(body.get("strategy") or "CDC_STAGE")
+            new_ids = [r["id"] for r in rows] if rows else None
+            migrations_created = create_migrations_for_group_tables(
+                group_id, table_ids=new_ids,
+                strategy=strategy,
+                stage_tablespace=body.get("stage_tablespace") or "PAYSTAGE",
+                truncate_target=bool(body.get("truncate_target", True)),
+                chunk_size=int(body.get("chunk_size") or 1_000_000),
+                max_parallel_workers=int(body.get("max_parallel_workers") or 1),
+                baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
+                validate_hash_sample=bool(body.get("validate_hash_sample", False)),
+            )
+        except Exception as exc:
+            migrations_error = str(exc)
+
+    return jsonify({
+        "tables":           rows,
+        "migrations":       migrations_created,
+        "migrations_error": migrations_error,
+    }), 201
 
 
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
