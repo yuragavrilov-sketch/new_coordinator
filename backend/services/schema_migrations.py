@@ -186,6 +186,34 @@ def _pk_uk_from_meta(meta) -> tuple[bool, bool]:
     return (has_pk, has_uk)
 
 
+def _supp_log_from_meta(meta) -> bool | None:
+    """Извлечь supplemental_log_data_all из metadata.
+
+    Поле кладём в TABLE-metadata в get_full_ddl_info: 'YES'/'NO'/None.
+    Возвращаем True / False / None (последнее — значит мета без поля,
+    скорее всего старый снапшот).
+    """
+    import json
+    if not meta:
+        return None
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            return None
+    if not isinstance(meta, dict):
+        return None
+    val = meta.get("supplemental_log_data_all")
+    if val is None:
+        return None
+    val = str(val).upper().strip()
+    if val == "YES":
+        return True
+    if val == "NO":
+        return False
+    return None
+
+
 def _ddl_id(fe_type: str, object_name: str) -> str:
     """URL-safe id for DDL object — uses frontend alias (e.g. MVIEW, no spaces)."""
     return f"ddl-{fe_type}-{object_name}"
@@ -391,6 +419,29 @@ def get_objects(conn, sm_id: str) -> list[dict]:
         tables = [_build_object(dict(zip(cols, r))) for r in cur.fetchall()]
     migrated_table_names = {t["name"].upper() for t in tables}
 
+    # Подгрузим supplemental_log_data_all для уже прилинкованных миграций,
+    # чтобы рядом с CDC-чипом можно было показать SUPP/NO SUPP. Один батч-
+    # запрос к ddl_objects.metadata по последнему snapshot для данной пары
+    # схем — то же, что используется ниже для orphan DDL.
+    if tables:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT o.object_name, o.metadata
+                FROM   ddl_objects o
+                WHERE  o.snapshot_id = (
+                            SELECT snapshot_id FROM ddl_snapshots
+                            WHERE  src_schema = %s AND tgt_schema = %s
+                            ORDER  BY loaded_at DESC
+                            FETCH  FIRST 1 ROWS ONLY)
+                  AND  o.db_side    = 'source'
+                  AND  o.object_type = 'TABLE'
+                  AND  o.object_name = ANY(%s)
+            """, (src_schema, tgt_schema, [t["name"].upper() for t in tables]))
+            meta_by_name = {r[0]: r[1] for r in cur.fetchall()}
+        for tbl in tables:
+            meta = meta_by_name.get(tbl["name"].upper())
+            tbl["hasSuppLog"] = _supp_log_from_meta(meta)
+
     # (b) DDL objects from the most recent snapshot
     ddl_objects: list[dict] = []
     with conn.cursor() as cur:
@@ -460,6 +511,7 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                     has_pk, has_uk = _pk_uk_from_meta(src_meta)
                     obj["hasPk"] = has_pk
                     obj["hasUk"] = has_uk
+                    obj["hasSuppLog"] = _supp_log_from_meta(src_meta)
                 ddl_objects.append(obj)
 
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get

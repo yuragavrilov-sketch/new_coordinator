@@ -501,12 +501,29 @@ const KEY_LABEL: Record<string, string> = {
 function MigrationChips({ o }: { o: SchemaObject }) {
   if (o.type !== "TABLE") return null;
 
+  // Чип supplemental logging — рендерим всегда, когда знаем (true/false).
+  // Для CDC миграции отсутствие supp-log = красный, для BULK/orphan — просто
+  // info-метка, чтобы видеть готовность таблицы к CDC.
+  const suppChip = (() => {
+    if (o.hasSuppLog === undefined || o.hasSuppLog === null) return null;
+    if (o.hasSuppLog) {
+      return <MiniChip label="SUPP" bg={`color-mix(in oklab, ${t.tone.ok} 18%, transparent)`} fg={t.tone.ok}/>;
+    }
+    const isCdc = !!o.strategy && o.strategy.startsWith("CDC_");
+    return isCdc
+      ? <MiniChip label="NO SUPP" bg={t.tone.errorSoft} fg={t.tone.error}/>
+      : <MiniChip label="NO SUPP" bg={t.bg.s3} fg={t.text.muted}/>;
+  })();
+
   // Таблица без миграции — показываем только наличие ключа (если знаем).
   if (!o.strategy) {
-    if (o.hasPk === undefined && o.hasUk === undefined) return null;
-    if (o.hasPk) return <MiniChip label="PK" bg={`color-mix(in oklab, ${t.tone.ok} 18%, transparent)`} fg={t.tone.ok}/>;
-    if (o.hasUk) return <MiniChip label="UK" bg={`color-mix(in oklab, ${t.tone.info} 14%, transparent)`} fg={t.tone.info}/>;
-    return <MiniChip label="NO KEY" bg={t.tone.errorSoft} fg={t.tone.error}/>;
+    const keyChip =
+      o.hasPk === undefined && o.hasUk === undefined ? null
+      : o.hasPk ? <MiniChip label="PK"     bg={`color-mix(in oklab, ${t.tone.ok}   18%, transparent)`} fg={t.tone.ok}/>
+      : o.hasUk ? <MiniChip label="UK"     bg={`color-mix(in oklab, ${t.tone.info} 14%, transparent)`} fg={t.tone.info}/>
+                : <MiniChip label="NO KEY" bg={t.tone.errorSoft}                                       fg={t.tone.error}/>;
+    if (!keyChip && !suppChip) return null;
+    return <>{keyChip}{suppChip}</>;
   }
 
   const isCdc   = o.strategy.startsWith("CDC_");
@@ -532,6 +549,7 @@ function MigrationChips({ o }: { o: SchemaObject }) {
         fg={t.text.muted}
       />
       {keyTxt && <MiniChip label={keyTxt} bg={keyTone.bg} fg={keyTone.fg}/>}
+      {suppChip}
     </>
   );
 }

@@ -61,6 +61,9 @@ export interface SchemaObject {
   keyType?:  string;         // "PRIMARY_KEY" | "UNIQUE_KEY" | "USER_DEFINED" | "ROWID" | "NONE" | ""
   hasPk?:    boolean;
   hasUk?:    boolean;
+  /** supplemental_log_data_all (Oracle ALL COLUMNS supp-logging).
+   *  undefined — снапшот старый и поле не сохранено; null/false — нет; true — есть. */
+  hasSuppLog?: boolean | null;
 }
 
 export interface MigrationEvent {

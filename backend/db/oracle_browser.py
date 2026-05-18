@@ -585,6 +585,22 @@ def get_table_info(conn, schema: str, table: str) -> dict:
 
 def get_full_ddl_info(conn, schema: str, table: str) -> dict:
     """Return full DDL snapshot: columns, constraints, indexes, triggers."""
+    # Supplemental logging at table level — нужен для CDC (LogMiner).
+    # all_tables.supplemental_log_data_all = 'YES' / 'NO' / NULL.
+    supp_log = None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT supplemental_log_data_all
+                FROM   all_tables
+                WHERE  owner = :s AND table_name = :t
+            """, {"s": schema, "t": table})
+            row = cur.fetchone()
+            if row:
+                supp_log = (row[0] or "").upper() or None
+    except Exception:
+        supp_log = None
+
     with conn.cursor() as cur:
         # Fetch columns without data_default (LONG type — cannot be used in
         # expressions; fetched separately below to avoid ORA-00997).
@@ -706,6 +722,7 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         "constraints": constraints,
         "indexes":     indexes,
         "triggers":    triggers,
+        "supplemental_log_data_all": supp_log,
     }
 
 
