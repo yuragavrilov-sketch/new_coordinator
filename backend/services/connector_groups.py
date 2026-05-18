@@ -536,6 +536,70 @@ def get_topic_message_counts(group_id: str) -> list[dict]:
 # Connector lifecycle
 # ---------------------------------------------------------------------------
 
+def check_cdc_readiness(source_connection_id: str,
+                        tables: list[dict]) -> dict:
+    """Check whether the source DB/tables are ready for Debezium CDC.
+
+    Returns a dict:
+      {
+        "archivelog": bool,
+        "db_level_supp": bool,    # supplemental_log_data_all on v$database
+        "tables": [
+          {"source_schema": ..., "source_table": ..., "supp_log": bool}
+        ]
+      }
+    """
+    from . import oracle_scn
+
+    oracle_cfg = _oracle_cfg(source_connection_id)
+    if not oracle_cfg.get("host"):
+        raise ValueError(
+            "Oracle source не настроен — заполните настройки соединения")
+
+    conn = oracle_scn.open_oracle_conn(oracle_cfg)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT log_mode FROM v$database")
+            row = cur.fetchone()
+            archivelog = bool(row and (row[0] or "").upper() == "ARCHIVELOG")
+
+            cur.execute("SELECT supplemental_log_data_all FROM v$database")
+            row = cur.fetchone()
+            db_supp = bool(row and (row[0] or "").upper() == "YES")
+
+            results = []
+            if db_supp:
+                for t in tables:
+                    results.append({
+                        "source_schema": t["source_schema"].upper(),
+                        "source_table":  t["source_table"].upper(),
+                        "supp_log":      True,
+                    })
+            else:
+                for t in tables:
+                    s = t["source_schema"].upper()
+                    n = t["source_table"].upper()
+                    cur.execute("""
+                        SELECT COUNT(*) FROM all_log_groups
+                        WHERE  owner = :s AND table_name = :t
+                          AND  log_group_type = 'ALL COLUMN LOGGING'
+                    """, {"s": s, "t": n})
+                    cnt = (cur.fetchone() or [0])[0] or 0
+                    results.append({
+                        "source_schema": s,
+                        "source_table":  n,
+                        "supp_log":      cnt > 0,
+                    })
+    finally:
+        conn.close()
+
+    return {
+        "archivelog":    archivelog,
+        "db_level_supp": db_supp,
+        "tables":        results,
+    }
+
+
 def request_start(group_id: str) -> dict:
     """Validate and initiate the async start lifecycle.
 

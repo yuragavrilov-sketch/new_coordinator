@@ -181,11 +181,16 @@ def add_group_tables(group_id: str):
     tables = body.get("tables", [])
     if not tables:
         return jsonify({"error": "Нужно указать хотя бы одну таблицу"}), 400
-    from services.connector_groups import add_tables
+    from services.connector_groups import add_tables, refresh_connector_tables
     try:
         rows = add_tables(group_id, tables)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    # If the connector is already running, push table.include.list / key cols update
+    try:
+        refresh_connector_tables(group_id)
+    except Exception as exc:
+        print(f"[add_group_tables] refresh_connector_tables warning: {exc}")
     return jsonify(rows), 201
 
 
@@ -209,6 +214,31 @@ def debezium_config(group_id: str):
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
     return jsonify(cfg)
+
+
+# ── CDC readiness check ──────────────────────────────────────────────────────
+
+@bp.post("/api/connector-groups/check-readiness")
+def check_readiness():
+    """Check ARCHIVELOG / supplemental logging readiness for a list of tables.
+
+    Body: {"source_connection_id": "oracle_source",
+           "tables": [{"source_schema": "X", "source_table": "Y"}, ...]}
+    """
+    body = request.get_json(force=True) or {}
+    src_conn_id = body.get("source_connection_id", "oracle_source")
+    tables = body.get("tables", [])
+    if not tables:
+        return jsonify({"error": "tables is required"}), 400
+
+    from services.connector_groups import check_cdc_readiness
+    try:
+        result = check_cdc_readiness(src_conn_id, tables)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(result)
 
 
 # ── Kafka topics ──────────────────────────────────────────────────────────────

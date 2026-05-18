@@ -9,6 +9,7 @@ import { DashboardEmptyState } from "./EmptyState";
 import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
 import { ProblemsSummary } from "./ProblemsSummary";
 import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
+import { AddToCdcGroupModal } from "./AddToCdcGroupModal";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { t } from "../theme";
 import { fmtCompactNum } from "../utils/format";
@@ -46,6 +47,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [migrateModalPrefill, setMigrateModalPrefill] = useState<MigrationPrefill | null>(null);
   const [selectedIds,         setSelectedIds]         = useState<Set<string>>(() => new Set());
   const [bulkOpen,            setBulkOpen]            = useState(false);
+  const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
+  const [toast,               setToast]               = useState<string>("");
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
   const objectsApi = useApi<SchemaObject[]>(
@@ -336,6 +339,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           count={selectedIds.size}
           onClear={() => setSelectedIds(new Set())}
           onCreate={() => setBulkOpen(true)}
+          onCdcGroup={() => setCdcGroupOpen(true)}
         />
       )}
 
@@ -350,6 +354,32 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
             eventsApi.reload();
           }}
         />
+      )}
+
+      {cdcGroupOpen && selectedTables.length > 0 && (
+        <AddToCdcGroupModal
+          tables={selectedTables}
+          onClose={() => setCdcGroupOpen(false)}
+          onDone={msg => {
+            setCdcGroupOpen(false);
+            setSelectedIds(new Set());
+            setToast(msg);
+            objectsApi.reload();
+            eventsApi.reload();
+            setTimeout(() => setToast(""), 5000);
+          }}
+        />
+      )}
+
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 80, left: "50%",
+          transform: "translateX(-50%)", zIndex: 1100,
+          background: t.bg.s1, color: t.text.primary,
+          border: `1px solid ${t.green.dim}`, borderRadius: t.radius.md,
+          padding: "8px 14px", fontSize: 13,
+          boxShadow: "0 8px 24px rgba(0,0,0,.35)",
+        }}>{toast}</div>
       )}
 
       {openObject && selectedId && (
@@ -400,8 +430,9 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   );
 }
 
-function BulkSelectionBar({ count, onClear, onCreate }: {
+function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup }: {
   count: number; onClear: () => void; onCreate: () => void;
+  onCdcGroup: () => void;
 }) {
   return (
     <div style={{
@@ -423,6 +454,9 @@ function BulkSelectionBar({ count, onClear, onCreate }: {
         Выбрано: <strong style={{ fontFamily: t.font.mono }}>{count}</strong>
       </span>
       <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
+      <button onClick={onCdcGroup} style={secondaryActionStyle()}>
+        В CDC-группу ({count})
+      </button>
       <button onClick={onCreate} style={primaryActionStyle(false)}>
         Создать миграции ({count})
       </button>
