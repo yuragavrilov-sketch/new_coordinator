@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -11,6 +11,16 @@ import services.job_queue   as job_queue
 import services.kafka_lag   as kafka_lag_svc
 import services.oracle_stage as oracle_stage
 from services.strategy import Strategy
+
+
+def _utc_iso_z(v):
+    """Return UTC-normalized ISO8601 string with 'Z' suffix (no double TZ)."""
+    if not v:
+        return None
+    if v.tzinfo is not None:
+        v = v.astimezone(timezone.utc).replace(tzinfo=None)
+    return v.isoformat() + "Z"
+
 
 bp = Blueprint("migrations", __name__)
 
@@ -918,8 +928,8 @@ def get_migration_lag(migration_id: str):
             "total_lag":        int(total_lag or 0),
             "lag_by_partition": lag_by_partition,
             "worker_id":        worker_id,
-            "worker_heartbeat": heartbeat.isoformat() + "Z" if heartbeat else None,
-            "updated_at":       updated_at.isoformat() + "Z" if updated_at else None,
+            "worker_heartbeat": _utc_iso_z(heartbeat),
+            "updated_at":       _utc_iso_z(updated_at),
             "rows_applied":     int(rows_applied or 0),
         })
     except Exception as exc:
