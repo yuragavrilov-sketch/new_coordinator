@@ -80,6 +80,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(true);
   const [selectedGroup, setSelectedGroup] = useState("");
+  const [groupStats,    setGroupStats]    = useState<Map<string, { tables: number; migrations: number }>>(new Map());
 
   // ── Per-table state (key info) ──────────────────────────────────────────
   const [tableStates, setTableStates] = useState<TableState[]>(() =>
@@ -119,11 +120,29 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupName]);
 
-  // ── Load existing groups ─────────────────────────────────────────────────
+  // ── Load existing groups + lazy stats ────────────────────────────────────
   useEffect(() => {
     fetch("/api/connector-groups")
       .then(r => r.ok ? r.json() : [])
-      .then((d: ConnectorGroup[]) => setGroups(d))
+      .then(async (d: ConnectorGroup[]) => {
+        setGroups(d);
+        // Подгружаем stats параллельно (tables + migrations) — не блокируем UI
+        const stats = new Map<string, { tables: number; migrations: number }>();
+        await Promise.all(d.map(async g => {
+          try {
+            const resp = await fetch(`/api/connector-groups/${g.group_id}`);
+            if (!resp.ok) return;
+            const full = await resp.json();
+            const tCount = Array.isArray(full.tables) ? full.tables.length : 0;
+            const mActive = Array.isArray(full.migrations)
+              ? full.migrations.filter((m: any) =>
+                  !["CANCELLED","FAILED","COMPLETED"].includes(m.phase)).length
+              : 0;
+            stats.set(g.group_id, { tables: tCount, migrations: mActive });
+          } catch {}
+        }));
+        setGroupStats(stats);
+      })
       .catch(() => setGroups([]))
       .finally(() => setGroupsLoading(false));
   }, []);
@@ -415,23 +434,56 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             </Section>
           ) : (
             <Section title="Целевая группа" accent={t.blue.dim}>
-              <Field label="Группа" required>
-                <select
-                  style={S.select}
-                  value={selectedGroup}
-                  onChange={e => setSelectedGroup(e.target.value)}
-                  disabled={groupsLoading || groups.length === 0}
-                >
-                  <option value="">— выберите —</option>
-                  {groups.map(g => (
-                    <option key={g.group_id} value={g.group_id}>
-                      {g.group_name} · {g.status} · {g.topic_prefix}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {groupsLoading && (
+                <div style={{ fontSize: t.size.sm, color: t.text.muted }}>Загрузка…</div>
+              )}
+              {!groupsLoading && groups.length === 0 && (
+                <div style={{ fontSize: t.size.sm, color: t.text.muted }}>Групп ещё нет</div>
+              )}
+              {!groupsLoading && groups.length > 0 && (
+                <div style={{
+                  display: "flex", flexDirection: "column", gap: 6,
+                  maxHeight: 220, overflowY: "auto",
+                }}>
+                  {groups.map(g => {
+                    const active = selectedGroup === g.group_id;
+                    const stats  = groupStats.get(g.group_id);
+                    return (
+                      <button key={g.group_id}
+                        onClick={() => setSelectedGroup(g.group_id)}
+                        style={{
+                          textAlign: "left", cursor: "pointer",
+                          background: active ? t.bg.s3 : t.bg.s1,
+                          border: `1px solid ${active ? t.blue.base : t.border.subtle}`,
+                          borderRadius: t.radius.md,
+                          padding: "8px 10px",
+                          display: "grid",
+                          gridTemplateColumns: "auto 1fr auto auto",
+                          alignItems: "center",
+                          gap: 10,
+                        }}>
+                        <GroupStatusBadge status={g.status}/>
+                        <span style={{
+                          color: t.text.primary, fontSize: t.size.md, fontWeight: 700,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>{g.group_name}</span>
+                        <span style={{
+                          fontFamily: t.font.mono, fontSize: 11, color: t.text.muted,
+                          maxWidth: 260, overflow: "hidden",
+                          textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>{g.topic_prefix}</span>
+                        <span style={{ fontSize: 11, color: t.text.muted, whiteSpace: "nowrap" }}>
+                          {stats
+                            ? `${stats.tables} табл · ${stats.migrations} мигр`
+                            : "…"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div style={{ fontSize: t.size.xs, color: t.text.muted }}>
-                Если коннектор RUNNING, table.include.list будет обновлён автоматически.
+                Если коннектор RUNNING — table.include.list обновится автоматически.
               </div>
             </Section>
           )}
@@ -480,31 +532,31 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                 </label>
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr", gap: 10,
+                  gridTemplateColumns: "repeat(4, 1fr)", gap: 8,
                 }}>
-                  <Field label="max_parallel_workers"
-                    hint="Параллельные BULK-чанки на одну миграцию (внешние воркеры)">
+                  <Field label="Workers (bulk)"
+                    hint="Параллельных BULK-чанков">
                     <input style={S.input} type="number" min={1}
                       value={maxParallelWorkers}
                       onChange={e => setMaxParallelWorkers(
                         Math.max(1, parseInt(e.target.value) || 1))}/>
                   </Field>
-                  <Field label="baseline_parallel_degree"
-                    hint="Параллельные BASELINE-чанки воркерам">
+                  <Field label="Workers (baseline)"
+                    hint="Параллельных BASELINE-чанков">
                     <input style={S.input} type="number" min={1}
                       value={baselineParallelDegree}
                       onChange={e => setBaselineParallelDegree(
                         Math.max(1, parseInt(e.target.value) || 1))}/>
                   </Field>
-                  <Field label="chunk_size (BULK)"
-                    hint="Строк в одном чанке BULK_LOADING">
+                  <Field label="Chunk size (bulk)"
+                    hint="Строк / BULK chunk">
                     <input style={S.input} type="number" min={1000} step={1000}
                       value={chunkSize}
                       onChange={e => setChunkSize(
                         Math.max(1000, parseInt(e.target.value) || 1_000_000))}/>
                   </Field>
-                  <Field label="baseline_batch_size"
-                    hint="Строк в одном чанке BASELINE_LOADING">
+                  <Field label="Batch size (baseline)"
+                    hint="Строк / BASELINE chunk">
                     <input style={S.input} type="number" min={1000} step={1000}
                       value={baselineBatchSize}
                       onChange={e => setBaselineBatchSize(
@@ -512,10 +564,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                   </Field>
                 </div>
                 <div style={{ fontSize: 11.5, color: t.text.muted }}>
-                  Все миграции создаются в фазе <code>NEW</code> с привязкой к группе.
-                  Оркестратор берёт их по одной (FIFO) после Start группы.
-                  Внешние воркеры внутри одной миграции могут одновременно тянуть до
-                  <code> max_parallel_workers</code> чанков (фаза BULK_LOADING).
+                  Миграции создаются в фазе <code>NEW</code> с привязкой к группе и идут по очереди (FIFO).
                 </div>
               </>
             )}
@@ -595,7 +644,9 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
           <button onClick={onClose} style={secondaryActionStyle()} disabled={busy}>
             Отмена
           </button>
-          <button onClick={submit} style={primaryActionStyle(busy)} disabled={busy || anyLoading}>
+          <button onClick={submit}
+            style={primaryActionStyle(busy)}
+            disabled={busy || anyLoading || (mode === "existing" && !selectedGroup)}>
             {busy
               ? "…"
               : mode === "new"
@@ -682,6 +733,25 @@ function KeyTypeSwitch({ info, current, onChange }: {
           }}>{o.label}</button>
       ))}
     </span>
+  );
+}
+
+function GroupStatusBadge({ status }: { status: string }) {
+  const tone =
+    status === "RUNNING"            ? { bg: t.green.bg, fg: t.green.fg, br: t.green.dim }
+    : status === "FAILED"           ? { bg: t.red.bg,   fg: t.red.fg,   br: t.red.dim }
+    : status === "STOPPING"         ? { bg: t.red.bg,   fg: t.amber.fg, br: t.amber.dim }
+    : status === "TOPICS_CREATING"
+      || status === "CONNECTOR_STARTING"
+                                    ? { bg: t.bg.s3,    fg: t.blue.fg,  br: t.blue.dim }
+    : /* PENDING/STOPPED */           { bg: t.bg.s2,    fg: t.text.muted, br: t.border.base };
+  return (
+    <span style={{
+      fontFamily: t.font.mono, fontSize: 9.5, fontWeight: 700,
+      padding: "2px 7px", borderRadius: t.radius.sm,
+      background: tone.bg, color: tone.fg, border: `1px solid ${tone.br}80`,
+      letterSpacing: 0.4, whiteSpace: "nowrap",
+    }}>{status}</span>
   );
 }
 
