@@ -499,7 +499,16 @@ const KEY_LABEL: Record<string, string> = {
 };
 
 function MigrationChips({ o }: { o: SchemaObject }) {
-  if (o.type !== "TABLE" || !o.strategy) return null;
+  if (o.type !== "TABLE") return null;
+
+  // Таблица без миграции — показываем только наличие ключа (если знаем).
+  if (!o.strategy) {
+    if (o.hasPk === undefined && o.hasUk === undefined) return null;
+    if (o.hasPk) return <MiniChip label="PK" bg={`color-mix(in oklab, ${t.tone.ok} 18%, transparent)`} fg={t.tone.ok}/>;
+    if (o.hasUk) return <MiniChip label="UK" bg={`color-mix(in oklab, ${t.tone.info} 14%, transparent)`} fg={t.tone.info}/>;
+    return <MiniChip label="NO KEY" bg={t.tone.errorSoft} fg={t.tone.error}/>;
+  }
+
   const isCdc   = o.strategy.startsWith("CDC_");
   const isStage = o.strategy.endsWith("_STAGE");
   const keyTxt  = o.keyType ? (KEY_LABEL[o.keyType] || o.keyType) : null;

@@ -153,6 +153,39 @@ _MATCH_MAP = {
 }
 
 
+def _pk_uk_from_meta(meta) -> tuple[bool, bool]:
+    """Извлечь наличие PK/UK из metadata.constraints (TABLE).
+
+    get_full_ddl_info кладёт constraints с type_code = 'P'/'U'/'R'/'C'. PK
+    считаем по 'P'; UK — по 'U' (включая UNIQUE indexes, которые
+    get_table_info добавляет в uk_constraints, но в full_ddl_info их нет —
+    fallback на uk_constraints на случай старых снапшотов).
+    """
+    import json
+    if not meta:
+        return (False, False)
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            return (False, False)
+    if not isinstance(meta, dict):
+        return (False, False)
+    has_pk = False
+    has_uk = False
+    for c in meta.get("constraints") or []:
+        tcode = (c.get("type_code") or "").upper()
+        if tcode == "P":
+            has_pk = True
+        elif tcode == "U":
+            has_uk = True
+    if not has_uk and meta.get("uk_constraints"):
+        has_uk = True
+    if not has_pk and meta.get("pk_columns"):
+        has_pk = True
+    return (has_pk, has_uk)
+
+
 def _ddl_id(fe_type: str, object_name: str) -> str:
     """URL-safe id for DDL object — uses frontend alias (e.g. MVIEW, no spaces)."""
     return f"ddl-{fe_type}-{object_name}"
@@ -382,7 +415,8 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                 SELECT s.object_type, s.object_name,
                        s.oracle_status        AS src_status,
                        tg.oracle_status       AS tgt_status,
-                       COALESCE(c.match_status, 'UNKNOWN') AS match_status
+                       COALESCE(c.match_status, 'UNKNOWN') AS match_status,
+                       s.metadata             AS src_meta
                 FROM   ddl_objects s
                 LEFT   JOIN ddl_objects tg
                        ON tg.snapshot_id = s.snapshot_id
@@ -404,7 +438,7 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                 ORDER BY s.object_type, s.object_name
             """, (snapshot_id,))
             for r in cur.fetchall():
-                otype, oname, src_status, tgt_status, match_status = r
+                otype, oname, src_status, tgt_status, match_status, src_meta = r
                 # Skip TABLE rows already represented by a migration
                 if otype == "TABLE" and oname.upper() in migrated_table_names:
                     continue
@@ -419,6 +453,13 @@ def get_objects(conn, sm_id: str) -> list[dict]:
                     obj["status"]   = "queued"
                     obj["progress"] = 0
                     obj["note"]     = obj["note"] or "миграция данных не запущена"
+                # Достаём наличие PK/UK из метаданных source-side TABLE,
+                # чтобы дашборд мог показать чип ключа ещё до создания
+                # миграции.
+                if otype == "TABLE":
+                    has_pk, has_uk = _pk_uk_from_meta(src_meta)
+                    obj["hasPk"] = has_pk
+                    obj["hasUk"] = has_uk
                 ddl_objects.append(obj)
 
     # Stable ID space: TABLE migrations use UUID strings; DDL objects get
