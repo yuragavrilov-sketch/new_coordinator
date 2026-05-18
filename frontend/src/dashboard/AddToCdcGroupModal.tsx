@@ -67,10 +67,13 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   const [nameTouched,   setNameTouched]   = useState(false);
 
   // ── Migrations params ─────────────────────────────────────────────────────
-  const [createMigrations, setCreateMigrations] = useState(true);
-  const [strategy,         setStrategy]         = useState<Strategy>("CDC_STAGE");
-  const [stageTablespace,  setStageTablespace]  = useState("PAYSTAGE");
-  const [truncateTarget,   setTruncateTarget]   = useState(true);
+  const [createMigrations,       setCreateMigrations]       = useState(true);
+  const [strategy,               setStrategy]               = useState<Strategy>("CDC_STAGE");
+  const [stageTablespace,        setStageTablespace]        = useState("PAYSTAGE");
+  const [truncateTarget,         setTruncateTarget]         = useState(true);
+  const [maxParallelWorkers,     setMaxParallelWorkers]     = useState(1);
+  const [baselineParallelDegree, setBaselineParallelDegree] = useState(4);
+  const [chunkSize,              setChunkSize]              = useState(1_000_000);
 
   // ── Existing groups ──────────────────────────────────────────────────────
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
@@ -238,10 +241,13 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   function migrationParams() {
     return createMigrations
       ? {
-          create_migrations: true,
+          create_migrations:        true,
           strategy,
-          stage_tablespace:  usesStage(strategy) ? stageTablespace.trim().toUpperCase() : "",
-          truncate_target:   truncateTarget,
+          stage_tablespace:         usesStage(strategy) ? stageTablespace.trim().toUpperCase() : "",
+          truncate_target:          truncateTarget,
+          max_parallel_workers:     Math.max(1, maxParallelWorkers),
+          baseline_parallel_degree: Math.max(1, baselineParallelDegree),
+          chunk_size:               Math.max(1_000, chunkSize),
         }
       : { create_migrations: false };
   }
@@ -470,9 +476,37 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                     )}
                   </span>
                 </label>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
+                }}>
+                  <Field label="max_parallel_workers"
+                    hint="Параллельные BULK-чанки на одну миграцию (внешние воркеры)">
+                    <input style={S.input} type="number" min={1}
+                      value={maxParallelWorkers}
+                      onChange={e => setMaxParallelWorkers(
+                        Math.max(1, parseInt(e.target.value) || 1))}/>
+                  </Field>
+                  <Field label="baseline_parallel_degree"
+                    hint="Потоки INSERT в фазе BASELINE_LOADING">
+                    <input style={S.input} type="number" min={1}
+                      value={baselineParallelDegree}
+                      onChange={e => setBaselineParallelDegree(
+                        Math.max(1, parseInt(e.target.value) || 1))}/>
+                  </Field>
+                  <Field label="chunk_size"
+                    hint="Строк в одном чанке (BULK_LOADING)">
+                    <input style={S.input} type="number" min={1000} step={1000}
+                      value={chunkSize}
+                      onChange={e => setChunkSize(
+                        Math.max(1000, parseInt(e.target.value) || 1_000_000))}/>
+                  </Field>
+                </div>
                 <div style={{ fontSize: 11.5, color: t.text.muted }}>
                   Все миграции создаются в фазе <code>NEW</code> с привязкой к группе.
                   Оркестратор берёт их по одной (FIFO) после Start группы.
+                  Внешние воркеры внутри одной миграции могут одновременно тянуть до
+                  <code> max_parallel_workers</code> чанков (фаза BULK_LOADING).
                 </div>
               </>
             )}
