@@ -586,20 +586,33 @@ def get_table_info(conn, schema: str, table: str) -> dict:
 def get_full_ddl_info(conn, schema: str, table: str) -> dict:
     """Return full DDL snapshot: columns, constraints, indexes, triggers."""
     # Supplemental logging at table level — нужен для CDC (LogMiner).
-    # all_tables.supplemental_log_data_all = 'YES' / 'NO' / NULL.
+    # all_tables.supplemental_log_data_all присутствует не во всех версиях /
+    # доступен только DBA, поэтому проверяем через ALL_LOG_GROUPS (есть у
+    # любого юзера, видит свои таблицы) + v$database для database-wide
+    # настройки. Результат — 'YES' / 'NO' / None (если оба запроса упали).
     supp_log = None
+    db_level = None
     try:
         with conn.cursor() as cur:
-            cur.execute("""
-                SELECT supplemental_log_data_all
-                FROM   all_tables
-                WHERE  owner = :s AND table_name = :t
-            """, {"s": schema, "t": table})
+            cur.execute("SELECT supplemental_log_data_all FROM v$database")
             row = cur.fetchone()
-            if row:
-                supp_log = (row[0] or "").upper() or None
+            db_level = (row[0] or "").upper() if row else None
     except Exception:
-        supp_log = None
+        db_level = None
+    if db_level == "YES":
+        supp_log = "YES"
+    else:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM all_log_groups
+                    WHERE  owner = :s AND table_name = :t
+                      AND  log_group_type = 'ALL COLUMN LOGGING'
+                """, {"s": schema, "t": table})
+                row = cur.fetchone()
+                supp_log = "YES" if row and (row[0] or 0) > 0 else "NO"
+        except Exception:
+            supp_log = None
 
     with conn.cursor() as cur:
         # Fetch columns without data_default (LONG type — cannot be used in

@@ -41,15 +41,21 @@ def check_supplemental_logging(cfg: dict, schema: str, table: str) -> bool:
                     f"Oracle не в режиме ARCHIVELOG (текущий: {row[0] if row else '?'}). "
                     "Debezium LogMiner требует ARCHIVELOG."
                 )
-            # Check supplemental logging at table level
+            # Check supplemental logging — сначала database-wide (v$database
+            # уже доступна, мы выше log_mode читали), потом конкретная
+            # таблица через ALL_LOG_GROUPS. all_tables.supplemental_log_data_all
+            # отсутствует в части версий и доступен только DBA, поэтому не
+            # используем.
+            cur.execute("SELECT supplemental_log_data_all FROM v$database")
+            row = cur.fetchone()
+            if row and (row[0] or "").upper() == "YES":
+                return True
             cur.execute("""
-                SELECT supplemental_log_data_all
-                FROM   all_tables
-                WHERE  owner      = :s
-                  AND  table_name = :t
+                SELECT COUNT(*) FROM all_log_groups
+                WHERE  owner = :s AND table_name = :t
+                  AND  log_group_type = 'ALL COLUMN LOGGING'
             """, {"s": schema.upper(), "t": table.upper()})
             row = cur.fetchone()
-            # supplemental_log_data_all = 'YES' means ALL COLUMNS logging is on
-            return bool(row and row[0] == "YES")
+            return bool(row and (row[0] or 0) > 0)
     finally:
         conn.close()
