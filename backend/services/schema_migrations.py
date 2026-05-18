@@ -252,6 +252,10 @@ def _build_object(row: dict) -> dict:
         "eta":       "—",
         "dur":       "—",
         "note":      row.get("error_text") or "",
+        "strategy":   row.get("strategy")            or "",
+        "keyType":    row.get("effective_key_type")  or "",
+        "hasPk":      bool(row.get("source_pk_exists")),
+        "hasUk":      bool(row.get("source_uk_exists")),
     }
 
 
@@ -336,7 +340,9 @@ def get_objects(conn, sm_id: str) -> list[dict]:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT m.migration_id, m.migration_name, m.phase, m.error_text,
-                   m.source_table, m.total_rows, m.rows_loaded
+                   m.source_table, m.total_rows, m.rows_loaded,
+                   m.strategy, m.effective_key_type,
+                   m.source_pk_exists, m.source_uk_exists
             FROM migrations m
             WHERE m.migration_id IN (
                 SELECT mpi.migration_id

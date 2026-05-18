@@ -56,6 +56,11 @@ export interface SchemaObject {
   note:       string;
   srcStatus?: string;        // Oracle VALID/INVALID on source side (DDL objects)
   tgtStatus?: string;        // Oracle VALID/INVALID on target side
+  /** Только для TABLE-миграций */
+  strategy?: string;         // "CDC_STAGE" | "CDC_DIRECT" | "BULK_STAGE" | "BULK_DIRECT" | ""
+  keyType?:  string;         // "PRIMARY_KEY" | "UNIQUE_KEY" | "USER_DEFINED" | "ROWID" | "NONE" | ""
+  hasPk?:    boolean;
+  hasUk?:    boolean;
 }
 
 export interface MigrationEvent {

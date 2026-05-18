@@ -345,8 +345,11 @@ const ObjectRow = React.memo(function ObjectRow({
         </span>
       </Td>
       <Td>
-        <div style={{ fontFamily: t.font.mono, fontSize: "12.5px", fontWeight: 500, letterSpacing: "-0.01em" }}>
-          {o.name}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: t.font.mono, fontSize: "12.5px", fontWeight: 500, letterSpacing: "-0.01em" }}>
+            {o.name}
+          </span>
+          <MigrationChips o={o}/>
         </div>
         {o.note && (
           <div style={{
@@ -480,6 +483,62 @@ function SelectAllCheckbox({
       aria-label="Выбрать все на странице"
       title={disabled ? "Нет таблиц для выбора" : "Выбрать все таблицы на странице"}
     />
+  );
+}
+
+// ── Chips: strategy + key type для TABLE-миграций ───────────────────────────
+// Чипы показываются только когда у объекта есть привязанная миграция
+// (strategy непустой) — DDL-only TABLE без миграции их не получает.
+
+const KEY_LABEL: Record<string, string> = {
+  PRIMARY_KEY:  "PK",
+  UNIQUE_KEY:   "UK",
+  USER_DEFINED: "USER",
+  ROWID:        "ROWID",
+  NONE:         "NO KEY",
+};
+
+function MigrationChips({ o }: { o: SchemaObject }) {
+  if (o.type !== "TABLE" || !o.strategy) return null;
+  const isCdc   = o.strategy.startsWith("CDC_");
+  const isStage = o.strategy.endsWith("_STAGE");
+  const keyTxt  = o.keyType ? (KEY_LABEL[o.keyType] || o.keyType) : null;
+  const keyTone =
+    o.keyType === "PRIMARY_KEY"  ? { bg: `color-mix(in oklab, ${t.tone.ok}    18%, transparent)`, fg: t.tone.ok    } :
+    o.keyType === "UNIQUE_KEY"   ? { bg: `color-mix(in oklab, ${t.tone.info}  14%, transparent)`, fg: t.tone.info  } :
+    o.keyType === "USER_DEFINED" ? { bg: `color-mix(in oklab, ${t.tone.warn}  14%, transparent)`, fg: t.tone.warn  } :
+    o.keyType === "ROWID"        ? { bg: `color-mix(in oklab, ${t.tone.warn}  18%, transparent)`, fg: t.tone.warn  } :
+    o.keyType === "NONE"         ? { bg: t.tone.errorSoft,                                        fg: t.tone.error } :
+                                   { bg: t.bg.s3,                                                 fg: t.text.muted };
+  return (
+    <>
+      <MiniChip
+        label={isCdc ? "CDC" : "BULK"}
+        bg={isCdc ? `color-mix(in oklab, ${t.tone.info} 18%, transparent)` : t.bg.s3}
+        fg={isCdc ? t.tone.info : t.text.secondary}
+      />
+      <MiniChip
+        label={isStage ? "STAGE" : "DIRECT"}
+        bg={t.bg.s3}
+        fg={t.text.muted}
+      />
+      {keyTxt && <MiniChip label={keyTxt} bg={keyTone.bg} fg={keyTone.fg}/>}
+    </>
+  );
+}
+
+function MiniChip({ label, bg, fg }: { label: string; bg: string; fg: string }) {
+  return (
+    <span style={{
+      display: "inline-block",
+      fontFamily: t.font.mono,
+      fontSize: "9.5px", fontWeight: 700,
+      letterSpacing: "0.05em", textTransform: "uppercase",
+      padding: "1px 5px", borderRadius: 3,
+      background: bg, color: fg,
+    }}>
+      {label}
+    </span>
   );
 }
 
