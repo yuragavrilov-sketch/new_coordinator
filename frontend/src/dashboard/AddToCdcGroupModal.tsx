@@ -348,18 +348,26 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
           }}>✕</button>
         </div>
 
-        <div style={{ ...S.body, flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        <div style={{
+          padding: 20,
+          display: "block",                /* блок, чтобы Section'ы не сжимались */
+          flex: "1 1 auto", minHeight: 0, overflowY: "auto",
+        }}>
+        {/* Каждая Section обёрнута в Stack — фиксируем расстояние между секциями */}
 
           {/* Mode switch */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <ModeBtn active={mode === "new"} onClick={() => setMode("new")}
-              label="Новая группа"/>
-            <ModeBtn active={mode === "existing"} onClick={() => setMode("existing")}
-              label={`В существующую (${groups.length})`}
-              disabled={groupsLoading || groups.length === 0}/>
-          </div>
+          <Block>
+            <div style={{ display: "flex", gap: 8 }}>
+              <ModeBtn active={mode === "new"} onClick={() => setMode("new")}
+                label="Новая группа"/>
+              <ModeBtn active={mode === "existing"} onClick={() => setMode("existing")}
+                label={`В существующую (${groups.length})`}
+                disabled={groupsLoading || groups.length === 0}/>
+            </div>
+          </Block>
 
           {/* Readiness */}
+          <Block>
           <Section title="Готовность Oracle к CDC" accent={allReady ? t.green.dim : t.amber.dim}>
             {readinessLoading && (
               <div style={{ color: t.text.muted, fontSize: t.size.sm }}>Проверка…</div>
@@ -401,8 +409,10 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               </div>
             )}
           </Section>
+          </Block>
 
           {/* Mode-specific form */}
+          <Block>
           {mode === "new" ? (
             <Section title="Новая группа" accent={t.blue.dim}>
               <Field label="Имя группы" required>
@@ -487,8 +497,10 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               </div>
             </Section>
           )}
+          </Block>
 
           {/* Migrations options */}
+          <Block>
           <Section title="Миграции таблиц" accent={t.purple.base}>
             <label style={{ display: "flex", gap: 8, alignItems: "center",
                             fontSize: 13, color: t.text.primary }}>
@@ -569,8 +581,10 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               </>
             )}
           </Section>
+          </Block>
 
           {/* Selected tables — keys preview */}
+          <Block>
           <Section title="Таблицы и ключи" accent={t.green.dim}>
             {anyLoading && (
               <div style={{ fontSize: t.size.sm, color: t.text.muted }}>
@@ -633,6 +647,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               })}
             </div>
           </Section>
+          </Block>
 
           {err && <div style={S.err}>{err}</div>}
           {phase && !err && (
@@ -734,6 +749,10 @@ function KeyTypeSwitch({ info, current, onChange }: {
       ))}
     </span>
   );
+}
+
+function Block({ children }: { children: React.ReactNode }) {
+  return <div style={{ marginBottom: 16 }}>{children}</div>;
 }
 
 function GroupStatusBadge({ status }: { status: string }) {
