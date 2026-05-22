@@ -221,7 +221,19 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
       if (kt === "PRIMARY_KEY")  kc = s.info?.pk_columns ?? [];
       if (kt === "UNIQUE_KEY")   kc = s.info?.uk_constraints[0]?.columns ?? [];
       if (kt === "NONE")         kc = [];
+      if (kt === "USER_DEFINED") kc = s.effective_key_columns;
       return { ...s, effective_key_type: kt, effective_key_columns: kc };
+    }));
+  }
+
+  function toggleKeyColumn(schema: string, table: string, col: string) {
+    setTableStates(prev => prev.map(s => {
+      if (s.schema !== schema || s.table !== table) return s;
+      const has = s.effective_key_columns.includes(col);
+      const next = has
+        ? s.effective_key_columns.filter(c => c !== col)
+        : [...s.effective_key_columns, col];
+      return { ...s, effective_key_columns: next };
     }));
   }
 
@@ -598,49 +610,68 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               {tableStates.map(s => {
                 const k = `${s.schema}.${s.table}`.toUpperCase();
                 const supp = suppMap.get(k);
+                const showPicker =
+                  !s.loading && !s.infoError && s.info
+                  && s.effective_key_type === "USER_DEFINED";
+                const userKeyEmpty =
+                  showPicker && s.effective_key_columns.length === 0;
                 return (
                   <div key={k} style={{
                     padding: "6px 8px",
                     borderBottom: `1px solid ${t.border.subtle}`,
-                    display: "flex", alignItems: "center", gap: 8,
+                    display: "flex", flexDirection: "column", gap: 6,
                   }}>
-                    <span style={{ fontFamily: t.font.mono, fontSize: 12,
-                                   color: t.text.primary, minWidth: 220 }}>
-                      {s.schema}.{s.table}
-                    </span>
-                    {s.loading
-                      ? <span style={{ color: t.text.muted, fontSize: 11 }}>загрузка…</span>
-                      : s.infoError
-                        ? <span style={{ color: t.red.fg, fontSize: 11 }}>{s.infoError}</span>
-                        : (
-                          <>
-                            <KeyChip kt={s.effective_key_type}/>
-                            {s.effective_key_columns.length > 0 && (
-                              <span style={{ fontFamily: t.font.mono, fontSize: 11, color: t.text.muted }}>
-                                ({s.effective_key_columns.join(",")})
-                              </span>
-                            )}
-                          </>
-                        )
-                    }
-                    <span style={{ flex: 1 }}/>
-                    {!s.loading && !s.infoError && s.info && (
-                      <KeyTypeSwitch
-                        info={s.info}
-                        current={s.effective_key_type}
-                        onChange={kt => setKeyType(s.schema, s.table, kt)}
-                      />
-                    )}
-                    {supp !== undefined && (
-                      <span style={{
-                        fontFamily: t.font.mono, fontSize: 9.5, fontWeight: 700,
-                        padding: "1px 6px", borderRadius: t.radius.sm,
-                        background: supp ? t.green.bg : t.red.bg,
-                        color:      supp ? t.green.fg : t.red.fg,
-                        border: `1px solid ${(supp ? t.green.dim : t.red.dim)}40`,
-                      }}>
-                        {supp ? "SUPP" : "NO SUPP"}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontFamily: t.font.mono, fontSize: 12,
+                                     color: t.text.primary, minWidth: 220 }}>
+                        {s.schema}.{s.table}
                       </span>
+                      {s.loading
+                        ? <span style={{ color: t.text.muted, fontSize: 11 }}>загрузка…</span>
+                        : s.infoError
+                          ? <span style={{ color: t.red.fg, fontSize: 11 }}>{s.infoError}</span>
+                          : (
+                            <>
+                              <KeyChip kt={s.effective_key_type}/>
+                              {s.effective_key_columns.length > 0 && (
+                                <span style={{ fontFamily: t.font.mono, fontSize: 11, color: t.text.muted }}>
+                                  ({s.effective_key_columns.join(",")})
+                                </span>
+                              )}
+                              {userKeyEmpty && (
+                                <span style={{ fontSize: 11, color: t.red.fg }}>
+                                  выберите колонки ↓
+                                </span>
+                              )}
+                            </>
+                          )
+                      }
+                      <span style={{ flex: 1 }}/>
+                      {!s.loading && !s.infoError && s.info && (
+                        <KeyTypeSwitch
+                          info={s.info}
+                          current={s.effective_key_type}
+                          onChange={kt => setKeyType(s.schema, s.table, kt)}
+                        />
+                      )}
+                      {supp !== undefined && (
+                        <span style={{
+                          fontFamily: t.font.mono, fontSize: 9.5, fontWeight: 700,
+                          padding: "1px 6px", borderRadius: t.radius.sm,
+                          background: supp ? t.green.bg : t.red.bg,
+                          color:      supp ? t.green.fg : t.red.fg,
+                          border: `1px solid ${(supp ? t.green.dim : t.red.dim)}40`,
+                        }}>
+                          {supp ? "SUPP" : "NO SUPP"}
+                        </span>
+                      )}
+                    </div>
+                    {showPicker && s.info && (
+                      <UserKeyColumnPicker
+                        columns={s.info.columns}
+                        selected={s.effective_key_columns}
+                        onToggle={col => toggleKeyColumn(s.schema, s.table, col)}
+                      />
                     )}
                   </div>
                 );
@@ -718,6 +749,47 @@ function KeyChip({ kt }: { kt: string }) {
     }}>
       {KEY_LABEL[kt] ?? kt}
     </span>
+  );
+}
+
+function UserKeyColumnPicker({ columns, selected, onToggle }: {
+  columns: { name: string; type: string; nullable: boolean }[];
+  selected: string[];
+  onToggle: (col: string) => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", flexWrap: "wrap", gap: 4,
+      padding: "6px 8px",
+      background: t.bg.s2,
+      border: `1px solid ${t.border.subtle}`,
+      borderRadius: t.radius.sm,
+    }}>
+      {columns.map(col => {
+        const active = selected.includes(col.name);
+        return (
+          <button
+            key={col.name}
+            type="button"
+            onClick={() => onToggle(col.name)}
+            title={`${col.type}${col.nullable ? "" : " NOT NULL"}`}
+            style={{
+              padding: "2px 8px",
+              fontSize: 11,
+              fontFamily: t.font.mono,
+              borderRadius: t.radius.sm,
+              border: `1px solid ${active ? t.blue.base : t.border.subtle}`,
+              background: active ? t.blue.bg : t.bg.s1,
+              color: active ? t.blue.fg : t.text.secondary,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {col.name}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
