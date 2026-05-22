@@ -400,24 +400,34 @@ def claim_cdc_migration(conn) -> Optional[dict]:
 
 
 def cdc_checkin(conn, migration_id: str, total_lag: int,
-                rows_applied: int, last_event_ts: Optional[str] = None) -> None:
-    """Update CDC heartbeat + lag in state DB."""
+                rows_applied: int, last_event_ts: Optional[str] = None,
+                lag_by_partition: Optional[dict] = None) -> None:
+    """Update CDC heartbeat + lag in state DB.
+
+    *lag_by_partition* — словарь {"<topic>-<partition>": lag}; пишется в JSONB
+    колонку migration_cdc_state.lag_by_partition, чтобы UI мог показать
+    разбивку по топикам/партициям.
+    """
+    import json
+    parts_json = json.dumps(lag_by_partition or {})
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO migration_cdc_state
                 (migration_id, consumer_group, topic,
-                 total_lag, rows_applied, worker_id, worker_heartbeat, updated_at)
+                 total_lag, lag_by_partition,
+                 rows_applied, worker_id, worker_heartbeat, updated_at)
             SELECT migration_id, consumer_group, topic_prefix,
-                   %s, %s, %s, NOW(), NOW()
+                   %s, %s::jsonb, %s, %s, NOW(), NOW()
             FROM   migrations
             WHERE  migration_id = %s
             ON CONFLICT (migration_id) DO UPDATE
                 SET total_lag        = EXCLUDED.total_lag,
+                    lag_by_partition = EXCLUDED.lag_by_partition,
                     rows_applied     = EXCLUDED.rows_applied,
                     worker_id        = EXCLUDED.worker_id,
                     worker_heartbeat = NOW(),
                     updated_at       = NOW()
-        """, (total_lag, rows_applied, WORKER_ID, migration_id))
+        """, (total_lag, parts_json, rows_applied, WORKER_ID, migration_id))
 
         # Mirror lag onto migrations table so UI can read it
         cur.execute("""

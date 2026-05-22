@@ -155,6 +155,24 @@ export function ConnectorPanel({
 
 // ── KafkaLagPanel ─────────────────────────────────────────────────────────────
 
+/** Группирует {"topic-partition": lag} → [[topic, [["partition", lag], …]], …].
+ *  Топик может содержать дефисы; партиция всегда последний числовой токен. */
+function groupByTopic(parts: Record<string, number>): [string, [string, number][]][] {
+  const byTopic: Record<string, [string, number][]> = {};
+  for (const [key, lag] of Object.entries(parts)) {
+    const idx = key.lastIndexOf("-");
+    const topic = idx > 0 ? key.slice(0, idx) : key;
+    const part  = idx > 0 ? key.slice(idx + 1) : "?";
+    (byTopic[topic] ||= []).push([part, lag]);
+  }
+  return Object.entries(byTopic)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([topic, rows]) => [
+      topic,
+      rows.sort(([a], [b]) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0)),
+    ]);
+}
+
 interface LagData {
   total_lag:        number | null;
   lag_by_partition: Record<string, number> | null;
@@ -206,15 +224,27 @@ export function KafkaLagPanel({
 
       {Object.keys(parts).length > 0 && (
         <div style={{ marginBottom: t.space[2] }}>
-          {Object.entries(parts).map(([k, v]) => (
-            <div key={k} style={{
-              display: "flex", justifyContent: "space-between",
-              fontSize: t.size.xs, color: t.text.muted, marginBottom: 2,
-            }}>
-              <span>{k}</span>
-              <span style={{ color: v === 0 ? t.green.base : t.amber.fg }}>
-                {v.toLocaleString()}
-              </span>
+          {groupByTopic(parts).map(([topic, rows]) => (
+            <div key={topic} style={{ marginBottom: 6 }}>
+              <div style={{
+                fontSize: t.size.xs, color: t.text.secondary,
+                fontFamily: t.font.mono, fontWeight: 600,
+                marginBottom: 2, wordBreak: "break-all",
+              }}>
+                {topic}
+              </div>
+              {rows.map(([part, lag]) => (
+                <div key={part} style={{
+                  display: "flex", justifyContent: "space-between",
+                  fontSize: t.size.xs, color: t.text.muted,
+                  marginLeft: 8, marginBottom: 2,
+                }}>
+                  <span>partition {part}</span>
+                  <span style={{ color: lag === 0 ? t.green.base : t.amber.fg }}>
+                    {lag.toLocaleString()}
+                  </span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

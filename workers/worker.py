@@ -290,9 +290,11 @@ def bulk_loop() -> None:
 # CDC APPLY
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _calc_lag(consumer, consumer_group: str, bootstrap: list) -> int:
+def _calc_lag(consumer, consumer_group: str, bootstrap: list) -> tuple[int, dict]:
+    """Возвращает (total_lag, by_partition={"topic-partition": lag})."""
     from kafka import KafkaAdminClient
     total_lag = 0
+    by_partition: dict = {}
     try:
         admin = KafkaAdminClient(bootstrap_servers=bootstrap, request_timeout_ms=5_000)
         try:
@@ -300,12 +302,14 @@ def _calc_lag(consumer, consumer_group: str, bootstrap: list) -> int:
             committed = {tp: om.offset for tp, om in offsets.items() if om.offset >= 0}
             end       = consumer.end_offsets(list(committed.keys()))
             for tp, off in committed.items():
-                total_lag += max(0, end.get(tp, off) - off)
+                lag = max(0, end.get(tp, off) - off)
+                total_lag += lag
+                by_partition[f"{tp.topic}-{tp.partition}"] = lag
         finally:
             admin.close()
     except Exception as exc:
         print(f"[cdc] lag error: {exc}")
-    return total_lag
+    return total_lag, by_partition
 
 
 def _merge_upsert(conn, schema: str, table: str, row: dict, key_cols: list) -> None:
@@ -529,9 +533,10 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
             # Periodic checkin
             if time.time() - last_checkin_ts >= CDC_CHECKIN_SEC:
                 try:
-                    total_lag = _calc_lag(consumer, consumer_group, bootstrap)
-                    db.cdc_checkin(pg, migration_id, total_lag, rows_applied)
-                    print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied}")
+                    total_lag, by_partition = _calc_lag(consumer, consumer_group, bootstrap)
+                    db.cdc_checkin(pg, migration_id, total_lag, rows_applied,
+                                   lag_by_partition=by_partition)
+                    print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied} parts={len(by_partition)}")
                 except Exception as exc:
                     print(f"[cdc:{tag}] checkin error: {exc}")
                     # Reconnect pg on error
