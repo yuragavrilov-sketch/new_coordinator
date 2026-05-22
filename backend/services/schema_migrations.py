@@ -643,6 +643,41 @@ def _load_migration_detail(conn, src_schema: str, tgt_schema: str, migration_id:
     }
 
 
+def _matched_migrations_subquery() -> str:
+    """SQL-фрагмент: миграции, относящиеся к schema_migration <sm_id>.
+
+    Возвращает подзапрос (без скобок), пригодный для использования как:
+        m.migration_id IN ({_matched_migrations_subquery()})
+
+    Принимает 4 параметра (в этом порядке): sm_id, sm_id, src_schema, tgt_schema.
+
+    Подбор по трём путям:
+      1) plan-flow:   schema_migrations.plan_id → migration_plan_items
+      2) group-flow:  schema_migrations.group_id → migrations.group_id
+      3) schema-pair: совпадение src_schema/tgt_schema (case-insensitive)
+    Любой путь даёт hit — нужный для случаев, когда у sm пустые src/tgt,
+    либо у миграции нет ни plan_id, ни group_id.
+    """
+    return """
+        SELECT mpi.migration_id
+        FROM   migration_plan_items mpi
+        JOIN   schema_migrations sm ON sm.plan_id = mpi.plan_id
+        WHERE  sm.schema_migration_id = %s
+        UNION
+        SELECT m2.migration_id
+        FROM   migrations m2
+        JOIN   schema_migrations sm2 ON sm2.group_id = m2.group_id
+        WHERE  sm2.schema_migration_id = %s
+          AND  m2.group_id IS NOT NULL
+        UNION
+        SELECT m3.migration_id
+        FROM   migrations m3
+        WHERE  %s <> '' AND %s <> ''
+          AND  UPPER(m3.source_schema) = UPPER(%s)
+          AND  UPPER(m3.target_schema) = UPPER(%s)
+    """
+
+
 def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
     """Merge two event streams (per-migration phase history + schema-level
     events such as DDL apply jobs), ordered by time, newest first."""
@@ -657,8 +692,11 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
         row = cur.fetchone()
         src_schema, tgt_schema = (row[0], row[1]) if row else ("", "")
 
+    src = src_schema or ""
+    tgt = tgt_schema or ""
+
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             SELECT
                 m.source_table AS obj,
                 msh.created_at,
@@ -666,17 +704,10 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
                 msh.transition_reason, msh.message
             FROM migrations m
             JOIN migration_state_history msh ON msh.migration_id = m.migration_id
-            WHERE m.migration_id IN (
-                SELECT mpi.migration_id
-                FROM   migration_plan_items mpi
-                JOIN   schema_migrations sm ON sm.plan_id = mpi.plan_id
-                WHERE  sm.schema_migration_id = %s
-            )
-               OR (UPPER(m.source_schema) = UPPER(%s)
-                   AND UPPER(m.target_schema) = UPPER(%s))
+            WHERE m.migration_id IN ({_matched_migrations_subquery()})
             ORDER BY msh.created_at DESC
             LIMIT %s
-        """, (sm_id, src_schema or "", tgt_schema or "", limit))
+        """, (sm_id, sm_id, src, tgt, src, tgt, limit))
         for r in cur.fetchall():
             obj, created_at, from_phase, to_phase, status, _reason, message = r
             level = "error" if status == "FAILED" else "warn" if to_phase == "DATA_MISMATCH" else "info"
@@ -747,16 +778,24 @@ def get_metrics(conn, sm_id: str) -> dict:
     src = _collect_side_metrics("source")
     tgt = _collect_side_metrics("target")
 
+    # Резолвим связанные миграции тем же путём, что и get_events:
+    # plan_id, group_id или schema-pair (см. _matched_migrations_subquery).
     cdc_lag_total = 0
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                "SELECT src_schema, tgt_schema FROM schema_migrations WHERE schema_migration_id = %s",
+                (sm_id,),
+            )
+            sm_row = cur.fetchone()
+            src = (sm_row[0] if sm_row else "") or ""
+            tgt = (sm_row[1] if sm_row else "") or ""
+
+            cur.execute(f"""
                 SELECT COALESCE(SUM(cs.total_lag), 0)
-                FROM   schema_migrations sm
-                JOIN   migration_plan_items mpi ON mpi.plan_id = sm.plan_id
-                JOIN   migration_cdc_state  cs  ON cs.migration_id = mpi.migration_id
-                WHERE  sm.schema_migration_id = %s
-            """, (sm_id,))
+                FROM   migration_cdc_state cs
+                WHERE  cs.migration_id IN ({_matched_migrations_subquery()})
+            """, (sm_id, sm_id, src, tgt, src, tgt))
             row = cur.fetchone()
             cdc_lag_total = int(row[0] or 0) if row else 0
     except Exception as exc:
