@@ -675,6 +675,35 @@ def log_sm_event(
     conn.commit()
 
 
+def fail_cdc_migration(conn, migration_id: str,
+                       error_code: str, error_text: str) -> None:
+    """Перевод CDC-миграции в FAILED + запись диагностики.
+
+    Срабатывает только из CDC_* фаз — не трогает уже завершённые миграции.
+    Освобождает heartbeat, чтобы менеджер не пытался reclaim.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE migrations
+            SET    phase            = 'FAILED',
+                   error_code       = %s,
+                   error_text       = %s,
+                   state_changed_at = NOW(),
+                   updated_at       = NOW()
+            WHERE  migration_id = %s
+              AND  phase IN ('CDC_APPLY_STARTING','CDC_APPLYING',
+                             'CDC_CATCHING_UP','CDC_CAUGHT_UP','STEADY_STATE')
+        """, (error_code[:64], error_text[:4000], migration_id))
+        cur.execute("""
+            UPDATE migration_cdc_state
+            SET    worker_id        = NULL,
+                   worker_heartbeat = NULL,
+                   updated_at       = NOW()
+            WHERE  migration_id = %s
+        """, (migration_id,))
+    conn.commit()
+
+
 def trigger_lag_zero(conn, migration_id: str) -> None:
     """
     Transition migration CDC_CATCHING_UP → CDC_CAUGHT_UP when lag reaches 0.

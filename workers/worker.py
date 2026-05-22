@@ -509,6 +509,11 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
     last_checkin_ts = time.time()
     rows_applied    = 0
 
+    # Защита от бесконечного reclaim-цикла на «ядовитом» событии: если один и
+    # тот же offset падает >=POISON_THRESHOLD раз, миграция помечается FAILED.
+    fail_offsets: dict = {}        # (topic, partition, offset) → count
+    POISON_THRESHOLD = 3
+
     try:
         while not stop_event.is_set():
             try:
@@ -518,17 +523,57 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                 time.sleep(5)
                 continue
 
+            polled = sum(len(v) for v in raw_msgs.values())
+            applied_in_batch = 0
+            batch_failed     = False
+
             for _tp, messages in raw_msgs.items():
                 for msg in messages:
                     event = _parse_debezium(msg.value)
                     if event is None:
                         continue
-                    _apply_event(oracle_conn, event,
-                                 target_schema, target_table, key_cols)
-                    rows_applied += 1
+                    try:
+                        _apply_event(oracle_conn, event,
+                                     target_schema, target_table, key_cols)
+                        rows_applied     += 1
+                        applied_in_batch += 1
+                    except Exception as exc:
+                        offset_key = (msg.topic, msg.partition, msg.offset)
+                        cnt = fail_offsets.get(offset_key, 0) + 1
+                        fail_offsets[offset_key] = cnt
+                        err = f"{type(exc).__name__}: {exc}"
+                        print(f"[cdc:{tag}] apply error at {msg.topic}:{msg.partition}@{msg.offset} "
+                              f"(attempt {cnt}/{POISON_THRESHOLD}) event_op={event.get('op')} "
+                              f"keys={key_cols} err={err}")
+                        try:
+                            oracle_conn.rollback()
+                        except Exception:
+                            pass
+                        batch_failed = True
 
+                        if cnt >= POISON_THRESHOLD:
+                            detail = (f"poison event {msg.topic}:{msg.partition}@{msg.offset} "
+                                      f"op={event.get('op')} key_cols={key_cols} → {err}")
+                            print(f"[cdc:{tag}] FATAL {detail}; transitioning migration to FAILED")
+                            try:
+                                db.fail_cdc_migration(pg, migration_id,
+                                                      "CDC_APPLY_FAILED", detail)
+                            except Exception as fail_exc:
+                                print(f"[cdc:{tag}] mark-FAILED error: {fail_exc}")
+                            return
+                        break        # bail out of inner-loop, do not commit this batch
+                if batch_failed:
+                    break
+
+                # Весь батч по этому TP применился — коммитим Oracle и Kafka.
+                # Не используем consumer.commit() без аргументов на success-path,
+                # т.к. мы итерируемся по TP и хотим коммитить только этот TP.
                 oracle_conn.commit()
                 consumer.commit()
+
+            if polled > 0:
+                print(f"[cdc:{tag}] poll: applied={applied_in_batch}/{polled}"
+                      f"{' (rollback)' if batch_failed else ''}")
 
             # Periodic checkin
             if time.time() - last_checkin_ts >= CDC_CHECKIN_SEC:
