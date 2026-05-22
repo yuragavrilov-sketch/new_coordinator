@@ -5,6 +5,8 @@ import { OBJECT_TYPES, type ObjectType, type SchemaObject } from "./types";
 
 export type SortKey = "priority" | "size" | "progress" | "name" | "type";
 export type StatusFilter = "all" | "running" | "issues" | "queued" | "done";
+export type KeyFilter = "all" | "pk" | "uk" | "no_key";
+export type SuppFilter = "all" | "supp" | "no_supp";
 
 interface Props {
   objects:      SchemaObject[];
@@ -13,6 +15,10 @@ interface Props {
   onTypeFilter: (v: ObjectType | "all") => void;
   statusFilter: StatusFilter;
   onStatusFilter: (v: StatusFilter) => void;
+  keyFilter:    KeyFilter;
+  onKeyFilter:  (v: KeyFilter) => void;
+  suppFilter:   SuppFilter;
+  onSuppFilter: (v: SuppFilter) => void;
   search:       string;
   onSearch:     (v: string) => void;
   sort:         SortKey;
@@ -29,6 +35,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 
 export function ObjectFilters({
   objects, filtered, typeFilter, onTypeFilter, statusFilter, onStatusFilter,
+  keyFilter, onKeyFilter, suppFilter, onSuppFilter,
   search, onSearch, sort, onSort,
 }: Props) {
   const typeCounts: Record<string, number> = {};
@@ -41,6 +48,21 @@ export function ObjectFilters({
     else if (o.status === "warn") statusCounts.warn++;
     else if (o.status === "queued") statusCounts.queued++;
     else if (o.status === "done") statusCounts.done++;
+  });
+
+  // PK/UK/NO KEY и SUPP/NO SUPP считаем только по TABLE-объектам.
+  // Если для таблицы поле ещё не загружено (undefined) — она не попадает в
+  // конкретный счётчик, но и не отсекается фильтром "all".
+  const tables = objects.filter(o => o.type === "TABLE");
+  const keyCounts = { all: tables.length, pk: 0, uk: 0, no_key: 0 };
+  const suppCounts = { all: tables.length, supp: 0, no_supp: 0 };
+  tables.forEach(o => {
+    if (o.hasPk) keyCounts.pk++;
+    else if (o.hasUk) keyCounts.uk++;
+    else if (o.hasPk === false && o.hasUk === false) keyCounts.no_key++;
+
+    if (o.hasSuppLog === true) suppCounts.supp++;
+    else if (o.hasSuppLog === false) suppCounts.no_supp++;
   });
 
   const typePills = (Object.keys(OBJECT_TYPES) as ObjectType[]).filter(k => typeCounts[k] > 0);
@@ -90,6 +112,37 @@ export function ObjectFilters({
           />
         ))}
       </div>
+
+      {/* Метки таблиц: PK/UK/NO KEY и SUPP/NO SUPP. Видны только когда есть
+          табличные объекты — для DDL-объектов эти фильтры бессмысленны. */}
+      {tables.length > 0 && (
+        <div style={{
+          display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center",
+          marginBottom: 10,
+        }}>
+          <span style={{ fontSize: 11, color: t.text.muted }}>Ключи</span>
+          <Segmented
+            value={keyFilter}
+            onChange={onKeyFilter}
+            options={[
+              { v: "all",    l: "Все",    c: keyCounts.all    },
+              { v: "pk",     l: "PK",     c: keyCounts.pk     },
+              { v: "uk",     l: "UK",     c: keyCounts.uk     },
+              { v: "no_key", l: "NO KEY", c: keyCounts.no_key },
+            ]}
+          />
+          <span style={{ fontSize: 11, color: t.text.muted, marginLeft: 4 }}>Supp&nbsp;log</span>
+          <Segmented
+            value={suppFilter}
+            onChange={onSuppFilter}
+            options={[
+              { v: "all",     l: "Все",     c: suppCounts.all     },
+              { v: "supp",    l: "SUPP",    c: suppCounts.supp    },
+              { v: "no_supp", l: "NO SUPP", c: suppCounts.no_supp },
+            ]}
+          />
+        </div>
+      )}
     </>
   );
 }

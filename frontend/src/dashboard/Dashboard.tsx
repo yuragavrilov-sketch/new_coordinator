@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, Suspense } from "react";
 import { SchemaHeader } from "./SchemaHeader";
 import { KpiRow, KpiCard } from "./KpiRow";
-import { ObjectFilters, type SortKey, type StatusFilter } from "./ObjectFilters";
+import { ObjectFilters, type SortKey, type StatusFilter, type KeyFilter, type SuppFilter } from "./ObjectFilters";
 import { ObjectTable } from "./ObjectTable";
 import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
@@ -38,6 +38,8 @@ interface Props {
 export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEvents }: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [keyFilter,    setKeyFilter]    = useState<KeyFilter>("all");
+  const [suppFilter,   setSuppFilter]   = useState<SuppFilter>("all");
   const [search,       setSearch]       = useState("");
   const [sort,         setSort]         = useState<SortKey>("priority");
   const [openObject,   setOpenObject]   = useState<SchemaObject | null>(null);
@@ -116,6 +118,26 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         return o.status === statusFilter;
       });
     }
+    // Фильтры PK/UK/NO KEY и SUPP/NO SUPP применяются только к таблицам;
+    // DDL-объекты (INDEX, VIEW, PACKAGE...) при активном фильтре отсекаются
+    // — иначе сегмент «NO KEY» показывал бы все view/package и т.п.
+    if (keyFilter !== "all") {
+      arr = arr.filter(o => {
+        if (o.type !== "TABLE") return false;
+        if (keyFilter === "pk")     return !!o.hasPk;
+        if (keyFilter === "uk")     return !o.hasPk && !!o.hasUk;
+        if (keyFilter === "no_key") return o.hasPk === false && o.hasUk === false;
+        return true;
+      });
+    }
+    if (suppFilter !== "all") {
+      arr = arr.filter(o => {
+        if (o.type !== "TABLE") return false;
+        if (suppFilter === "supp")    return o.hasSuppLog === true;
+        if (suppFilter === "no_supp") return o.hasSuppLog === false;
+        return true;
+      });
+    }
     if (search) {
       const q = search.toLowerCase();
       arr = arr.filter(o => o.name.toLowerCase().includes(q));
@@ -137,12 +159,12 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
       return 0;
     });
     return arr;
-  }, [objects, typeFilter, statusFilter, search, sort]);
+  }, [objects, typeFilter, statusFilter, keyFilter, suppFilter, search, sort]);
 
   // Reset drawer when switching schemas
   useEffect(() => { setOpenObject(null); }, [selectedId]);
   // Reset to page 1 when filters change so the user always sees the matches
-  useEffect(() => { setPage(1); }, [typeFilter, statusFilter, search, sort, pageSize, selectedId]);
+  useEffect(() => { setPage(1); }, [typeFilter, statusFilter, keyFilter, suppFilter, search, sort, pageSize, selectedId]);
   // Clear bulk-selection when switching schemas
   useEffect(() => { setSelectedIds(new Set()); }, [selectedId]);
 
@@ -293,6 +315,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         filtered={filtered}
         typeFilter={typeFilter}     onTypeFilter={setTypeFilter}
         statusFilter={statusFilter} onStatusFilter={setStatusFilter}
+        keyFilter={keyFilter}       onKeyFilter={setKeyFilter}
+        suppFilter={suppFilter}     onSuppFilter={setSuppFilter}
         search={search}             onSearch={setSearch}
         sort={sort}                 onSort={setSort}
       />
