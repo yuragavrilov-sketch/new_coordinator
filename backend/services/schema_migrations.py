@@ -819,9 +819,10 @@ def get_metrics(conn, sm_id: str) -> dict:
         "targetCpuSpark":   _pad10(tgt["cpu_hist"]),
         "targetNetSpark":   _pad10(tgt["net_hist"]),
         "targetRedoSpark":  _pad10(tgt["redo_hist"]),
-        # CDC
-        "cdcLagMs":  cdc_lag_total,
-        "lagSpark":  [0] * 10,
+        # CDC: суммарный consumer-group lag по всем CDC-миграциям схемы,
+        # в сообщениях (offset_end − committed). Не миллисекунды.
+        "cdcLag":   cdc_lag_total,
+        "lagSpark": [0] * 10,
     }
 
 

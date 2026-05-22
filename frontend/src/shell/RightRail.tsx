@@ -59,7 +59,12 @@ export function RightRail({ schemaName, metrics, events }: Props) {
           <MiniStat label="Redo/s"  value={fmtBytes(metrics.targetRedoPerSec) + "/s"} tone="warn" data={metrics.targetRedoSpark}/>
 
           <GroupHeading>CDC</GroupHeading>
-          <MiniStat label="Lag" value={`${(metrics.cdcLagMs / 1000).toFixed(1)}s`} tone="info" data={metrics.lagSpark}/>
+          <MiniStat
+            label="Lag"
+            value={`${metrics.cdcLag.toLocaleString()} msg`}
+            tone={metrics.cdcLag === 0 ? "ok" : metrics.cdcLag < 10_000 ? "warn" : "error"}
+            data={metrics.lagSpark}
+          />
         </div>
       </section>
 

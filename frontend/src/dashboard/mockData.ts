@@ -106,7 +106,7 @@ export const initialMetrics = {
   sourceCpu:  0,
   network:    0,
   redoPerSec: 0,
-  cdcLagMs:   0,
+  cdcLag:     0,
   cpuSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   netSpark:  [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   redoSpark: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],

@@ -77,7 +77,7 @@ export interface LiveMetrics {
   sourceCpu: number;   // %
   network:   number;   // MB/s
   redoPerSec: number;  // bytes/s, formatted by callee
-  cdcLagMs:  number;
+  cdcLag:    number;   // суммарный consumer-group lag по всем CDC-миграциям схемы, в сообщениях
   cpuSpark:  number[];
   netSpark:  number[];
   redoSpark: number[];
