@@ -788,14 +788,14 @@ def get_metrics(conn, sm_id: str) -> dict:
                 (sm_id,),
             )
             sm_row = cur.fetchone()
-            src = (sm_row[0] if sm_row else "") or ""
-            tgt = (sm_row[1] if sm_row else "") or ""
+            sm_src = (sm_row[0] if sm_row else "") or ""
+            sm_tgt = (sm_row[1] if sm_row else "") or ""
 
             cur.execute(f"""
                 SELECT COALESCE(SUM(cs.total_lag), 0)
                 FROM   migration_cdc_state cs
                 WHERE  cs.migration_id IN ({_matched_migrations_subquery()})
-            """, (sm_id, sm_id, src, tgt, src, tgt))
+            """, (sm_id, sm_id, sm_src, sm_tgt, sm_src, sm_tgt))
             row = cur.fetchone()
             cdc_lag_total = int(row[0] or 0) if row else 0
     except Exception as exc:
