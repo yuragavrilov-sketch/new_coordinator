@@ -16,10 +16,14 @@ interface Props {
   speed?:   { chunksSec: number; rowsSec: number };
   onClick:  () => void;
   onAction: (id: string, action: "run" | "stop" | "delete") => void;
+  /** Bulk-select state — независимо от выделения «строка раскрыта» */
+  checked?:        boolean;
+  onToggleCheck?:  (id: string) => void;
 }
 
 export function MigrationRow({
   m, selected, compact, busy, speed, onClick, onAction,
+  checked, onToggleCheck,
 }: Props) {
   const canRun    = m.phase === "DRAFT";
   const canStop   = ACTIVE_PHASES.has(m.phase);
@@ -44,6 +48,16 @@ export function MigrationRow({
     >
       {/* Name + phase + actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+        {onToggleCheck && (
+          <input
+            type="checkbox"
+            checked={!!checked}
+            onChange={() => onToggleCheck(m.migration_id)}
+            onClick={e => e.stopPropagation()}
+            style={{ flexShrink: 0, cursor: "pointer" }}
+            title="Выбрать для массового действия"
+          />
+        )}
         <span style={{
           fontWeight: 700, fontSize: t.size.md, color: t.text.primary,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",

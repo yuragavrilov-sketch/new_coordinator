@@ -28,6 +28,8 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
   const [speeds,     setSpeeds]     = useState<Record<string, { chunksSec: number; rowsSec: number }>>({});
   const [filter,     setFilter]     = useState<FilterKey>("all");
   const [search,     setSearch]     = useState("");
+  const [bulkIds,    setBulkIds]    = useState<Set<string>>(() => new Set());
+  const [bulkBusy,   setBulkBusy]   = useState(false);
   const snapRef = useRef<Record<string, SpeedSnapshot>>({});
 
   const load = useCallback(() => {
@@ -116,6 +118,80 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
     }
   }, [load, selectedId]);
 
+  const toggleBulk = useCallback((id: string) => {
+    setBulkIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearBulk = useCallback(() => setBulkIds(new Set()), []);
+
+  // Параллельный fetch с лимитом — чтобы при сотнях миграций браузер
+  // не отстреливал «too many requests».
+  async function _runBulk(ids: string[], call: (id: string) => Promise<Response>) {
+    setBulkBusy(true);
+    const failed: string[] = [];
+    try {
+      const CONCURRENCY = 6;
+      const queue = [...ids];
+      const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+        while (queue.length > 0) {
+          const id = queue.shift()!;
+          try {
+            const r = await call(id);
+            if (!r.ok) failed.push(id);
+          } catch {
+            failed.push(id);
+          }
+        }
+      });
+      await Promise.all(workers);
+    } finally {
+      setBulkBusy(false);
+      clearBulk();
+      load();
+    }
+    if (failed.length > 0) {
+      alert(`Не удалось выполнить для ${failed.length} из ${ids.length} миграций`);
+    }
+  }
+
+  const bulkStop = useCallback(async () => {
+    const ids = Array.from(bulkIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Остановить ${ids.length} миграций?`)) return;
+    await _runBulk(ids, id => fetch(`/api/migrations/${id}/action`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ action: "cancel" }),
+    }));
+  }, [bulkIds, clearBulk, load]);
+
+  const bulkDelete = useCallback(async () => {
+    const ids = Array.from(bulkIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Удалить ${ids.length} миграций? Это действие необратимо.`)) return;
+    await _runBulk(ids, id => fetch(`/api/migrations/${id}`, { method: "DELETE" }));
+    if (selectedId && bulkIds.has(selectedId)) setSelectedId(null);
+  }, [bulkIds, clearBulk, load, selectedId]);
+
+  // Чистим выбор от удалённых/исчезнувших id
+  useEffect(() => {
+    setBulkIds(prev => {
+      const valid = new Set(migrations.map(m => m.migration_id));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach(id => {
+        if (valid.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [migrations]);
+
   return (
     <>
       {showCreate && (
@@ -142,6 +218,20 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
             display: "flex", flexDirection: "column", gap: 6,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {visible.length > 0 && (
+                <input
+                  type="checkbox"
+                  checked={bulkIds.size > 0 && visible.every(m => bulkIds.has(m.migration_id))}
+                  ref={el => { if (el) el.indeterminate = bulkIds.size > 0
+                    && !visible.every(m => bulkIds.has(m.migration_id)); }}
+                  onChange={e => {
+                    if (e.target.checked) setBulkIds(new Set(visible.map(m => m.migration_id)));
+                    else                  clearBulk();
+                  }}
+                  style={{ cursor: "pointer" }}
+                  title="Выбрать все видимые"
+                />
+              )}
               <span style={{ fontWeight: 700, fontSize: t.size.md, color: t.text.secondary }}>
                 Миграции
               </span>
@@ -210,6 +300,40 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
             </div>
           </div>
 
+          {/* Bulk action bar — виден только когда что-то выбрано */}
+          {bulkIds.size > 0 && (
+            <div style={{
+              padding: "6px 14px",
+              background: t.bg.s2,
+              borderBottom: `1px solid ${t.border.subtle}`,
+              display: "flex", alignItems: "center", gap: 8,
+              fontSize: t.size.sm,
+            }}>
+              <span style={{ color: t.text.muted }}>
+                Выбрано: <b style={{ color: t.text.primary }}>{bulkIds.size}</b>
+              </span>
+              <button onClick={clearBulk} disabled={bulkBusy} style={{
+                background: "none", border: `1px solid ${t.border.subtle}`,
+                borderRadius: t.radius.sm, color: t.text.disabled,
+                fontSize: t.size.xs, padding: "2px 8px", cursor: "pointer",
+              }}>Сбросить</button>
+              <span style={{ flex: 1 }}/>
+              <button onClick={bulkStop} disabled={bulkBusy} style={{
+                background: t.red.bg, border: `1px solid ${t.red.dim}`,
+                borderRadius: t.radius.sm, color: t.red.fg,
+                fontSize: t.size.xs, padding: "3px 10px", cursor: "pointer", fontWeight: 700,
+              }}>⏹ Остановить</button>
+              <button onClick={bulkDelete} disabled={bulkBusy} style={{
+                background: t.bg.s3, border: `1px solid ${t.border.base}`,
+                borderRadius: t.radius.sm, color: t.text.secondary,
+                fontSize: t.size.xs, padding: "3px 10px", cursor: "pointer", fontWeight: 700,
+              }}>✕ Удалить</button>
+              {bulkBusy && (
+                <span style={{ fontSize: t.size.xs, color: t.text.disabled }}>…</span>
+              )}
+            </div>
+          )}
+
           {/* Content */}
           <div style={{ flex: 1, overflow: "auto" }}>
             {loading && (
@@ -234,10 +358,12 @@ export function MigrationList({ refreshSignal, sseEvents }: Props) {
                 m={m}
                 selected={m.migration_id === selectedId}
                 compact={!!selected}
-                busy={actionBusy === m.migration_id}
+                busy={actionBusy === m.migration_id || bulkBusy}
                 speed={speeds[m.migration_id]}
                 onClick={() => setSelectedId(id => id === m.migration_id ? null : m.migration_id)}
                 onAction={handleAction}
+                checked={bulkIds.has(m.migration_id)}
+                onToggleCheck={toggleBulk}
               />
             ))}
           </div>

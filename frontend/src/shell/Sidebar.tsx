@@ -5,14 +5,14 @@ import type { IconName } from "../components/ui";
 
 export type NavKey =
   | "dashboard"   // Эта миграция
-  | "history"     // История
+  | "history"     // Миграции
   | "clusters"    // Кластеры
   | "rules"       // Правила conversion
   | "settings";
 
 export const NAV_ITEMS: { key: NavKey; label: string; icon: IconName; badge?: number }[] = [
   { key: "dashboard", label: "Эта миграция", icon: "dashboard" },
-  { key: "history",   label: "История",      icon: "history", badge: 8 },
+  { key: "history",   label: "Миграции",     icon: "history" },
   { key: "clusters",  label: "Кластеры",     icon: "clusters" },
   { key: "rules",     label: "Правила conversion", icon: "rules" },
   { key: "settings",  label: "Настройки",    icon: "settings" },
