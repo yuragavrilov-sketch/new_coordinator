@@ -727,7 +727,21 @@ def get_events(conn, sm_id: str, limit: int = 100) -> list[dict]:
             msg = message or event_type
             events.append((created_at, obj, lvl or "info", msg))
 
-    events.sort(key=lambda e: e[0] or 0, reverse=True)
+    # Колонки created_at в двух исходных таблицах разного типа:
+    # migration_state_history — TIMESTAMP (naive), schema_migration_events —
+    # TIMESTAMPTZ (aware). При сортировке Python падает с
+    # "can't compare offset-naive and offset-aware datetimes". Приводим
+    # к единому формату — naive UTC — на этапе ключа сортировки.
+    from datetime import datetime
+    def _sort_key(e):
+        v = e[0]
+        if v is None:
+            return datetime.min
+        if hasattr(v, "tzinfo") and v.tzinfo is not None:
+            return v.replace(tzinfo=None)
+        return v
+
+    events.sort(key=_sort_key, reverse=True)
     out = []
     for created_at, obj, level, msg in events[:limit]:
         out.append({
