@@ -112,9 +112,10 @@ export const t = {
  * Global stylesheet — injected once via main.tsx.
  * Light palette, oklch tones, Geist typography (from the CDC·Migrator handoff).
  */
+// В контурах без интернета (или с фильтрацией fonts.gstatic.com) запрос
+// к Google Fonts падал и DevTools шумел. font-family уже содержит фолбэк
+// на 'Inter' / system-ui, поэтому удаление @import не ломает вид.
 export const themeCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
-
   :root {
     /* surfaces — warm off-white */
     --bg:         #fbfaf7;
