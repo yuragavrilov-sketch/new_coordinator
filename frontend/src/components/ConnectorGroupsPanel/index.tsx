@@ -72,11 +72,34 @@ export function ConnectorGroupsPanel() {
   const stopGroup   = (gid: string) => fetch(`/api/connector-groups/${gid}/stop`,   { method: "POST" }).then(load).catch(() => {});
   const createTopics = (gid: string) => fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" }).then(() => loadTopicCounts(gid)).catch(() => {});
 
-  const deleteGroup = (gid: string) => {
+  const deleteGroup = async (gid: string) => {
     if (!confirm("Удалить группу?")) return;
-    fetch(`/api/connector-groups/${gid}`, { method: "DELETE" })
-      .then(() => { load(); if (expanded === gid) { setExpanded(null); setDetail(null); } })
-      .catch(() => {});
+    try {
+      const r = await fetch(`/api/connector-groups/${gid}`, { method: "DELETE" });
+      if (r.ok) {
+        load();
+        if (expanded === gid) { setExpanded(null); setDetail(null); }
+        return;
+      }
+      const body = await r.json().catch(() => ({}));
+      const msg  = body?.error || `HTTP ${r.status}`;
+      // Backend отказался — обычно из-за активных миграций. Предлагаем force.
+      if (r.status === 400 && /активных миграций/i.test(msg)) {
+        if (!confirm(`${msg}.\n\nПеревести их в CANCELLED и удалить группу?`)) return;
+        const r2 = await fetch(`/api/connector-groups/${gid}?force=true`, { method: "DELETE" });
+        if (r2.ok) {
+          load();
+          if (expanded === gid) { setExpanded(null); setDetail(null); }
+          return;
+        }
+        const body2 = await r2.json().catch(() => ({}));
+        alert(body2?.error || `Не удалось удалить (HTTP ${r2.status})`);
+        return;
+      }
+      alert(msg);
+    } catch (e) {
+      alert(`Сеть: ${String(e)}`);
+    }
   };
 
   const showConfig = (gid: string, groupName: string) => {

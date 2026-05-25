@@ -116,8 +116,13 @@ def list_groups() -> list[dict]:
         conn.close()
 
 
-def delete_group(group_id: str) -> None:
-    """Delete group: cleanup Debezium connector + Kafka topics + DB records."""
+def delete_group(group_id: str, force: bool = False) -> None:
+    """Delete group: cleanup Debezium connector + Kafka topics + DB records.
+
+    Если *force=True* — все активные миграции группы предварительно
+    переводятся в CANCELLED (с записью в migration_state_history).
+    Без *force* группа с активными миграциями удалить нельзя — ValueError.
+    """
     group = get_group(group_id)
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
@@ -126,15 +131,38 @@ def delete_group(group_id: str) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT COUNT(*) FROM migrations
+                SELECT migration_id, phase FROM migrations
                 WHERE  group_id = %s
                   AND  phase NOT IN ('DRAFT', 'COMPLETED', 'CANCELLED', 'FAILED')
             """, (group_id,))
-            active = cur.fetchone()[0]
-            if active:
+            active = cur.fetchall()
+            if active and not force:
                 raise ValueError(
-                    f"Нельзя удалить группу: {active} активных миграций"
+                    f"Нельзя удалить группу: {len(active)} активных миграций"
                 )
+
+            for mid, prev_phase in active:
+                cur.execute("""
+                    UPDATE migrations
+                    SET    phase            = 'CANCELLED',
+                           state_changed_at = NOW(),
+                           updated_at       = NOW(),
+                           error_code       = COALESCE(error_code, 'GROUP_DELETED'),
+                           error_text       = COALESCE(error_text, 'Группа удалена пользователем')
+                    WHERE  migration_id = %s
+                """, (mid,))
+                cur.execute("""
+                    INSERT INTO migration_state_history
+                        (migration_id, from_phase, to_phase, message, actor_type)
+                    VALUES (%s, %s, 'CANCELLED', 'Группа удалена (force)', 'USER')
+                """, (mid, prev_phase))
+                # Освобождаем worker-heartbeat, чтобы CDC-менеджер не reclaim-ил
+                cur.execute("""
+                    UPDATE migration_cdc_state
+                    SET    worker_id = NULL, worker_heartbeat = NULL, updated_at = NOW()
+                    WHERE  migration_id = %s
+                """, (mid,))
+
             # group_tables + group_state_history deleted by ON DELETE CASCADE
             cur.execute("DELETE FROM connector_groups WHERE group_id = %s", (group_id,))
         conn.commit()

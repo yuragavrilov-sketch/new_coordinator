@@ -195,8 +195,9 @@ def create_group_wizard():
 @bp.delete("/api/connector-groups/<group_id>")
 def delete_group(group_id: str):
     from services.connector_groups import delete_group as svc_delete
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
     try:
-        svc_delete(group_id)
+        svc_delete(group_id, force=force)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return "", 204
