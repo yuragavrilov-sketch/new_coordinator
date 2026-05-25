@@ -163,6 +163,19 @@ def delete_group(group_id: str, force: bool = False) -> None:
                     WHERE  migration_id = %s
                 """, (mid,))
 
+            # FK migrations.group_id / schema_migrations.group_id у нас без
+            # ON DELETE — поэтому перед удалением группы обнуляем ссылки на
+            # неё во всех связанных записях (включая уже завершённые миграции,
+            # чтобы сохранилась история).
+            cur.execute(
+                "UPDATE migrations SET group_id = NULL WHERE group_id = %s",
+                (group_id,),
+            )
+            cur.execute(
+                "UPDATE schema_migrations SET group_id = NULL WHERE group_id = %s",
+                (group_id,),
+            )
+
             # group_tables + group_state_history deleted by ON DELETE CASCADE
             cur.execute("DELETE FROM connector_groups WHERE group_id = %s", (group_id,))
         conn.commit()
