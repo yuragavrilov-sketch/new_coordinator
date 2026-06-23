@@ -5,7 +5,7 @@ set "REMOTE_HOST1=10.200.103.100"
 set "REMOTE_HOST2=10.200.103.101"
 set "REMOTE_USER=a.gavrilov_yun"
 set "REMOTE_DIR=/tmp"
-set "REMOTE_DOCKER=docker"
+set "REMOTE_DOCKER=sudo docker"
 
 set "SSH_KEY=D:\ssh_servers\keys\a.gavrilov_yun-ed25519"
 
