@@ -90,6 +90,15 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "kafka_connect", label: "Connect"       },
 ];
 
+const CONFIG_TOKEN_KEY = "coordinator.configApiToken";
+
+function configHeaders(token: string, json = false): HeadersInit {
+  const headers: Record<string, string> = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (token.trim()) headers["X-Config-Token"] = token.trim();
+  return headers;
+}
+
 // ─── Field ───────────────────────────────────────────────────────────────────
 
 function Field({
@@ -144,13 +153,19 @@ export function SettingsModal({ onClose }: Props) {
   const [error,       setError]       = useState<string | null>(null);
   const [testing,     setTesting]     = useState(false);
   const [testResult,  setTestResult]  = useState<{ status: string; message: string } | null>(null);
+  const [configToken, setConfigToken] = useState(() => localStorage.getItem(CONFIG_TOKEN_KEY) || "");
 
   // Live service-health metrics (polled every 10s)
   const metricsApi = useApi<ServicesMetrics>("/api/services/metrics", { intervalMs: 10000 });
 
   useEffect(() => {
-    fetch("/api/config")
-      .then((r) => r.json())
+    fetch("/api/config", { headers: configHeaders(configToken) })
+      .then((r) => {
+        if (!r.ok) {
+          throw new Error(r.status === 401 ? "CONFIG_API_TOKEN required" : `HTTP ${r.status}`);
+        }
+        return r.json();
+      })
       .then((data: Record<string, Record<string, string>>) => {
         setConfigs({
           oracle_source: { ...ORACLE_DEFAULT, ...(data.oracle_source ?? {}) },
@@ -158,9 +173,10 @@ export function SettingsModal({ onClose }: Props) {
           kafka:         { ...KAFKA_DEFAULT,  ...(data.kafka         ?? {}) },
           kafka_connect: { ...CONNECT_DEFAULT,...(data.kafka_connect ?? {}) },
         });
+        setError(null);
       })
-      .catch(() => setError("Не удалось загрузить конфиги"));
-  }, []);
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }, [configToken]);
 
   async function testConnection() {
     setTesting(true);
@@ -168,7 +184,7 @@ export function SettingsModal({ onClose }: Props) {
     try {
       const r = await fetch(`/api/config/${activeTab}/test`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: configHeaders(configToken, true),
         body: JSON.stringify(configs[activeTab]),
       });
       const d = await r.json();
@@ -188,7 +204,7 @@ export function SettingsModal({ onClose }: Props) {
     try {
       const r = await fetch(`/api/config/${activeTab}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: configHeaders(configToken, true),
         body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -203,6 +219,12 @@ export function SettingsModal({ onClose }: Props) {
 
   function setOracle(key: "oracle_source" | "oracle_target", field: keyof OracleConfig, v: string) {
     setConfigs((p) => ({ ...p, [key]: { ...p[key], [field]: v } }));
+  }
+
+  function updateConfigToken(v: string) {
+    setConfigToken(v);
+    if (v.trim()) localStorage.setItem(CONFIG_TOKEN_KEY, v);
+    else localStorage.removeItem(CONFIG_TOKEN_KEY);
   }
 
   const tabBarStyle: React.CSSProperties = {
@@ -274,6 +296,14 @@ export function SettingsModal({ onClose }: Props) {
             {error}
           </div>
         )}
+
+        <Field
+          label="Config Token"
+          type="password"
+          value={configToken}
+          onChange={updateConfigToken}
+          placeholder="optional"
+        />
 
         {/* Live metrics for the current tab */}
         <ServiceMetricsPanel tab={activeTab} data={metricsApi.data}/>

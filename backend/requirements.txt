@@ -6,3 +6,5 @@ oracledb>=2.0
 kafka-python>=2.0
 requests>=2.31
 gunicorn>=21.2
+alembic>=1.14
+SQLAlchemy>=2.0

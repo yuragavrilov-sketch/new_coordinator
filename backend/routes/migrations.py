@@ -730,7 +730,7 @@ _ACTION_TRANSITIONS = {
     "pause":          (None,              "PAUSED"),
     "resume":         ("PAUSED",          "BULK_LOADING"),   # sensible default; orchestrator re-routes
     "cancel":         (None,              "CANCELLING"),
-    "lag_zero":       ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),   # called by cdc_apply_worker
+    "lag_zero":       ("CDC_CATCHING_UP", "CDC_CAUGHT_UP"),   # called by the universal worker
     "retry_verify":   ("DATA_MISMATCH",   "DATA_VERIFYING"),
     "force_complete": ("DATA_MISMATCH",   "COMPLETED"),
 }

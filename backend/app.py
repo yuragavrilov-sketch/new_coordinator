@@ -197,18 +197,6 @@ catalog_mod.init(
 )
 app.register_blueprint(catalog_bp)
 
-# ── Workers blueprint ─────────────────────────────────────────────────────────
-import routes.workers as workers_mod
-from routes.workers import bp as workers_bp
-
-workers_mod.init(
-    get_conn_fn=get_conn,
-    row_to_dict_fn=row_to_dict,
-    db_available_ref=_db_available,
-    broadcast_fn=broadcast,
-)
-app.register_blueprint(workers_bp)
-
 # ── Schema migrations (dashboard) ─────────────────────────────────────────────
 import routes.schema_migrations as schema_mig_mod
 from routes.schema_migrations import bp as schema_mig_bp

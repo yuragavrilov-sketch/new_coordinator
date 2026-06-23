@@ -5,6 +5,7 @@ import os
 import threading
 from datetime import datetime
 import decimal
+from pathlib import Path
 
 import re
 
@@ -130,7 +131,7 @@ def row_to_dict(cursor, row: tuple) -> dict:
 # Schema init
 # ---------------------------------------------------------------------------
 
-def init_db() -> None:
+def _init_schema_legacy() -> None:
     print("[state_db] running schema init / migrations...")
     conn = get_conn()
     try:
@@ -750,6 +751,37 @@ def init_db() -> None:
         print("[state_db] schema init complete")
     finally:
         conn.close()
+
+
+def init_db() -> None:
+    """Apply State DB schema migrations.
+
+    Alembic is the primary migration runner.  The initial baseline migration
+    delegates to ``_init_schema_legacy`` so existing idempotent DDL remains the
+    single source of truth while the project moves to versioned migrations.
+    Set STATE_DB_USE_ALEMBIC=false to temporarily fall back to the legacy
+    bootstrap path.
+    """
+    use_alembic = os.environ.get("STATE_DB_USE_ALEMBIC", "true").lower()
+    if use_alembic in {"0", "false", "no"}:
+        _init_schema_legacy()
+        return
+
+    try:
+        from alembic import command
+        from alembic.config import Config
+    except ImportError:
+        print("[state_db] alembic not installed; falling back to legacy schema bootstrap")
+        _init_schema_legacy()
+        return
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_dir / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", PG_DSN)
+    print("[state_db] running Alembic migrations...")
+    command.upgrade(cfg, "head")
+    print("[state_db] Alembic migrations complete")
 
 
 # ---------------------------------------------------------------------------
