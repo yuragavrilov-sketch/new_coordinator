@@ -53,3 +53,5 @@ Thumbs.db
 
 # Deploy
 deploy.bat
+m-coordinator
+m-worker
