@@ -5,6 +5,7 @@ set "REMOTE_HOST1=10.200.103.100"
 set "REMOTE_HOST2=10.200.103.101"
 set "REMOTE_USER=a.gavrilov_yun"
 set "REMOTE_DIR=/tmp"
+set "REMOTE_DOCKER=docker"
 
 set "SSH_KEY=D:\ssh_servers\keys\a.gavrilov_yun-ed25519"
 
@@ -21,6 +22,12 @@ if errorlevel 1 (
 where scp >nul 2>nul
 if errorlevel 1 (
     echo ERROR: scp is not available in PATH.
+    exit /b 1
+)
+
+where ssh >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: ssh is not available in PATH.
     exit /b 1
 )
 
@@ -42,7 +49,7 @@ if not exist ".\Dockerfile.coordinator" (
 
 echo Checks OK.
 
-echo [1/8] Building Worker image...
+echo [1/10] Building Worker image...
 docker build -f .\Dockerfile.worker -t m-worker:latest .
 if errorlevel 1 (
     echo ERROR: Worker Docker build failed.
@@ -50,7 +57,7 @@ if errorlevel 1 (
 )
 echo Build OK.
 
-echo [2/8] Building Coordinator image...
+echo [2/10] Building Coordinator image...
 docker build -f .\Dockerfile.coordinator -t m-coordinator:latest .
 if errorlevel 1 (
     echo ERROR: Coordinator Docker build failed.
@@ -58,7 +65,7 @@ if errorlevel 1 (
 )
 echo Build OK.
 
-echo [3/8] Saving image to m-coordinator...
+echo [3/10] Saving image to m-coordinator...
 docker save m-coordinator:latest -o m-coordinator
 if errorlevel 1 (
     echo ERROR: docker save for m-coordinator failed.
@@ -66,7 +73,7 @@ if errorlevel 1 (
 )
 echo Save OK.
 
-echo [4/8] Saving image to m-worker...
+echo [4/10] Saving image to m-worker...
 docker save m-worker:latest -o m-worker
 if errorlevel 1 (
     echo ERROR: docker save for m-worker failed.
@@ -74,31 +81,45 @@ if errorlevel 1 (
 )
 echo Save OK.
 
-echo [5/8] Deploying m-coordinator to %REMOTE_HOST1%...
+echo [5/10] Copying m-coordinator to %REMOTE_HOST1%...
 scp -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes m-coordinator %REMOTE_USER%@%REMOTE_HOST1%:%REMOTE_DIR%/m-coordinator
 if errorlevel 1 (
     echo ERROR: scp m-coordinator to %REMOTE_HOST1% failed.
     exit /b 1
 )
 
-echo [6/8] Deploying m-worker to %REMOTE_HOST1%...
+echo [6/10] Loading m-coordinator on %REMOTE_HOST1%...
+ssh -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes %REMOTE_USER%@%REMOTE_HOST1% "%REMOTE_DOCKER% load -i %REMOTE_DIR%/m-coordinator"
+if errorlevel 1 (
+    echo ERROR: docker load m-coordinator on %REMOTE_HOST1% failed.
+    exit /b 1
+)
+
+echo [7/10] Copying m-worker to %REMOTE_HOST1%...
 scp -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes m-worker %REMOTE_USER%@%REMOTE_HOST1%:%REMOTE_DIR%/m-worker
 if errorlevel 1 (
     echo ERROR: scp m-worker to %REMOTE_HOST1% failed.
     exit /b 1
 )
 
-echo [7/8] Deploying m-coordinator to %REMOTE_HOST2%...
-scp -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes m-coordinator %REMOTE_USER%@%REMOTE_HOST2%:%REMOTE_DIR%/m-coordinator
+echo [8/10] Loading m-worker on %REMOTE_HOST1%...
+ssh -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes %REMOTE_USER%@%REMOTE_HOST1% "%REMOTE_DOCKER% load -i %REMOTE_DIR%/m-worker"
 if errorlevel 1 (
-    echo ERROR: scp m-coordinator to %REMOTE_HOST2% failed.
+    echo ERROR: docker load m-worker on %REMOTE_HOST1% failed.
     exit /b 1
 )
 
-echo [8/8] Deploying m-worker to %REMOTE_HOST2%...
+echo [9/10] Copying m-worker to %REMOTE_HOST2%...
 scp -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes m-worker %REMOTE_USER%@%REMOTE_HOST2%:%REMOTE_DIR%/m-worker
 if errorlevel 1 (
     echo ERROR: scp m-worker to %REMOTE_HOST2% failed.
+    exit /b 1
+)
+
+echo [10/10] Loading m-worker on %REMOTE_HOST2%...
+ssh -i "%SSH_KEY%" -o BatchMode=yes -o IdentitiesOnly=yes %REMOTE_USER%@%REMOTE_HOST2% "%REMOTE_DOCKER% load -i %REMOTE_DIR%/m-worker"
+if errorlevel 1 (
+    echo ERROR: docker load m-worker on %REMOTE_HOST2% failed.
     exit /b 1
 )
 
