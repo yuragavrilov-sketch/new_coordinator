@@ -87,7 +87,6 @@ def _kafka_metrics() -> dict[str, Any]:
         admin = KafkaAdminClient(
             bootstrap_servers=servers,
             request_timeout_ms=5000,
-            api_version_auto_timeout_ms=5000,
         )
         try:
             cluster = admin.describe_cluster()
