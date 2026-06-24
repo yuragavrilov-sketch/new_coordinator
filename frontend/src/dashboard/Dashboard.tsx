@@ -28,13 +28,24 @@ const CreateMigrationModal = React.lazy(() =>
 interface Props {
   selectedId:        string | null;
   schema:            SchemaMigrationListItem | null;
+  planId:            number | null;
   onCreated:         (newId: string) => void;
+  onPlanChanged:     (planId: number) => void;
+  onOpenPlan:        () => void;
   /** When `true` and `schema` is null, render the empty state with CTA. */
   showEmptyState:    boolean;
   sseEvents:         SSEEvent[];
 }
 
-export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Props) {
+export function Dashboard({
+  selectedId,
+  schema,
+  planId,
+  onCreated,
+  onPlanChanged,
+  onOpenPlan,
+  showEmptyState,
+}: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [keyFilter,    setKeyFilter]    = useState<KeyFilter>("all");
@@ -50,7 +61,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
   const [bulkOpen,            setBulkOpen]            = useState(false);
   const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
   const [planOpen,            setPlanOpen]            = useState(false);
-  const [activePlanId,        setActivePlanId]        = useState<number | null>(schema?.planId ?? null);
+  const [activePlanId,        setActivePlanId]        = useState<number | null>(planId ?? schema?.planId ?? null);
   const [planBusy,            setPlanBusy]            = useState(false);
   const [planErr,             setPlanErr]             = useState("");
   const [toast,               setToast]               = useState<string>("");
@@ -74,8 +85,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
   const tableObjects = useMemo(() => objects.filter(o => o.type === "TABLE"), [objects]);
 
   useEffect(() => {
-    setActivePlanId(schema?.planId ?? null);
-  }, [schema?.id, schema?.planId]);
+    setActivePlanId(planId ?? schema?.planId ?? null);
+  }, [schema?.id, schema?.planId, planId]);
 
   // Filtered + sorted
   const filtered = useMemo(() => {
@@ -270,8 +281,10 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
         loading={!!activePlanId && planApi.loading}
         onStart={handleStartPlan}
         onReload={() => planApi.reload()}
+        onOpenDetails={onOpenPlan}
         busy={planBusy}
         error={planErr || planApi.error || ""}
+        variant="overview"
       />
 
       <ObjectTable
@@ -335,6 +348,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
             setPlanOpen(false);
             setSelectedIds(new Set());
             setActivePlanId(planId);
+            onPlanChanged(planId);
             setToast(`Добавлено в пачку: ${count}`);
             objectsApi.reload();
             eventsApi.reload();

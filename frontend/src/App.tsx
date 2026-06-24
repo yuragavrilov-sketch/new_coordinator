@@ -8,6 +8,7 @@ import { Sidebar, type NavKey } from "./shell/Sidebar";
 import { RightRail } from "./shell/RightRail";
 import { RulesTabs } from "./shell/RulesTabs";
 import { Dashboard } from "./dashboard/Dashboard";
+import { PlanDetailsPage } from "./dashboard/PlanDetailsPage";
 import { initialMetrics } from "./dashboard/mockData";
 import type { SchemaMigrationListItem } from "./dashboard/api";
 import type { MigrationEvent, LiveMetrics } from "./dashboard/types";
@@ -38,6 +39,7 @@ export default function App() {
   const [nav, setNav] = useState<NavKey>("dashboard");
   const [showSettings, setShowSettings] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [planOverride, setPlanOverride] = useState<{ schemaId: string; planId: number } | null>(null);
 
   // Schema migration list — auto-poll every 10s
   const listApi = useApi<SchemaMigrationListItem[]>("/api/schema-migrations", {
@@ -54,6 +56,8 @@ export default function App() {
 
   const selectedSchema: SchemaMigrationListItem | null =
     list.find(s => s.id === selectedId) || null;
+  const selectedPlanId =
+    planOverride?.schemaId === selectedId ? planOverride.planId : selectedSchema?.planId ?? null;
 
   // Events for right rail (filtered to selected schema)
   const eventsApi = useApi<MigrationEvent[]>(
@@ -106,9 +110,22 @@ export default function App() {
           <Dashboard
             selectedId={selectedId}
             schema={selectedSchema}
+            planId={selectedPlanId}
             onCreated={id => { setSelectedId(id); listApi.reload(); }}
+            onPlanChanged={planId => {
+              if (selectedId) setPlanOverride({ schemaId: selectedId, planId });
+              listApi.reload();
+            }}
+            onOpenPlan={() => setNav("plan")}
             showEmptyState={backendStatus === "ok" && !listApi.loading && list.length === 0}
             sseEvents={sseEvents}
+          />
+        )}
+        {nav === "plan" && (
+          <PlanDetailsPage
+            schema={selectedSchema}
+            planId={selectedPlanId}
+            onBack={() => setNav("dashboard")}
           />
         )}
         {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}

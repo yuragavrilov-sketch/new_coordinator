@@ -9,14 +9,25 @@ interface Props {
   loading: boolean;
   onStart: () => void;
   onReload: () => void;
+  onOpenDetails?: () => void;
   busy: boolean;
   error: string;
+  variant?: "overview" | "detail";
 }
 
 const DONE = new Set(["DONE"]);
 const BAD = new Set(["FAILED", "CANCELLED"]);
 
-export function PlanPanel({ plan, loading, onStart, onReload, busy, error }: Props) {
+export function PlanPanel({
+  plan,
+  loading,
+  onStart,
+  onReload,
+  onOpenDetails,
+  busy,
+  error,
+  variant = "detail",
+}: Props) {
   const batches = useMemo(() => {
     const map = new Map<number, MigrationPlanItem[]>();
     for (const item of plan?.items || []) {
@@ -47,9 +58,14 @@ export function PlanPanel({ plan, loading, onStart, onReload, busy, error }: Pro
   const done = plan.items.filter(i => DONE.has(i.status)).length;
   const failed = plan.items.filter(i => BAD.has(i.status)).length;
   const running = plan.items.filter(i => i.status === "RUNNING").length;
+  const pending = plan.items.filter(i => i.status === "PENDING").length;
   const progress = total ? done / total * 100 : 0;
-  const hasPending = plan.items.some(i => i.status === "PENDING");
+  const hasPending = pending > 0;
   const canStart = ["READY", "RUNNING"].includes(plan.status) && hasPending && running === 0;
+  const currentBatch = batches.find(([, items]) => items.some(i => i.status === "RUNNING"))
+    || batches.find(([, items]) => items.some(i => i.status === "PENDING"))
+    || batches[batches.length - 1];
+  const modeCounts = countModes(plan.items);
 
   return (
     <Shell>
@@ -69,6 +85,9 @@ export function PlanPanel({ plan, loading, onStart, onReload, busy, error }: Pro
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {variant === "overview" && onOpenDetails && (
+            <button onClick={onOpenDetails} style={secondaryActionStyle(false)}>Детали</button>
+          )}
           <button onClick={onReload} style={secondaryActionStyle(false)}>Обновить</button>
           <button
             onClick={onStart}
@@ -101,26 +120,164 @@ export function PlanPanel({ plan, loading, onStart, onReload, busy, error }: Pro
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {batches.map(([batch, items]) => (
-          <div key={batch} style={{
-            border: `1px solid ${t.border.subtle}`,
-            borderRadius: t.radius.md,
-            overflow: "hidden",
-            background: t.bg.s2,
-          }}>
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
+      {variant === "overview" && (
+        <PlanOverview
+          batchCount={batches.length}
+          total={total}
+          done={done}
+          running={running}
+          pending={pending}
+          failed={failed}
+          currentBatch={currentBatch}
+          modeCounts={modeCounts}
+        />
+      )}
+
+      {variant === "detail" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {batches.map(([batch, items]) => (
+            <div key={batch} style={{
+              border: `1px solid ${t.border.subtle}`,
+              borderRadius: t.radius.md,
+              overflow: "hidden",
+              background: t.bg.s2,
             }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Batch {batch}</span>
-              <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
+              }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Batch {batch}</span>
+                <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
+              </div>
+              {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
             </div>
-            {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </Shell>
+  );
+}
+
+function countModes(items: MigrationPlanItem[]) {
+  const out = new Map<string, number>();
+  for (const item of items) {
+    const mode = item.mode || item.strategy || "UNKNOWN";
+    out.set(mode, (out.get(mode) || 0) + 1);
+  }
+  return Array.from(out.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+function PlanOverview({
+  batchCount,
+  total,
+  done,
+  running,
+  pending,
+  failed,
+  currentBatch,
+  modeCounts,
+}: {
+  batchCount: number;
+  total: number;
+  done: number;
+  running: number;
+  pending: number;
+  failed: number;
+  currentBatch?: [number, MigrationPlanItem[]];
+  modeCounts: Array<[string, number]>;
+}) {
+  const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
+  const batchDone = batchItems.filter(i => DONE.has(i.status)).length;
+  const batchRunning = batchItems.filter(i => i.status === "RUNNING").length;
+  const batchFailed = batchItems.filter(i => BAD.has(i.status)).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(5, minmax(92px, 1fr))",
+        gap: 8,
+      }}>
+        <Stat label="Batch" value={batchCount}/>
+        <Stat label="Всего" value={total}/>
+        <Stat label="Done" value={done}/>
+        <Stat label="Running" value={running}/>
+        <Stat label="Failed" value={failed}/>
+      </div>
+
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) minmax(160px, 260px)",
+        gap: 10,
+      }}>
+        <div style={{
+          padding: "8px 10px",
+          border: `1px solid ${t.border.subtle}`,
+          borderRadius: t.radius.md,
+          background: t.bg.s2,
+          minWidth: 0,
+        }}>
+          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Текущий batch</div>
+          {batchNo ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>Batch {batchNo}</span>
+              <span style={{ fontSize: 12, color: t.text.muted }}>
+                {batchDone}/{batchItems.length} done · {batchRunning} running · {batchFailed} failed
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: t.text.muted }}>Нет таблиц в пачке</div>
+          )}
+        </div>
+
+        <div style={{
+          padding: "8px 10px",
+          border: `1px solid ${t.border.subtle}`,
+          borderRadius: t.radius.md,
+          background: t.bg.s2,
+          minWidth: 0,
+        }}>
+          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Режимы</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {modeCounts.length === 0 ? (
+              <span style={{ fontSize: 12, color: t.text.muted }}>n/a</span>
+            ) : modeCounts.map(([mode, count]) => (
+              <span key={mode} style={{
+                padding: "3px 7px",
+                borderRadius: t.radius.sm,
+                border: `1px solid ${t.border.subtle}`,
+                background: t.bg.s1,
+                color: t.text.secondary,
+                fontSize: 11,
+                fontFamily: t.font.mono,
+              }}>{mode}: {count}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {pending > 0 && running === 0 && failed === 0 && (
+        <div style={{ fontSize: 12, color: t.text.muted }}>
+          Готово к запуску: в очереди {pending} таблиц.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{
+      padding: "8px 10px",
+      border: `1px solid ${t.border.subtle}`,
+      borderRadius: t.radius.md,
+      background: t.bg.s2,
+    }}>
+      <div style={{ fontSize: 10.5, color: t.text.muted, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, fontFamily: t.font.mono, color: t.text.primary }}>
+        {value}
+      </div>
+    </div>
   );
 }
 

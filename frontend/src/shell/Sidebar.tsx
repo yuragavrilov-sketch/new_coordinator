@@ -5,6 +5,7 @@ import type { IconName } from "../components/ui";
 
 export type NavKey =
   | "dashboard"   // Эта миграция
+  | "plan"        // Пачка таблиц
   | "history"     // Миграции
   | "clusters"    // Кластеры
   | "rules"       // Правила conversion
@@ -12,6 +13,7 @@ export type NavKey =
 
 export const NAV_ITEMS: { key: NavKey; label: string; icon: IconName; badge?: number }[] = [
   { key: "dashboard", label: "Эта миграция", icon: "dashboard" },
+  { key: "plan",      label: "Пачка",        icon: "flow" },
   { key: "history",   label: "Миграции",     icon: "history" },
   { key: "clusters",  label: "Кластеры",     icon: "clusters" },
   { key: "rules",     label: "Правила conversion", icon: "rules" },
