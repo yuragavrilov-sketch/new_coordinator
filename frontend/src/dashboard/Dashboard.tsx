@@ -1,28 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState, Suspense } from "react";
-import { SchemaHeader } from "./SchemaHeader";
-import { KpiRow, KpiCard } from "./KpiRow";
 import { ObjectFilters, type SortKey, type StatusFilter, type KeyFilter, type SuppFilter } from "./ObjectFilters";
 import { ObjectTable } from "./ObjectTable";
 import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
 import { DashboardEmptyState } from "./EmptyState";
-import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
-import { ProblemsSummary } from "./ProblemsSummary";
 import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
 import { AddToCdcGroupModal } from "./AddToCdcGroupModal";
 import { AddToPlanModal } from "./AddToPlanModal";
-import { PlanPanel } from "./PlanPanel";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { t } from "../theme";
-import { fmtCompactNum } from "../utils/format";
 import { useApi } from "../hooks/useApi";
 import type { SSEEvent } from "../hooks/useSSE";
-import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
+import { type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
 import {
   type SchemaMigrationListItem,
-  type MigrationPlanDetail,
   createSchemaMigration,
-  startMigrationPlan,
 } from "./api";
 import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
 
@@ -39,7 +31,7 @@ interface Props {
   sseEvents:         SSEEvent[];
 }
 
-export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEvents }: Props) {
+export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [keyFilter,    setKeyFilter]    = useState<KeyFilter>("all");
@@ -55,9 +47,6 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [bulkOpen,            setBulkOpen]            = useState(false);
   const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
   const [planOpen,            setPlanOpen]            = useState(false);
-  const [activePlanId,        setActivePlanId]        = useState<number | null>(schema?.planId ?? null);
-  const [planBusy,            setPlanBusy]            = useState(false);
-  const [planErr,             setPlanErr]             = useState("");
   const [toast,               setToast]               = useState<string>("");
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
@@ -69,65 +58,14 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
     selectedId ? `/api/schema-migrations/${selectedId}/events?limit=200` : null,
     { intervalMs: 5000 },
   );
-  const planApi = useApi<MigrationPlanDetail>(
-    activePlanId ? `/api/planner/plans/${activePlanId}` : null,
-    { intervalMs: 5000 },
-  );
 
   const objects = objectsApi.data || [];
   const events  = eventsApi.data  || [];
-
-  useEffect(() => {
-    setActivePlanId(schema?.planId ?? null);
-  }, [schema?.id, schema?.planId]);
-
-  // Aggregate KPIs from current objects (or use server-side KPI from schema header)
-  const overall = useMemo(() => {
-    const done       = objects.filter(o => o.status === "done" || o.status === "skipped").length;
-    const err        = objects.reduce((a, o) => a + o.err, 0);
-    const warn       = objects.reduce((a, o) => a + o.warn, 0);
-    const rowsPerSec = objects.reduce((a, o) => a + (o.rowsPerSec || 0), 0);
-    const mbPerSec   = objects.reduce((a, o) => a + (o.mbPerSec   || 0), 0);
-    const totalRows  = objects.reduce((a, o) => a + (o.rows     || 0), 0);
-    const doneRows   = objects.reduce((a, o) => a + (o.rowsDone || 0), 0);
-    const progress   = totalRows ? (doneRows / totalRows) * 100 : 0;
-    return { done, total: objects.length, err, warn, rowsPerSec, mbPerSec, totalRows, doneRows, progress };
-  }, [objects]);
-
-  const statusCounts = useMemo(() => {
-    const c = { all: objects.length, running: 0, queued: 0, done: 0 };
-    objects.forEach(o => {
-      if (o.status === "running") c.running++;
-      else if (o.status === "queued") c.queued++;
-      else if (o.status === "done") c.done++;
-    });
-    return c;
-  }, [objects]);
-
-  // Categorize problem objects for the user's "what's broken" view
-  const problems = useMemo(() => {
-    const missing:     SchemaObject[] = [];          // нет в target
-    const diff:        SchemaObject[] = [];          // DDL отличается
-    const srcInvalid:  SchemaObject[] = [];          // INVALID в source
-    const tgtInvalid:  SchemaObject[] = [];          // INVALID в target (но valid в source)
-    const bothInvalid: SchemaObject[] = [];          // INVALID и там и там
-    for (const o of objects) {
-      const note = o.note || "";
-      const si = (o.srcStatus || "").toUpperCase() === "INVALID";
-      const ti = (o.tgtStatus || "").toUpperCase() === "INVALID";
-      if (si && ti) bothInvalid.push(o);
-      else if (si) srcInvalid.push(o);
-      else if (ti) tgtInvalid.push(o);
-      if (note.startsWith("нет в target")) missing.push(o);
-      else if (note.startsWith("DDL отличается")) diff.push(o);
-    }
-    return { missing, diff, srcInvalid, tgtInvalid, bothInvalid };
-  }, [objects]);
+  const tableObjects = useMemo(() => objects.filter(o => o.type === "TABLE"), [objects]);
 
   // Filtered + sorted
   const filtered = useMemo(() => {
-    let arr = objects;
-    if (typeFilter !== "all") arr = arr.filter(o => o.type === typeFilter);
+    let arr = tableObjects;
     if (statusFilter !== "all") {
       arr = arr.filter(o => {
         if (statusFilter === "issues") return o.err > 0 || o.warn > 0 || o.status === "error" || o.status === "warn";
@@ -171,11 +109,10 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
       if (sort === "size")     return (b.sizeMb || 0) - (a.sizeMb || 0);
       if (sort === "progress") return b.progress - a.progress;
       if (sort === "name")     return a.name.localeCompare(b.name);
-      if (sort === "type")     return OBJECT_TYPES[a.type].ord - OBJECT_TYPES[b.type].ord;
       return 0;
     });
     return arr;
-  }, [objects, typeFilter, statusFilter, keyFilter, suppFilter, search, sort]);
+  }, [tableObjects, statusFilter, keyFilter, suppFilter, search, sort]);
 
   // Reset drawer when switching schemas
   useEffect(() => { setOpenObject(null); }, [selectedId]);
@@ -257,22 +194,6 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
     [],
   );
 
-  const handleStartPlan = useCallback(async () => {
-    if (!activePlanId) return;
-    setPlanBusy(true);
-    setPlanErr("");
-    try {
-      await startMigrationPlan(activePlanId);
-      planApi.reload();
-      objectsApi.reload();
-      eventsApi.reload();
-    } catch (e) {
-      setPlanErr(String(e instanceof Error ? e.message : e));
-    } finally {
-      setPlanBusy(false);
-    }
-  }, [activePlanId, planApi, objectsApi, eventsApi]);
-
   // Empty state
   if (!schema) {
     return (
@@ -302,48 +223,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
 
   return (
     <>
-      <SchemaHeader
-        schema={schema}
-        progress={schema.kpi.progress}
-      />
-
-      <KpiRow>
-        <KpiCard
-          label="Прогресс схемы"
-          value={`${schema.kpi.progress.toFixed(1)}%`}
-          sub={`${schema.kpi.doneObjects}/${schema.kpi.totalObjects} объектов готово`}
-          tone="info"
-        />
-        <KpiCard
-          label="Объектов в работе"
-          value={statusCounts.running}
-          sub={`${statusCounts.queued} в очереди · ${statusCounts.done} готовы`}
-          tone="info"
-          mono={false}
-        />
-        <KpiCard
-          label="Скорость"
-          value={fmtCompactNum(overall.rowsPerSec)}
-          sub={`rows/s · ${overall.mbPerSec} MB/s`}
-          tone="ok"
-        />
-        <KpiCard
-          label="Совместимость"
-          value={`${(schema.schemaCompat || 100).toFixed(1)}%`}
-          sub="по PL/SQL и view"
-          tone="warn"
-        />
-        <KpiCard
-          label="Ошибки"
-          value={schema.kpi.errorObjects}
-          sub={`${overall.warn} предупреждений`}
-          tone="error"
-          mono={false}
-        />
-      </KpiRow>
-
       <ObjectFilters
-        objects={objects}
+        objects={tableObjects}
         filtered={filtered}
         typeFilter={typeFilter}     onTypeFilter={setTypeFilter}
         statusFilter={statusFilter} onStatusFilter={setStatusFilter}
@@ -351,39 +232,8 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         suppFilter={suppFilter}     onSuppFilter={setSuppFilter}
         search={search}             onSearch={setSearch}
         sort={sort}                 onSort={setSort}
+        tablesOnly
       />
-
-      <LoadSnapshotBanner
-        srcSchema={schema.src_schema || ""}
-        tgtSchema={schema.tgt_schema || ""}
-        sseEvents={sseEvents}
-        onLoaded={() => objectsApi.reload()}
-      />
-
-      <PlanPanel
-        plan={activePlanId ? (planApi.data || null) : null}
-        loading={!!activePlanId && planApi.loading}
-        onStart={handleStartPlan}
-        onReload={() => planApi.reload()}
-        busy={planBusy}
-        error={planErr || planApi.error || ""}
-      />
-
-      {selectedId && (
-        <ProblemsSummary
-          missing={problems.missing}
-          diff={problems.diff}
-          srcInvalid={problems.srcInvalid}
-          tgtInvalid={problems.tgtInvalid}
-          bothInvalid={problems.bothInvalid}
-          schemaMigrationId={selectedId}
-          srcSchema={schema.src_schema || ""}
-          tgtSchema={schema.tgt_schema || ""}
-          onOpen={handleOpen}
-          onApplied={() => { objectsApi.reload(); eventsApi.reload(); }}
-        />
-      )}
-
 
       <ObjectTable
         objects={filtered}
@@ -442,14 +292,12 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           schemaMigrationId={selectedId}
           tables={selectedTables}
           onClose={() => setPlanOpen(false)}
-          onDone={(planId, count) => {
+          onDone={(_planId, count) => {
             setPlanOpen(false);
             setSelectedIds(new Set());
-            setActivePlanId(planId);
             setToast(`Добавлено в пачку: ${count}`);
             objectsApi.reload();
             eventsApi.reload();
-            planApi.reload();
             setTimeout(() => setToast(""), 5000);
           }}
         />

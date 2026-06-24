@@ -23,6 +23,7 @@ interface Props {
   onSearch:     (v: string) => void;
   sort:         SortKey;
   onSort:       (v: SortKey) => void;
+  tablesOnly?:  boolean;
 }
 
 const SORT_LABELS: Record<SortKey, string> = {
@@ -37,6 +38,7 @@ export function ObjectFilters({
   objects, filtered, typeFilter, onTypeFilter, statusFilter, onStatusFilter,
   keyFilter, onKeyFilter, suppFilter, onSuppFilter,
   search, onSearch, sort, onSort,
+  tablesOnly = false,
 }: Props) {
   const typeCounts: Record<string, number> = {};
   objects.forEach(o => { typeCounts[o.type] = (typeCounts[o.type] || 0) + 1; });
@@ -75,7 +77,7 @@ export function ObjectFilters({
       }}>
         <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em",
                       display: "flex", alignItems: "baseline", gap: 6 }}>
-          Объекты схемы
+          {tablesOnly ? "Таблицы" : "Объекты схемы"}
           <span style={{ fontFamily: t.font.mono, fontSize: 12, color: t.text.muted, fontWeight: 500 }}>
             {filtered.length}
           </span>
@@ -93,25 +95,27 @@ export function ObjectFilters({
               { v: "done",    l: "Готово",   c: statusCounts.done },
             ]}
           />
-          <SortPicker value={sort} onChange={onSort}/>
+          <SortPicker value={sort} onChange={onSort} tablesOnly={tablesOnly}/>
         </div>
       </div>
 
-      <div style={{
-        display: "flex", flexWrap: "wrap", gap: 4,
-        marginBottom: 10, padding: "4px 0",
-      }}>
-        <TypePill active={typeFilter === "all"} label="Все типы" count={objects.length} onClick={() => onTypeFilter("all")}/>
-        {typePills.map(k => (
-          <TypePill
-            key={k}
-            active={typeFilter === k}
-            label={OBJECT_TYPES[k].label}
-            count={typeCounts[k]}
-            onClick={() => onTypeFilter(k)}
-          />
-        ))}
-      </div>
+      {!tablesOnly && (
+        <div style={{
+          display: "flex", flexWrap: "wrap", gap: 4,
+          marginBottom: 10, padding: "4px 0",
+        }}>
+          <TypePill active={typeFilter === "all"} label="Все типы" count={objects.length} onClick={() => onTypeFilter("all")}/>
+          {typePills.map(k => (
+            <TypePill
+              key={k}
+              active={typeFilter === k}
+              label={OBJECT_TYPES[k].label}
+              count={typeCounts[k]}
+              onClick={() => onTypeFilter(k)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Метки таблиц: PK/UK/NO KEY и SUPP/NO SUPP. Видны только когда есть
           табличные объекты — для DDL-объектов эти фильтры бессмысленны. */}
@@ -209,7 +213,13 @@ function Segmented<V extends string>({ value, onChange, options }: {
   );
 }
 
-function SortPicker({ value, onChange }: { value: SortKey; onChange: (v: SortKey) => void }) {
+function SortPicker({ value, onChange, tablesOnly }: {
+  value: SortKey;
+  onChange: (v: SortKey) => void;
+  tablesOnly: boolean;
+}) {
+  const keys = (Object.keys(SORT_LABELS) as SortKey[]).filter(k => !tablesOnly || k !== "type");
+  const valueForSelect = tablesOnly && value === "type" ? "name" : value;
   return (
     <div style={{
       display: "inline-flex", alignItems: "center", gap: 6,
@@ -219,11 +229,11 @@ function SortPicker({ value, onChange }: { value: SortKey; onChange: (v: SortKey
       padding: "3px 8px",
     }}>
       <span style={{ fontSize: 11, color: t.text.muted }}>Сорт.</span>
-      <select value={value} onChange={e => onChange(e.target.value as SortKey)} style={{
+      <select value={valueForSelect} onChange={e => onChange(e.target.value as SortKey)} style={{
         border: 0, outline: 0, background: "transparent",
         fontSize: 12, padding: "2px 4px", cursor: "pointer",
       }}>
-        {(Object.keys(SORT_LABELS) as SortKey[]).map(k => (
+        {keys.map(k => (
           <option key={k} value={k}>{SORT_LABELS[k]}</option>
         ))}
       </select>
