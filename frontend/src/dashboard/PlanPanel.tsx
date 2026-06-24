@@ -204,7 +204,7 @@ function PlanOverview({
         gap: 8,
       }}>
         <Stat label={groupLabel === "Batch" ? "Batch" : "Шагов"} value={batchCount}/>
-        <Stat label="Всего" value={total}/>
+        <Stat label="Таблиц" value={total}/>
         <Stat label="Done" value={done}/>
         <Stat label="Running" value={running}/>
         <Stat label="Failed" value={failed}/>
