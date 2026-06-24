@@ -34,6 +34,7 @@ import services.validator       as validator
 import services.job_queue       as job_queue
 import services.kafka_topics    as kafka_topics
 import services.connector_groups as connector_groups_svc
+import services.target_trigger_jobs as target_trigger_jobs
 import db.oracle_browser        as oracle_browser
 from services.strategy import Strategy
 
@@ -286,6 +287,63 @@ def _update_queue_positions() -> None:
                   AND  queue_position IS NOT NULL
             """)
         conn.commit()
+    finally:
+        conn.close()
+
+
+def _prepare_target_for_direct_load(mid: str, m: dict, dst_cfg: dict, message_parts: list[str]) -> None:
+    """Prepare target table for a DIRECT bulk load.
+
+    STAGE strategies do the same target preparation later in
+    BASELINE_PUBLISHING, immediately before publishing stage into target.
+    """
+    tgt_schema = m["target_schema"]
+    tgt_table = m["target_table"]
+    tgt_quoted = f'"{tgt_schema.upper()}"."{tgt_table.upper()}"'
+
+    conn = oracle_scn.open_oracle_conn(dst_cfg)
+    try:
+        with conn.cursor() as cur:
+            if m.get("truncate_target", True):
+                cur.execute(f"TRUNCATE TABLE {tgt_quoted}")
+                message_parts.append("target truncated")
+                print(f"[orchestrator] {mid}: truncated {tgt_quoted}")
+        conn.commit()
+
+        rebuilt = oracle_browser.rebuild_unusable_constraint_indexes(
+            conn, tgt_schema, tgt_table,
+        )
+        if rebuilt:
+            message_parts.append(f"constraint indexes rebuilt={len(rebuilt)}")
+            print(f"[orchestrator] {mid}: rebuilt UNUSABLE constraint indexes: {rebuilt}")
+
+        marked = oracle_browser.mark_indexes_unusable(
+            conn, tgt_schema, tgt_table, skip_pk=True,
+        )
+        if marked:
+            message_parts.append(f"indexes unusable={len(marked)}")
+            print(f"[orchestrator] {mid}: marked UNUSABLE: {marked}")
+
+        disabled_trg = oracle_browser.disable_triggers(conn, tgt_schema, tgt_table)
+        if disabled_trg:
+            message_parts.append(f"triggers disabled={len(disabled_trg)}")
+            print(f"[orchestrator] {mid}: disabled triggers: {disabled_trg}")
+
+        oracle_browser.set_table_logging(conn, tgt_schema, tgt_table, nologging=True)
+        message_parts.append("target NOLOGGING")
+        print(f"[orchestrator] {mid}: set NOLOGGING on {tgt_quoted}")
+    finally:
+        conn.close()
+
+
+def _ensure_trigger_job(mid: str, requested_by: str = "orchestrator") -> None:
+    conn = _state["get_conn"]()
+    try:
+        target_trigger_jobs.ensure_pending_job(conn, mid, requested_by=requested_by)
+    except ValueError as exc:
+        print(f"[orchestrator] {mid}: trigger job not created: {exc}")
+    except Exception as exc:
+        print(f"[orchestrator] {mid}: trigger job create warning: {exc}")
     finally:
         conn.close()
 
@@ -718,52 +776,42 @@ def trigger_indexes_enabling(migration_id: str) -> None:
     _handle_indexes_enabling(migration_id, m)
 
 
-def trigger_enable_triggers(migration_id: str) -> None:
-    """Called by the API endpoint when the user clicks 'Enable Triggers'.
-
-    Accepts migrations in CDC_CATCHING_UP, CDC_CAUGHT_UP, or STEADY_STATE —
-    i.e. only after CDC apply has started and indexes are rebuilt.
-    """
-    _ALLOWED = {"CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
-    get_conn = _state["get_conn"]
-    conn = get_conn()
+def list_trigger_jobs(migration_id: str) -> list[dict]:
+    conn = _state["get_conn"]()
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT * FROM migrations WHERE migration_id = %s",
-                (migration_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError(f"Migration {migration_id} not found")
-            m = row_to_dict(cur, row)
+        return target_trigger_jobs.list_jobs(conn, migration_id)
     finally:
         conn.close()
 
-    if m["phase"] not in _ALLOWED:
-        raise ValueError(
-            f"Migration is in phase {m['phase']}, "
-            f"expected one of {', '.join(sorted(_ALLOWED))}"
-        )
 
-    dst_cfg = _oracle_cfg(m["target_connection_id"])
-    conn = oracle_scn.open_oracle_conn(dst_cfg)
+def create_trigger_job(migration_id: str, requested_by: str | None = None) -> dict:
+    conn = _state["get_conn"]()
     try:
-        result = oracle_browser.enable_triggers(
-            conn, m["target_schema"], m["target_table"],
+        return target_trigger_jobs.ensure_pending_job(
+            conn,
+            migration_id,
+            requested_by=requested_by or "user",
         )
     finally:
         conn.close()
 
-    if result["errors"]:
-        names = [e["name"] for e in result["errors"]]
-        raise RuntimeError(
-            f"Не удалось включить триггеры: {', '.join(names)}. "
-            + str(result["errors"])
-        )
 
-    n = len(result["enabled"])
-    print(f"[orchestrator] {migration_id}: enabled {n} triggers")
+def run_trigger_job(migration_id: str, job_id: str) -> dict:
+    return target_trigger_jobs.run_job_async(
+        get_conn_fn=_state["get_conn"],
+        load_configs_fn=_state["load_configs"],
+        broadcast_fn=_state["broadcast"],
+        migration_id=migration_id,
+        job_id=job_id,
+    )
+
+
+def trigger_enable_triggers(migration_id: str) -> dict:
+    """Compatibility shortcut: create a pending job and start it."""
+    job = create_trigger_job(migration_id, requested_by="user")
+    if job["state"] == "PENDING":
+        return run_trigger_job(migration_id, job["job_id"])
+    return job
 
 
 def trigger_baseline_restart(migration_id: str) -> None:
@@ -980,6 +1028,7 @@ def _handle_new(mid: str, m: dict) -> None:
         try:
             src_cfg = _oracle_cfg(m["source_connection_id"])
             dst_cfg = _oracle_cfg(m["target_connection_id"])
+            msg_parts: list[str] = []
 
             if strategy.has_cdc:
                 try:
@@ -993,6 +1042,13 @@ def _handle_new(mid: str, m: dict) -> None:
                         )
                 except Exception as exc:
                     print(f"[orchestrator] supplemental logging check failed: {exc}")
+            else:
+                start_scn = oracle_scn.get_current_scn(src_cfg)
+                _update(mid, {
+                    "start_scn": start_scn,
+                    "scn_fixed_at": datetime.utcnow(),
+                })
+                msg_parts.append(f"source SCN fixed={start_scn}")
 
             if strategy.uses_stage:
                 ts = m.get("stage_tablespace") or ""
@@ -1002,32 +1058,22 @@ def _handle_new(mid: str, m: dict) -> None:
                     m["target_schema"], m["stage_table_name"],
                     tablespace=ts,
                 )
-                stage_msg = "Stage table создана"
+                msg_parts.append("stage table created")
             else:
-                stage_msg = "Прямая загрузка (без stage)"
+                msg_parts.append("direct load")
 
-            # ── TRUNCATE target для DIRECT-стратегий ──
-            if not strategy.uses_stage and m.get("truncate_target", True):
-                tgt_quoted = f'"{m["target_schema"].upper()}"."{m["target_table"].upper()}"'
-                ora_conn = oracle_scn.open_oracle_conn(dst_cfg)
-                try:
-                    with ora_conn.cursor() as cur:
-                        cur.execute(f"TRUNCATE TABLE {tgt_quoted}")
-                    ora_conn.commit()
-                    print(f"[orchestrator] {mid}: truncated {tgt_quoted}")
-                    stage_msg += ", target очищен"
-                finally:
-                    ora_conn.close()
+            if not strategy.uses_stage:
+                _prepare_target_for_direct_load(mid, m, dst_cfg, msg_parts)
 
             if not strategy.has_cdc:
                 _safe_transition(mid, "NEW", "CHUNKING",
-                                 message=f"{stage_msg}, без CDC → нарезка чанков")
+                                 message=", ".join(msg_parts) + ", no CDC -> chunking")
                 _unmark_in_prog(mid)
                 _create_chunks_and_transition(mid, m)
                 return
             else:
                 _safe_transition(mid, "NEW", "TOPIC_CREATING",
-                                 message=f"{stage_msg}, создание топика Kafka")
+                                 message=", ".join(msg_parts) + ", create Kafka topic")
         except Exception as exc:
             if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
                 _fail(mid, str(exc), "PREPARING_ERROR")
@@ -1081,7 +1127,10 @@ def _handle_topic_creating(mid: str, m: dict) -> None:
 
 
 def _handle_indexes_enabling(mid: str, m: dict) -> None:
-    """Enable all UNUSABLE indexes, DISABLED constraints and triggers — runs in a thread."""
+    """Enable UNUSABLE indexes and DISABLED constraints in a thread.
+
+    Triggers stay disabled until the operator starts the target-trigger job.
+    """
     if _in_prog(mid):
         return
     _mark_in_prog(mid)
@@ -1133,18 +1182,11 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                 return
 
             if not strategy.has_cdc:
-                try:
-                    oracle_browser.enable_triggers(
-                        oracle_scn.open_oracle_conn(dst_cfg),
-                        m["target_schema"], m["target_table"],
-                    )
-                except Exception as exc:
-                    print(f"[orchestrator] {mid}: enable triggers warning: {exc}")
-
                 _safe_transition(
                     mid, "INDEXES_ENABLING", "DATA_VERIFYING",
                     message=(
                         f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                        "Triggers stay disabled until the manual trigger job is run. "
                         "Без CDC — запуск сверки данных"
                     ),
                     extra_fields={"error_code": None, "error_text": None},
@@ -1263,7 +1305,7 @@ def _handle_data_verifying(mid: str, m: dict) -> None:
 
     # Verification complete — check results
     if counts_match and hash_match:
-        _safe_transition(
+        completed = _safe_transition(
             mid, "DATA_VERIFYING", "COMPLETED",
             message=(
                 f"Сверка данных пройдена. Source: {src_count}, Target: {tgt_count}. "
@@ -1271,6 +1313,8 @@ def _handle_data_verifying(mid: str, m: dict) -> None:
             ),
             extra_fields={"error_code": None, "error_text": None},
         )
+        if completed:
+            _ensure_trigger_job(mid)
     else:
         details = []
         if not counts_match:

@@ -106,8 +106,8 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
 def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     """BULK/DIRECT: read from source, write to stage or target.
 
-    If start_scn is set (legacy per-migration connector): read AS OF SCN.
-    If start_scn is NULL (group-based connector): read current data.
+    If start_scn is set: read a consistent source snapshot AS OF SCN.
+    If start_scn is NULL: read current data.
     """
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
@@ -129,7 +129,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
             cur.arraysize = BULK_BATCH_SIZE
             cur.prefetchrows = BULK_BATCH_SIZE + 1
             if start_scn:
-                # Legacy mode: consistent snapshot via flashback query
+                # Consistent snapshot via flashback query
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                     f'AS OF SCN :p_scn '

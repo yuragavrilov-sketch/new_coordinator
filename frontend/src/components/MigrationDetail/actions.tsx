@@ -139,22 +139,49 @@ export function EnableIndexesButton({ migrationId, onDone }: { migrationId: stri
 // ── EnableTriggersButton ─────────────────────────────────────────────────────
 
 export function EnableTriggersButton({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
-  const [busy, setBusy]   = useState(false);
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [done, setDone]   = useState(false);
+  type TriggerJob = {
+    job_id: string;
+    state: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+    enabled_count: number;
+    error_text: string | null;
+  };
 
-  async function handleClick() {
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<TriggerJob[]>([]);
+  const latest = jobs[0];
+
+  async function loadJobs() {
+    const r = await fetch(`/api/migrations/${migrationId}/trigger-jobs`);
+    if (r.ok) setJobs(await r.json());
+  }
+
+  useEffect(() => {
+    let alive = true;
+    async function tick() {
+      const r = await fetch(`/api/migrations/${migrationId}/trigger-jobs`);
+      if (alive && r.ok) setJobs(await r.json());
+    }
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [migrationId]);
+
+  async function createJob() {
     setBusy(true);
     setErrMsg(null);
     try {
-      const r = await fetch(`/api/migrations/${migrationId}/enable-triggers`, { method: "POST" });
+      const r = await fetch(`/api/migrations/${migrationId}/trigger-jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requested_by: "ui" }),
+      });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         setErrMsg(d.error ?? `Ошибка ${r.status}`);
-      } else {
-        setDone(true);
-        onDone();
       }
+      await loadJobs();
+      onDone();
     } catch (e) {
       setErrMsg(String(e));
     } finally {
@@ -162,15 +189,51 @@ export function EnableTriggersButton({ migrationId, onDone }: { migrationId: str
     }
   }
 
-  if (done) {
-    return <span style={{ fontSize: 11, color: t.green.base, fontWeight: 600 }}>Триггеры включены</span>;
+  async function runJob(jobId: string) {
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const r = await fetch(`/api/migrations/${migrationId}/trigger-jobs/${jobId}/run`, { method: "POST" });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setErrMsg(d.error ?? `Ошибка ${r.status}`);
+      }
+      await loadJobs();
+      onDone();
+    } catch (e) {
+      setErrMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
+
+  if (latest?.state === "DONE") {
+    return (
+      <span style={{ fontSize: 11, color: t.green.base, fontWeight: 600 }}>
+        Триггеры включены: {latest.enabled_count}
+      </span>
+    );
+  }
+
+  const label =
+    !latest || latest.state === "FAILED"
+      ? "Создать job триггеров"
+      : latest.state === "RUNNING"
+        ? "Job триггеров выполняется..."
+        : "Запустить job триггеров";
+
+  const handleClick =
+    !latest || latest.state === "FAILED"
+      ? createJob
+      : latest.state === "PENDING"
+        ? () => runJob(latest.job_id)
+        : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
       <button
         onClick={handleClick}
-        disabled={busy}
+        disabled={busy || latest?.state === "RUNNING"}
         style={{
           background: busy ? t.bg.s2 : t.green.base,
           color: busy ? t.text.muted : t.text.primary,
@@ -182,8 +245,11 @@ export function EnableTriggersButton({ migrationId, onDone }: { migrationId: str
           cursor: busy ? "not-allowed" : "pointer",
         }}
       >
-        {busy ? "Включение..." : "Включить триггеры"}
+        {busy ? "..." : label}
       </button>
+      {latest?.state === "FAILED" && latest.error_text && (
+        <span style={{ fontSize: 11, color: t.red.fg }}>{latest.error_text}</span>
+      )}
       {errMsg && (
         <span style={{ fontSize: 11, color: t.red.fg }}>{errMsg}</span>
       )}

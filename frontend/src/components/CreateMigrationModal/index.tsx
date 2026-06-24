@@ -339,6 +339,22 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
               truncateTarget={form.truncate_target}
               onTruncateChange={(b) => setF({ truncate_target: b })}
             />
+            {!hasCdc(form.strategy) && (
+              <div style={{
+                marginTop: 8,
+                padding: "9px 12px",
+                borderRadius: t.radius.md,
+                background: t.amber.bg,
+                border: `1px solid ${t.amber.dim}`,
+                color: t.amber.fg,
+                fontSize: t.size.sm,
+                lineHeight: 1.45,
+              }}>
+                Без CDC координатор зафиксирует SCN источника и прочитает все чанки как единый snapshot.
+                На target перед загрузкой будут отключены триггеры, вторичные индексы переведены в UNUSABLE,
+                а после переноса индексы пересчитаются автоматически. Триггеры включаются отдельным job после сверки.
+              </div>
+            )}
           </Section>
 
           {/* ── Config ── */}

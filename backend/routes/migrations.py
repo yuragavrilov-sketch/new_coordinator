@@ -1058,8 +1058,11 @@ def retry_failed_chunks(migration_id: str):
 
 @bp.post("/api/migrations/<migration_id>/enable-indexes")
 def enable_indexes(migration_id: str):
-    """Manually trigger INDEXES_ENABLING work (rebuild indexes, re-enable constraints
-    and triggers).  Migration must be in INDEXES_ENABLING phase."""
+    """Manually trigger INDEXES_ENABLING work.
+
+    Rebuilds indexes and re-enables constraints. Triggers are handled by a
+    separate target-trigger job after data verification.
+    """
     if not _db_ok():
         return jsonify({"error": "DB unavailable"}), 503
     fn = _state.get("enable_indexes")
@@ -1076,16 +1079,58 @@ def enable_indexes(migration_id: str):
 
 @bp.post("/api/migrations/<migration_id>/enable-triggers")
 def enable_triggers(migration_id: str):
-    """Manually re-enable DISABLED triggers on the target table.
-    Only allowed once CDC apply is running (CDC_CATCHING_UP / CDC_CAUGHT_UP / STEADY_STATE)."""
+    """Compatibility shortcut: create and start a target-trigger job."""
     if not _db_ok():
         return jsonify({"error": "DB unavailable"}), 503
     fn = _state.get("enable_triggers")
     if fn is None:
         return jsonify({"error": "enable_triggers not wired"}), 500
     try:
-        fn(migration_id)
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "job": fn(migration_id)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.get("/api/migrations/<migration_id>/trigger-jobs")
+def list_trigger_jobs(migration_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("list_trigger_jobs")
+    if fn is None:
+        return jsonify({"error": "list_trigger_jobs not wired"}), 500
+    try:
+        return jsonify(fn(migration_id))
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/api/migrations/<migration_id>/trigger-jobs")
+def create_trigger_job(migration_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("create_trigger_job")
+    if fn is None:
+        return jsonify({"error": "create_trigger_job not wired"}), 500
+    requested_by = (request.get_json(silent=True) or {}).get("requested_by")
+    try:
+        return jsonify({"ok": True, "job": fn(migration_id, requested_by)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/api/migrations/<migration_id>/trigger-jobs/<job_id>/run")
+def run_trigger_job(migration_id: str, job_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    fn = _state.get("run_trigger_job")
+    if fn is None:
+        return jsonify({"error": "run_trigger_job not wired"}), 500
+    try:
+        return jsonify({"ok": True, "job": fn(migration_id, job_id)})
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 409
     except Exception as exc:

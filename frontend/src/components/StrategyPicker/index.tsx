@@ -57,7 +57,7 @@ export function StrategyPicker({ value, onChange, truncateTarget, onTruncateChan
       <div style={{ fontSize: 12, color: t.text.muted }}>
         {cdc
           ? "Bulk-загрузка + apply из Kafka, миграция остаётся в STEADY_STATE."
-          : "Один разовый перенос данных, завершается после DATA_VERIFYING."}
+          : "Один разовый перенос данных из source snapshot по зафиксированному SCN, завершается после DATA_VERIFYING."}
       </div>
 
       <button
@@ -106,7 +106,7 @@ export function StrategyPicker({ value, onChange, truncateTarget, onTruncateChan
           <div style={{ fontSize: 12, color: t.text.muted }}>
             {stage
               ? "Через промежуточную stage-таблицу (валидация + TRUNCATE + baseline). Надёжнее."
-              : "Прямая загрузка в target. Быстрее, но без stage-валидации."}
+              : "Прямая загрузка в target. Target triggers отключаются, вторичные индексы пересчитываются после загрузки."}
           </div>
           <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
             <label style={{ fontWeight: 500, fontSize: 13, cursor: usesStage(value) ? "not-allowed" : "pointer" }}>

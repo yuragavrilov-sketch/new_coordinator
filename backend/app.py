@@ -233,6 +233,9 @@ orchestrator_mod.init(
 # initialised first so trigger_indexes_enabling can reference _state["get_conn"]).
 mig_mod._state["enable_indexes"]    = orchestrator_mod.trigger_indexes_enabling
 mig_mod._state["enable_triggers"]  = orchestrator_mod.trigger_enable_triggers
+mig_mod._state["list_trigger_jobs"] = orchestrator_mod.list_trigger_jobs
+mig_mod._state["create_trigger_job"] = orchestrator_mod.create_trigger_job
+mig_mod._state["run_trigger_job"] = orchestrator_mod.run_trigger_job
 mig_mod._state["restart_baseline"] = orchestrator_mod.trigger_baseline_restart
 
 if _db_available["value"]:

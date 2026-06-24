@@ -726,6 +726,30 @@ def _init_schema_legacy() -> None:
                     ON ddl_apply_jobs(schema_migration_id, created_at DESC)
             """)
 
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS target_trigger_jobs (
+                    job_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    migration_id   UUID NOT NULL REFERENCES migrations(migration_id) ON DELETE CASCADE,
+                    state          VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+                    enabled_count  INTEGER NOT NULL DEFAULT 0,
+                    result_json    JSONB,
+                    error_text     TEXT,
+                    requested_by   VARCHAR(128),
+                    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    started_at     TIMESTAMPTZ,
+                    completed_at   TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_target_trigger_jobs_migration
+                    ON target_trigger_jobs(migration_id, created_at DESC)
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_target_trigger_jobs_open
+                    ON target_trigger_jobs(migration_id)
+                    WHERE state IN ('PENDING', 'RUNNING')
+            """)
+
             # ── schema_migration_events ──────────────────────────────────
             # Top-level events at the schema-migration scope (not tied to one
             # child migration). Used for DDL-apply progress + future actions.

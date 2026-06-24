@@ -113,10 +113,15 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {phase === "DATA_MISMATCH" && (
             <DataMismatchButtons migrationId={migrationId} onDone={loadDetail} />
           )}
-          {(phase === "CDC_CATCHING_UP" || phase === "CDC_CAUGHT_UP" || phase === "STEADY_STATE") &&
-            detail && isCdcMode(detail) && (
+          {detail && (
+            ((!isCdcMode(detail) && phase === "COMPLETED") ||
+              (isCdcMode(detail) && (
+                phase === "CDC_CATCHING_UP" ||
+                phase === "CDC_CAUGHT_UP" ||
+                phase === "STEADY_STATE"
+              ))) && (
             <EnableTriggersButton migrationId={migrationId} onDone={loadDetail} />
-          )}
+          ))}
           <StopDeleteButtons migrationId={migrationId} phase={phase} onDone={loadDetail} onDeleted={onClose} />
           <button onClick={onClose} style={{
             background: "none", border: "none", color: t.text.disabled,
