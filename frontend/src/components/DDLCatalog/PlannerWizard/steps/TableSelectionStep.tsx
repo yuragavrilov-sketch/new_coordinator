@@ -3,11 +3,17 @@ import { S } from "../../styles";
 import { SearchSelect } from "../../../TargetPrep/SearchSelect";
 import { StrategyPicker } from "../../../StrategyPicker";
 import { TableKeyConfig } from "../TableKeyConfig";
-import type { BatchItem, ConnectorGroup, PlanDefaults, TableKeyEntry } from "../types";
+import type { BatchItem, ConnectorGroup, PlanDefaults, PlanSummary, TableKeyEntry } from "../types";
 import { t } from "../../../../theme";
+import { hasCdc } from "../../../../types/migration";
 
 interface Props {
   selected:        string[];
+  planMode:       "historical" | "cdc";
+  onPlanMode:     (mode: "historical" | "cdc") => void;
+  plans:          PlanSummary[];
+  selectedPlanId: string;
+  onSelectedPlanId: (id: string) => void;
   defaults:        PlanDefaults;
   onDefaults:      (d: PlanDefaults) => void;
   tableSettings:   Map<string, BatchItem>;
@@ -20,7 +26,7 @@ interface Props {
 }
 
 export function TableSelectionStep({
-  selected, defaults, onDefaults,
+  selected, planMode, onPlanMode, plans, selectedPlanId, onSelectedPlanId, defaults, onDefaults,
   tableSettings, onTableSetting,
   groups, selectedGroup, onSelectGroup,
   tableKeyEntries, onTableKeyEntry,
@@ -48,6 +54,71 @@ export function TableSelectionStep({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={S.card}>
+        <div style={S.cardHeader}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Тип пачки</span>
+        </div>
+        <div style={{ ...S.cardBody, gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => onPlanMode("historical")}
+              style={{
+                ...S.btnSecondary,
+                borderColor: planMode === "historical" ? t.green.base : t.border.base,
+                background: planMode === "historical" ? t.green.bg : t.bg.s2,
+                color: planMode === "historical" ? t.green.fg : t.text.secondary,
+                textAlign: "left",
+              }}
+            >
+              Исторические без CDC
+            </button>
+            <button
+              type="button"
+              onClick={() => onPlanMode("cdc")}
+              style={{
+                ...S.btnSecondary,
+                borderColor: planMode === "cdc" ? t.blue.base : t.border.base,
+                background: planMode === "cdc" ? t.bg.s3 : t.bg.s2,
+                color: planMode === "cdc" ? t.blue.fg : t.text.secondary,
+                textAlign: "left",
+              }}
+            >
+              CDC пачка
+            </button>
+          </div>
+          {planMode === "historical" && (
+            <div style={{
+              padding: "9px 12px",
+              borderRadius: t.radius.md,
+              background: t.amber.bg,
+              border: `1px solid ${t.amber.dim}`,
+              color: t.amber.fg,
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}>
+              Исторический режим не фиксирует SCN и не запускает Kafka. Таблицы должны быть неизменяемыми на source.
+              По умолчанию каждая таблица становится отдельным batch и переносится после завершения предыдущей.
+            </div>
+          )}
+          <div style={S.field}>
+            <label style={S.label}>Пачка</label>
+            <select
+              value={selectedPlanId}
+              onChange={e => onSelectedPlanId(e.target.value)}
+              style={S.select}
+            >
+              <option value="">Создать новую пачку</option>
+              {plans.map(p => (
+                <option key={p.plan_id} value={p.plan_id}>
+                  #{p.plan_id} · {p.name} · {p.status} · {p.items_done}/{p.item_count}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
       {/* Global defaults */}
       <div style={S.card}>
         <div style={S.cardHeader}>
@@ -82,6 +153,7 @@ export function TableSelectionStep({
       </div>
 
       {/* Connector group */}
+      {(planMode === "cdc" || hasCdc(defaults.strategy)) && (
       <div style={S.card}>
         <div style={S.cardHeader}>
           <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Группа коннекторов</span>
@@ -107,6 +179,7 @@ export function TableSelectionStep({
           )}
         </div>
       </div>
+      )}
 
       {/* Per-table settings */}
       <div style={S.card}>

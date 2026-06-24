@@ -8,9 +8,10 @@ interface Props {
   onBatches:   (b: Batch[]) => void;
   deps:        FKDep[];
   depsLoading: boolean;
+  planMode:    "historical" | "cdc";
 }
 
-export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
+export function OrderingStep({ batches, onBatches, deps, depsLoading, planMode }: Props) {
   const moveItem = (fromBatch: number, table: string, toBatch: number) => {
     const next = batches.map(b => ({
       ...b,
@@ -26,6 +27,11 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
   const addBatch = () => {
     const maxId = Math.max(...batches.map(b => b.id), 0);
     onBatches([...batches, { id: maxId + 1, items: [] }]);
+  };
+
+  const splitSequential = () => {
+    const items = batches.flatMap(b => b.items);
+    onBatches(items.map((item, idx) => ({ id: idx + 1, items: [item] })));
   };
 
   const moveUp = (batchId: number, table: string) => {
@@ -82,6 +88,11 @@ export function OrderingStep({ batches, onBatches, deps, depsLoading }: Props) {
       {/* Batches */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Батчи ({batches.length})</span>
+        {planMode === "historical" && (
+          <button onClick={splitSequential} style={{ ...S.btnSuccess, fontSize: 11, padding: "3px 10px" }}>
+            По одной таблице
+          </button>
+        )}
         <button onClick={addBatch} style={{ ...S.btnSecondary, fontSize: 11, padding: "3px 10px" }}>
           + Добавить батч
         </button>

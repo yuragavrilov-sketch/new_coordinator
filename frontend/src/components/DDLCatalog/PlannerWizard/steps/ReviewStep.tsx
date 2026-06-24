@@ -1,11 +1,13 @@
 import { S } from "../../styles";
-import type { Batch, PlanDefaults, TableKeyEntry } from "../types";
+import type { Batch, PlanDefaults, PlanSummary, TableKeyEntry } from "../types";
 import { t } from "../../../../theme";
 
 interface Props {
   srcSchema:       string;
   tgtSchema:       string;
   selectedGroup:   string;
+  planMode:        "historical" | "cdc";
+  selectedPlan?:   PlanSummary;
   defaults:        PlanDefaults;
   batches:         Batch[];
   executing:       boolean;
@@ -17,7 +19,7 @@ interface Props {
 }
 
 export function ReviewStep({
-  srcSchema, tgtSchema, selectedGroup,
+  srcSchema, tgtSchema, selectedGroup, planMode, selectedPlan,
   defaults, batches, executing, onExecute,
   planId, starting, onStart,
   tableKeyEntries,
@@ -45,10 +47,29 @@ export function ReviewStep({
           </div>
         </div>
         <div style={{ ...S.card, padding: 16 }}>
-          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 4 }}>Группа коннекторов</div>
-          <div style={{ fontSize: 13, color: t.blue.fg }}>{selectedGroup || "—"}</div>
+          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 4 }}>Режим</div>
+          <div style={{ fontSize: 13, color: planMode === "historical" ? t.green.fg : t.blue.fg }}>
+            {selectedPlan
+              ? `Добавление в #${selectedPlan.plan_id}`
+              : planMode === "historical" ? "Исторические без CDC" : selectedGroup || "CDC"}
+          </div>
         </div>
       </div>
+
+      {planMode === "historical" && (
+        <div style={{
+          padding: "9px 12px",
+          borderRadius: t.radius.md,
+          background: t.amber.bg,
+          border: `1px solid ${t.amber.dim}`,
+          color: t.amber.fg,
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}>
+          SCN не фиксируется. Перед DIRECT-загрузкой target будет подготовлен: truncate при включенной опции,
+          триггеры отключены, вторичные индексы пересчитаны после загрузки. Включение триггеров останется ручным job.
+        </div>
+      )}
 
       {/* Defaults */}
       <div style={S.card}>
@@ -135,7 +156,13 @@ export function ReviewStep({
               cursor: (executing || totalTables === 0) ? "not-allowed" : "pointer",
             }}
           >
-            {executing ? "Создание плана..." : "Создать план и миграции (DRAFT)"}
+            {executing
+              ? "Создание плана..."
+              : selectedPlan
+                ? "Добавить таблицы в пачку (DRAFT)"
+                : planMode === "historical"
+                  ? "Создать пачку исторических таблиц (DRAFT)"
+                  : "Создать план и миграции (DRAFT)"}
           </button>
         ) : (
           <>
@@ -151,7 +178,11 @@ export function ReviewStep({
                 cursor: starting ? "not-allowed" : "pointer",
               }}
             >
-              {starting ? "Запуск..." : "Запустить первый батч"}
+              {starting
+                ? "Запуск..."
+                : selectedPlan?.status === "RUNNING"
+                  ? "Готово"
+                  : planMode === "historical" ? "Запустить последовательную пачку" : "Запустить первый батч"}
             </button>
           </>
         )}

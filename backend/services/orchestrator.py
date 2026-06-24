@@ -13,7 +13,7 @@ in per-migration daemon threads to avoid blocking the orchestrator loop.
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 # DB helpers
 from db.state_db import (
@@ -187,6 +187,148 @@ def _transition(migration_id: str, to_phase: str,
     })
     print(f"[orchestrator] {migration_id}: {from_phase} → {to_phase}"
           + (f" ({message})" if message else ""))
+
+
+    _sync_plan_after_transition(migration_id, to_phase)
+
+
+def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
+    """Keep migration_plan_items in step with child migrations."""
+    if to_phase not in ("COMPLETED", "DATA_MISMATCH", "FAILED", "CANCELLED"):
+        return
+
+    if to_phase == "COMPLETED":
+        item_status = "DONE"
+    elif to_phase == "CANCELLED":
+        item_status = "CANCELLED"
+    else:
+        item_status = "FAILED"
+
+    started_ids: list[str] = []
+    next_batch: int | None = None
+
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE migration_plan_items
+                SET    status = %s
+                WHERE  migration_id = %s
+                  AND  status <> %s
+                RETURNING plan_id, batch_order
+            """, (item_status, migration_id, item_status))
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return
+
+            plan_id, batch_order = row
+
+            if item_status != "DONE":
+                cur.execute("""
+                    UPDATE migration_plans
+                    SET    status = %s
+                    WHERE  plan_id = %s
+                """, (item_status, plan_id))
+                conn.commit()
+                return
+
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+                  AND  batch_order = %s
+                  AND  status <> 'DONE'
+            """, (plan_id, batch_order))
+            if (cur.fetchone()[0] or 0) > 0:
+                conn.commit()
+                return
+
+            cur.execute("""
+                SELECT batch_order
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+                  AND  status = 'PENDING'
+                GROUP  BY batch_order
+                ORDER  BY batch_order
+                LIMIT  1
+            """, (plan_id,))
+            pending = cur.fetchone()
+            if not pending:
+                cur.execute("""
+                    UPDATE migration_plans
+                    SET    status = 'DONE'
+                    WHERE  plan_id = %s
+                """, (plan_id,))
+                conn.commit()
+                return
+
+            next_batch = pending[0]
+            cur.execute("""
+                SELECT item_id, migration_id
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+                  AND  batch_order = %s
+                  AND  status = 'PENDING'
+                ORDER  BY sort_order, item_id
+            """, (plan_id, next_batch))
+            items = cur.fetchall()
+
+            now = datetime.now(timezone.utc).isoformat()
+            for item_id, next_mid in items:
+                next_mid = str(next_mid)
+                cur.execute("""
+                    UPDATE migrations
+                    SET    phase = 'NEW',
+                           state_changed_at = %s,
+                           updated_at = %s
+                    WHERE  migration_id = %s
+                      AND  phase = 'DRAFT'
+                """, (now, now, next_mid))
+                if cur.rowcount <= 0:
+                    continue
+
+                cur.execute("""
+                    INSERT INTO migration_state_history
+                        (migration_id, from_phase, to_phase, message, actor_type)
+                    VALUES (%s, 'DRAFT', 'NEW', %s, 'SYSTEM')
+                """, (next_mid, f"Auto-started by planner (batch {next_batch})"))
+
+                cur.execute("""
+                    UPDATE migration_plan_items
+                    SET    status = 'RUNNING'
+                    WHERE  item_id = %s
+                      AND  status = 'PENDING'
+                """, (item_id,))
+                started_ids.append(next_mid)
+
+            cur.execute("""
+                UPDATE migration_plans
+                SET    status = 'RUNNING',
+                       started_at = COALESCE(started_at, %s)
+                WHERE  plan_id = %s
+            """, (now, plan_id))
+
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        print(f"[orchestrator] {migration_id}: plan sync failed: {exc}")
+        return
+    finally:
+        conn.close()
+
+    for mid in started_ids:
+        _state["broadcast"]({
+            "type": "migration_phase",
+            "migration_id": mid,
+            "phase": "NEW",
+            "ts": datetime.utcnow().isoformat() + "Z",
+        })
+    if started_ids:
+        print(
+            f"[orchestrator] plan batch {next_batch} auto-started: "
+            f"{', '.join(started_ids)}"
+        )
 
 
 def _fail(migration_id: str, error_text: str, error_code: str = "ORCHESTRATOR_ERROR") -> None:
@@ -1042,13 +1184,6 @@ def _handle_new(mid: str, m: dict) -> None:
                         )
                 except Exception as exc:
                     print(f"[orchestrator] supplemental logging check failed: {exc}")
-            else:
-                start_scn = oracle_scn.get_current_scn(src_cfg)
-                _update(mid, {
-                    "start_scn": start_scn,
-                    "scn_fixed_at": datetime.utcnow(),
-                })
-                msg_parts.append(f"source SCN fixed={start_scn}")
 
             if strategy.uses_stage:
                 ts = m.get("stage_tablespace") or ""

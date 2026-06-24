@@ -232,6 +232,145 @@ def delete_plan(plan_id):
         conn.close()
 
 
+@bp.post("/api/planner/plans/<int:plan_id>/items")
+def add_plan_items(plan_id):
+    """Append migrations to an existing plan as pending batches."""
+    data = request.json or {}
+    batches = data.get("batches", [])
+    defaults = data.get("defaults", {})
+    connector_group_id = data.get("connector_group_id")
+
+    if not batches:
+        return jsonify({"error": "batches required"}), 400
+
+    conn = _state["get_conn"]()
+    now = datetime.now(timezone.utc).isoformat()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM migration_plans WHERE plan_id = %s", (plan_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Plan not found"}), 404
+            plan = _state["row_to_dict"](cur, row)
+
+            src_schema = (data.get("src_schema") or plan.get("src_schema") or "").strip().upper()
+            tgt_schema = (data.get("tgt_schema") or plan.get("tgt_schema") or "").strip().upper()
+            group_id = connector_group_id or plan.get("connector_group_id")
+            if not src_schema or not tgt_schema:
+                return jsonify({"error": "src_schema and tgt_schema required"}), 400
+
+            cur.execute("""
+                SELECT COALESCE(MAX(batch_order), 0)
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+            """, (plan_id,))
+            batch_offset = cur.fetchone()[0] or 0
+
+            items_created = []
+            for batch in batches:
+                batch_order = batch_offset + int(batch.get("order", 1))
+                for idx, tbl_cfg in enumerate(batch.get("tables", [])):
+                    table_name = tbl_cfg.get("table", "").strip().upper()
+                    if not table_name:
+                        continue
+                    mode = tbl_cfg.get("mode", defaults.get("mode", "CDC"))
+                    overrides = tbl_cfg.get("overrides", {})
+
+                    chunk_size = overrides.get("chunk_size", defaults.get("chunk_size", 1_000_000))
+                    max_workers = overrides.get("max_parallel_workers", defaults.get("max_parallel_workers", 1))
+                    raw_strategy = overrides.get("strategy") or defaults.get("strategy") or "CDC_STAGE"
+                    try:
+                        strategy = Strategy.parse(raw_strategy)
+                    except ValueError as exc:
+                        return jsonify({"error": f"Invalid strategy for {table_name}: {exc}"}), 400
+                    raw_truncate = overrides.get("truncate_target")
+                    if raw_truncate is None:
+                        raw_truncate = defaults.get("truncate_target", True)
+                    truncate_target = bool(raw_truncate)
+                    if strategy.uses_stage and truncate_target is False:
+                        return jsonify({
+                            "error": f"Invalid truncate_target for {table_name}: "
+                                     "STAGE-стратегия требует TRUNCATE target."
+                        }), 400
+                    baseline_pd = overrides.get("baseline_parallel_degree", defaults.get("baseline_parallel_degree", 4))
+
+                    mid = str(uuid.uuid4())
+                    cur.execute("""
+                        INSERT INTO migrations (
+                            migration_id, migration_name, phase, state_changed_at,
+                            source_connection_id, target_connection_id,
+                            source_schema, source_table,
+                            target_schema, target_table,
+                            chunk_size, max_parallel_workers,
+                            baseline_parallel_degree,
+                            strategy,
+                            truncate_target,
+                            group_id,
+                            created_at, updated_at
+                        ) VALUES (
+                            %s, %s, 'DRAFT', %s,
+                            'oracle_source', 'oracle_target',
+                            %s, %s,
+                            %s, %s,
+                            %s, %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s, %s
+                        )
+                    """, (
+                        mid, f"{src_schema}.{table_name}", now,
+                        src_schema, table_name,
+                        tgt_schema, table_name,
+                        chunk_size, max(1, int(max_workers)),
+                        max(1, int(baseline_pd)),
+                        strategy.value,
+                        truncate_target,
+                        group_id if strategy.has_cdc else None,
+                        now, now,
+                    ))
+
+                    cur.execute("""
+                        INSERT INTO migration_state_history
+                            (migration_id, from_phase, to_phase, message, actor_type)
+                        VALUES (%s, NULL, 'DRAFT', %s, 'USER')
+                    """, (mid, f"Added to planner plan {plan_id}"))
+
+                    cur.execute("""
+                        INSERT INTO migration_plan_items
+                            (plan_id, table_name, mode, batch_order, sort_order,
+                             overrides_json, migration_id, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING')
+                    """, (plan_id, table_name, mode, batch_order, idx,
+                          json.dumps(overrides), mid))
+
+                    items_created.append({
+                        "table": table_name,
+                        "migration_id": mid,
+                        "batch_order": batch_order,
+                        "mode": mode,
+                    })
+
+            cur.execute("""
+                UPDATE migration_plans
+                SET    status = CASE
+                           WHEN status IN ('DONE', 'FAILED', 'CANCELLED') THEN 'READY'
+                           ELSE status
+                       END
+                WHERE  plan_id = %s
+            """, (plan_id,))
+
+        conn.commit()
+        return jsonify({"plan_id": plan_id, "items": items_created})
+    except Exception as exc:
+        conn.rollback()
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
 # ── Execute plan (create migrations) ─────────────────────────────────────────
 
 @bp.post("/api/planner/execute")

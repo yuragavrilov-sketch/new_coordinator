@@ -57,7 +57,7 @@ export function StrategyPicker({ value, onChange, truncateTarget, onTruncateChan
       <div style={{ fontSize: 12, color: t.text.muted }}>
         {cdc
           ? "Bulk-загрузка + apply из Kafka, миграция остаётся в STEADY_STATE."
-          : "Один разовый перенос данных из source snapshot по зафиксированному SCN, завершается после DATA_VERIFYING."}
+          : "Один разовый перенос для исторических/неизменяемых таблиц, завершается после DATA_VERIFYING. SCN не фиксируется."}
       </div>
 
       <button

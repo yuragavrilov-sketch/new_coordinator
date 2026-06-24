@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { S } from "../styles";
 import type {
   Batch, BatchItem, ConnectorGroup, FKDep,
-  PlanDefaults, TableInfo, TableKeyEntry,
+  PlanDefaults, PlanSummary, TableInfo, TableKeyEntry,
 } from "./types";
-import type { Strategy } from "../../../types/migration";
+import { hasCdc, type Strategy } from "../../../types/migration";
 import { topoSort } from "./topoSort";
 import { StepIndicator } from "./StepIndicator";
 import { TableSelectionStep } from "./steps/TableSelectionStep";
@@ -21,22 +21,25 @@ interface Props {
 
 export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }: Props) {
   const [step, setStep] = useState(0);
+  const [planMode, setPlanModeState] = useState<"historical" | "cdc">("historical");
 
   // Step 0 state
   const [defaults, setDefaults] = useState<PlanDefaults>({
-    chunk_size: 50000, workers: 4, strategy: "CDC_STAGE" as Strategy, truncate_target: true,
+    chunk_size: 50000, workers: 1, strategy: "BULK_DIRECT" as Strategy, truncate_target: true,
   });
   const [tableSettings, setTableSettings] = useState<Map<string, BatchItem>>(() => {
     const map = new Map<string, BatchItem>();
     for (const table of selectedTables) {
       map.set(table, {
-        table, strategy: "CDC_STAGE" as Strategy, truncate_target: true, chunk_size: 50000, workers: 4,
+        table, strategy: "BULK_DIRECT" as Strategy, truncate_target: true, chunk_size: 50000, workers: 1,
       });
     }
     return map;
   });
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
+  const [plans,         setPlans]         = useState<PlanSummary[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState("");
 
   const [tableKeyEntries, setTableKeyEntries] = useState<Map<string, TableKeyEntry>>(() => {
     const map = new Map<string, TableKeyEntry>();
@@ -72,6 +75,15 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       .then((data: ConnectorGroup[]) => setGroups(data))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch("/api/planner/plans")
+      .then(r => r.ok ? r.json() : [])
+      .then((data: PlanSummary[]) => setPlans(data))
+      .catch(() => {});
+  }, []);
+
+  const selectedPlan = plans.find(p => String(p.plan_id) === selectedPlanId);
 
   // Load table info for all selected tables
   useEffect(() => {
@@ -131,6 +143,29 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
     });
   };
 
+  const setPlanMode = (mode: "historical" | "cdc") => {
+    setPlanModeState(mode);
+    const nextDefaults: PlanDefaults = mode === "historical"
+      ? { ...defaults, strategy: "BULK_DIRECT", workers: 1, truncate_target: true }
+      : { ...defaults, strategy: "CDC_STAGE", workers: Math.max(defaults.workers, 4), truncate_target: true };
+    setDefaults(nextDefaults);
+    if (mode === "historical") setSelectedGroup("");
+    setTableSettings(prev => {
+      const next = new Map(prev);
+      for (const table of selectedTables) {
+        const cur = next.get(table);
+        next.set(table, {
+          table,
+          strategy: nextDefaults.strategy,
+          truncate_target: nextDefaults.truncate_target,
+          chunk_size: cur?.chunk_size ?? nextDefaults.chunk_size,
+          workers: nextDefaults.workers,
+        });
+      }
+      return next;
+    });
+  };
+
   // Step 0 → 1: load FK deps and build initial batches
   const initOrdering = useCallback(() => {
     if (selectedTables.length === 0) return;
@@ -148,7 +183,9 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
             chunk_size: defaults.chunk_size, workers: defaults.workers,
           };
         });
-        setBatches([{ id: 1, items }]);
+        setBatches(planMode === "historical"
+          ? items.map((item, idx) => ({ id: idx + 1, items: [item] }))
+          : [{ id: 1, items }]);
       })
       .catch(() => {
         setDeps([]);
@@ -159,19 +196,23 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
             chunk_size: defaults.chunk_size, workers: defaults.workers,
           };
         });
-        setBatches([{ id: 1, items }]);
+        setBatches(planMode === "historical"
+          ? items.map((item, idx) => ({ id: idx + 1, items: [item] }))
+          : [{ id: 1, items }]);
       })
       .finally(() => setDepsLoading(false));
-  }, [selectedTables, srcSchema, tableSettings, defaults]);
+  }, [selectedTables, srcSchema, tableSettings, defaults, planMode]);
 
   // Execute plan
   const doExecute = useCallback(() => {
     setExecuting(true); setExecuteError(null);
     const group = groups.find(g => g.group_name === selectedGroup);
+    const hasCdcTables = batches.some(b => b.items.some(it => hasCdc(it.strategy)));
     const payload = {
+      name:         `${planMode === "historical" ? "Historical bulk pack" : "CDC pack"} ${srcSchema}->${tgtSchema}`,
       src_schema: srcSchema,
       tgt_schema: tgtSchema,
-      group_id:   group?.id ?? null,
+      connector_group_id: hasCdcTables ? (group?.group_id ?? group?.id ?? null) : null,
       defaults: {
         chunk_size:           defaults.chunk_size,
         max_parallel_workers: defaults.workers,
@@ -179,35 +220,41 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         truncate_target:      defaults.truncate_target,
       },
       batches: batches.map(b => ({
-        batch_order: b.id,
+        order: b.id,
         tables: b.items.map(it => {
-          const keyEntry = tableKeyEntries.get(it.table);
           return {
-            source_table:          it.table,
-            target_table:          it.table,
-            strategy:              it.strategy,
-            truncate_target:       it.truncate_target,
-            chunk_size:            it.chunk_size,
-            max_parallel_workers:  it.workers,
-            effective_key_type:    keyEntry?.effective_key_type ?? "",
-            effective_key_columns: keyEntry?.effective_key_columns ?? [],
+            table: it.table,
+            mode: hasCdc(it.strategy) ? "CDC" : "BULK",
+            overrides: {
+              strategy:             it.strategy,
+              truncate_target:      it.truncate_target,
+              chunk_size:           it.chunk_size,
+              max_parallel_workers: it.workers,
+            },
           };
         }),
       })),
     };
-    fetch("/api/planner/execute", {
+    const endpoint = selectedPlanId
+      ? `/api/planner/plans/${selectedPlanId}/items`
+      : "/api/planner/execute";
+    fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
       .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || "Ошибка")))
-      .then((data: { plan_id: string }) => setPlanId(data.plan_id))
+      .then((data: { plan_id: string | number }) => setPlanId(String(data.plan_id ?? selectedPlanId)))
       .catch(e => setExecuteError(typeof e === "string" ? e : String(e)))
       .finally(() => setExecuting(false));
-  }, [srcSchema, tgtSchema, selectedGroup, groups, defaults, batches, tableKeyEntries]);
+  }, [planMode, srcSchema, tgtSchema, selectedGroup, groups, defaults, batches, selectedPlanId]);
 
   // Start first batch
   const doStart = useCallback(() => {
+    if (selectedPlanId && selectedPlan?.status === "RUNNING") {
+      onClose();
+      return;
+    }
     if (!planId) return;
     setStarting(true); setStartError(null);
     fetch(`/api/planner/plans/${planId}/start`, { method: "POST" })
@@ -215,7 +262,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
       .then(() => { onClose(); })
       .catch(e => setStartError(typeof e === "string" ? e : String(e)))
       .finally(() => setStarting(false));
-  }, [planId, onClose]);
+  }, [planId, selectedPlanId, selectedPlan, onClose]);
 
   const canNext = (): boolean => {
     if (step === 0) return true;
@@ -284,6 +331,11 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
         {step === 0 && (
           <TableSelectionStep
             selected={selectedTables}
+            planMode={planMode}
+            onPlanMode={setPlanMode}
+            plans={plans}
+            selectedPlanId={selectedPlanId}
+            onSelectedPlanId={setSelectedPlanId}
             defaults={defaults} onDefaults={setDefaults}
             tableSettings={tableSettings} onTableSetting={updateTableSetting}
             groups={groups} selectedGroup={selectedGroup}
@@ -297,6 +349,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
           <OrderingStep
             batches={batches} onBatches={setBatches}
             deps={deps} depsLoading={depsLoading}
+            planMode={planMode}
           />
         )}
 
@@ -304,6 +357,8 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
           <ReviewStep
             srcSchema={srcSchema} tgtSchema={tgtSchema}
             selectedGroup={selectedGroup}
+            planMode={planMode}
+            selectedPlan={selectedPlan}
             defaults={defaults} batches={batches}
             executing={executing} onExecute={doExecute}
             planId={planId} starting={starting} onStart={doStart}

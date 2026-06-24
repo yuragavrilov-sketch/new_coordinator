@@ -106,8 +106,8 @@ def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
 def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
     """BULK/DIRECT: read from source, write to stage or target.
 
-    If start_scn is set: read a consistent source snapshot AS OF SCN.
-    If start_scn is NULL: read current data.
+    Historical no-CDC migrations normally leave start_scn NULL and read current data.
+    If start_scn is explicitly set, use a flashback query AS OF SCN.
     """
     chunk_id    = chunk["chunk_id"]
     src_schema  = chunk["source_schema"]
@@ -137,7 +137,7 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                     {"p_scn": start_scn, "p_start": rowid_start, "p_end": rowid_end},
                 )
             else:
-                # Group mode: read current data (no flashback, CDC handles consistency)
+                # Read current data without flashback.
                 cur.execute(
                     f'SELECT * FROM "{src_schema.upper()}"."{src_table.upper()}" '
                     f'WHERE ROWID BETWEEN CHARTOROWID(:p_start) AND CHARTOROWID(:p_end)',

@@ -43,8 +43,17 @@ export interface FKDep {
 }
 
 export interface ConnectorGroup {
+  group_id:       string;
   id:             string;
   group_name:     string;
   connector_name: string;
   status:         string;
+}
+
+export interface PlanSummary {
+  plan_id:    number;
+  name:       string;
+  status:     string;
+  item_count: number;
+  items_done: number;
 }

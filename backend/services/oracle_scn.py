@@ -24,33 +24,6 @@ def open_oracle_conn(cfg: dict):
     )
 
 
-def get_current_scn(cfg: dict) -> int:
-    """Return a source database SCN suitable for flashback reads.
-
-    ``DBMS_FLASHBACK.GET_SYSTEM_CHANGE_NUMBER`` is tried first because it is
-    commonly available without direct access to ``V$DATABASE``.  The view is
-    kept as a fallback for installations where the package is restricted.
-    """
-    conn = open_oracle_conn(cfg)
-    try:
-        with conn.cursor() as cur:
-            try:
-                cur.execute("SELECT DBMS_FLASHBACK.GET_SYSTEM_CHANGE_NUMBER FROM dual")
-                row = cur.fetchone()
-                if row and row[0] is not None:
-                    return int(row[0])
-            except Exception:
-                pass
-
-            cur.execute("SELECT current_scn FROM v$database")
-            row = cur.fetchone()
-            if not row or row[0] is None:
-                raise RuntimeError("Oracle did not return current SCN")
-            return int(row[0])
-    finally:
-        conn.close()
-
-
 def check_supplemental_logging(cfg: dict, schema: str, table: str) -> bool:
     """
     Return True if the table has at least ALL COLUMNS supplemental logging enabled.
