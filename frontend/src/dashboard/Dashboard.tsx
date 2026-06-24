@@ -7,6 +7,7 @@ import { DashboardEmptyState } from "./EmptyState";
 import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
 import { AddToCdcGroupModal } from "./AddToCdcGroupModal";
 import { AddToPlanModal } from "./AddToPlanModal";
+import { PlanPanel } from "./PlanPanel";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { t } from "../theme";
 import { useApi } from "../hooks/useApi";
@@ -14,7 +15,9 @@ import type { SSEEvent } from "../hooks/useSSE";
 import { type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
 import {
   type SchemaMigrationListItem,
+  type MigrationPlanDetail,
   createSchemaMigration,
+  startMigrationPlan,
 } from "./api";
 import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
 
@@ -47,6 +50,9 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
   const [bulkOpen,            setBulkOpen]            = useState(false);
   const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
   const [planOpen,            setPlanOpen]            = useState(false);
+  const [activePlanId,        setActivePlanId]        = useState<number | null>(schema?.planId ?? null);
+  const [planBusy,            setPlanBusy]            = useState(false);
+  const [planErr,             setPlanErr]             = useState("");
   const [toast,               setToast]               = useState<string>("");
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
@@ -58,10 +64,18 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
     selectedId ? `/api/schema-migrations/${selectedId}/events?limit=200` : null,
     { intervalMs: 5000 },
   );
+  const planApi = useApi<MigrationPlanDetail>(
+    activePlanId ? `/api/planner/plans/${activePlanId}` : null,
+    { intervalMs: 5000 },
+  );
 
   const objects = objectsApi.data || [];
   const events  = eventsApi.data  || [];
   const tableObjects = useMemo(() => objects.filter(o => o.type === "TABLE"), [objects]);
+
+  useEffect(() => {
+    setActivePlanId(schema?.planId ?? null);
+  }, [schema?.id, schema?.planId]);
 
   // Filtered + sorted
   const filtered = useMemo(() => {
@@ -194,6 +208,22 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
     [],
   );
 
+  const handleStartPlan = useCallback(async () => {
+    if (!activePlanId) return;
+    setPlanBusy(true);
+    setPlanErr("");
+    try {
+      await startMigrationPlan(activePlanId);
+      planApi.reload();
+      objectsApi.reload();
+      eventsApi.reload();
+    } catch (e) {
+      setPlanErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setPlanBusy(false);
+    }
+  }, [activePlanId, planApi, objectsApi, eventsApi]);
+
   // Empty state
   if (!schema) {
     return (
@@ -233,6 +263,15 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
         search={search}             onSearch={setSearch}
         sort={sort}                 onSort={setSort}
         tablesOnly
+      />
+
+      <PlanPanel
+        plan={activePlanId ? (planApi.data || null) : null}
+        loading={!!activePlanId && planApi.loading}
+        onStart={handleStartPlan}
+        onReload={() => planApi.reload()}
+        busy={planBusy}
+        error={planErr || planApi.error || ""}
       />
 
       <ObjectTable
@@ -292,12 +331,14 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState }: Pro
           schemaMigrationId={selectedId}
           tables={selectedTables}
           onClose={() => setPlanOpen(false)}
-          onDone={(_planId, count) => {
+          onDone={(planId, count) => {
             setPlanOpen(false);
             setSelectedIds(new Set());
+            setActivePlanId(planId);
             setToast(`Добавлено в пачку: ${count}`);
             objectsApi.reload();
             eventsApi.reload();
+            planApi.reload();
             setTimeout(() => setToast(""), 5000);
           }}
         />

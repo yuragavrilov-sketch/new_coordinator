@@ -4,6 +4,7 @@ import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { addSchemaPlanItems, type AddPlanItemsPayload } from "./api";
+import type { ConnectorGroup } from "../types/migration";
 
 interface BulkTable {
   source_schema: string;
@@ -20,33 +21,70 @@ interface Props {
 }
 
 export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: Props) {
-  const [strategy, setStrategy] = useState<"BULK_DIRECT" | "BULK_STAGE">("BULK_DIRECT");
+  const [mode, setMode] = useState<"historical" | "cdc">("historical");
+  const [strategy, setStrategy] = useState<AddPlanItemsPayload["strategy"]>("BULK_DIRECT");
+  const [connectorGroupId, setConnectorGroupId] = useState("");
   const [sequential, setSequential] = useState(true);
   const [truncateTarget, setTruncateTarget] = useState(true);
   const [chunkSize, setChunkSize] = useState(1_000_000);
   const [workers, setWorkers] = useState(1);
   const [baselinePd, setBaselinePd] = useState(4);
   const [stageTablespace, setStageTablespace] = useState("PAYSTAGE");
+  const [groups, setGroups] = useState<ConnectorGroup[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const usesStage = strategy === "BULK_STAGE";
+  const usesStage = strategy.endsWith("_STAGE");
+  const runningGroups = groups.filter(g => g.status === "RUNNING");
+
+  useEffect(() => {
+    fetch("/api/connector-groups")
+      .then(r => r.ok ? r.json() : [])
+      .then((data: ConnectorGroup[]) => setGroups(data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "cdc") return;
+    if (!connectorGroupId && runningGroups.length > 0) {
+      setConnectorGroupId(runningGroups[0].group_id);
+    }
+  }, [mode, connectorGroupId, runningGroups]);
 
   useEffect(() => {
     if (usesStage && !truncateTarget) setTruncateTarget(true);
   }, [usesStage, truncateTarget]);
+
+  function setPackMode(next: "historical" | "cdc") {
+    setMode(next);
+    setErr("");
+    if (next === "historical") {
+      setStrategy("BULK_DIRECT");
+      setWorkers(1);
+      setConnectorGroupId("");
+    } else {
+      setStrategy("CDC_DIRECT");
+      setWorkers(4);
+    }
+  }
 
   async function submit() {
     if (busy) return;
     setBusy(true);
     setErr("");
     try {
+      if (mode === "cdc" && !connectorGroupId) {
+        setErr("Для CDC-пачки выберите RUNNING группу коннекторов.");
+        setBusy(false);
+        return;
+      }
       const payload: AddPlanItemsPayload = {
         tables: tables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
         })),
         strategy,
+        connector_group_id: mode === "cdc" ? connectorGroupId : undefined,
         sequential,
         truncate_target: truncateTarget,
         chunk_size: chunkSize,
@@ -68,7 +106,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
       <div style={{ ...S.modal, maxWidth: 640 }}>
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: t.text.primary }}>
-            Добавить в пачку исторических таблиц
+            Добавить в пачку таблиц
           </span>
           <span style={{ fontSize: 12, color: t.text.muted, fontFamily: t.font.mono }}>
             {tables.length} таблиц
@@ -92,24 +130,80 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
           )}
 
           <Section title="Режим">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setPackMode("historical")}
+                style={{
+                  ...secondaryActionStyle(false),
+                  justifyContent: "center",
+                  borderColor: mode === "historical" ? t.green.base : t.border.subtle,
+                  background: mode === "historical" ? t.green.bg : t.bg.s2,
+                  color: mode === "historical" ? t.green.fg : t.text.primary,
+                }}
+              >
+                Исторические без CDC
+              </button>
+              <button
+                type="button"
+                onClick={() => setPackMode("cdc")}
+                style={{
+                  ...secondaryActionStyle(false),
+                  justifyContent: "center",
+                  borderColor: mode === "cdc" ? t.blue.base : t.border.subtle,
+                  background: mode === "cdc" ? t.blue.bg : t.bg.s2,
+                  color: mode === "cdc" ? t.blue.fg : t.text.primary,
+                }}
+              >
+                CDC пачка
+              </button>
+            </div>
             <div style={{
               padding: "9px 12px",
               borderRadius: t.radius.md,
-              background: t.amber.bg,
-              border: `1px solid ${t.amber.dim}`,
-              color: t.amber.fg,
+              background: mode === "cdc" ? t.blue.bg : t.amber.bg,
+              border: `1px solid ${mode === "cdc" ? t.blue.dim : t.amber.dim}`,
+              color: mode === "cdc" ? t.blue.fg : t.amber.fg,
               fontSize: 12,
               lineHeight: 1.45,
             }}>
-              SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source.
-              Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса.
+              {mode === "cdc"
+                ? "CDC-пачка создаёт DRAFT-миграции с выбранной connector group. После старта batch coordinator запустит bulk и CDC apply по обычному CDC flow."
+                : "SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source. Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса."}
             </div>
             <Field label="Стратегия">
-              <select value={strategy} onChange={e => setStrategy(e.target.value as "BULK_DIRECT" | "BULK_STAGE")} style={S.select}>
-                <option value="BULK_DIRECT">BULK_DIRECT</option>
-                <option value="BULK_STAGE">BULK_STAGE</option>
+              <select value={strategy} onChange={e => setStrategy(e.target.value as AddPlanItemsPayload["strategy"])} style={S.select}>
+                {mode === "historical" ? (
+                  <>
+                    <option value="BULK_DIRECT">BULK_DIRECT</option>
+                    <option value="BULK_STAGE">BULK_STAGE</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="CDC_DIRECT">CDC_DIRECT</option>
+                    <option value="CDC_STAGE">CDC_STAGE</option>
+                  </>
+                )}
               </select>
             </Field>
+            {mode === "cdc" && (
+              <Field label="Группа коннекторов (RUNNING)" required>
+                <select
+                  value={connectorGroupId}
+                  onChange={e => setConnectorGroupId(e.target.value)}
+                  style={S.select}
+                  disabled={runningGroups.length === 0}
+                >
+                  {runningGroups.length === 0 ? (
+                    <option value="">нет запущенных групп</option>
+                  ) : runningGroups.map(g => (
+                    <option key={g.group_id} value={g.group_id}>
+                      {g.group_name} · {g.topic_prefix}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             {usesStage && (
               <Field label="Stage tablespace">
                 <input value={stageTablespace} onChange={e => setStageTablespace(e.target.value)} style={S.input}/>

@@ -36,7 +36,7 @@ export function PlanPanel({ plan, loading, onStart, onReload, busy, error }: Pro
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
           <div>
             <Title>Пачка таблиц</Title>
-            <Muted>Пока нет plan для этой миграции. Выделите таблицы и добавьте их в историческую пачку.</Muted>
+            <Muted>Пока нет plan для этой миграции. Выделите таблицы и добавьте их в историческую или CDC-пачку.</Muted>
           </div>
         </div>
       </Shell>

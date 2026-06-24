@@ -234,6 +234,9 @@ def add_plan_items(sm_id: str):
     truncate_target = bool(payload.get("truncate_target", True))
     if strategy.uses_stage and not truncate_target:
         return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
+    connector_group_id = payload.get("connector_group_id")
+    if strategy.has_cdc and not connector_group_id:
+        return jsonify({"error": "connector_group_id required for CDC strategy"}), 400
 
     sequential = bool(payload.get("sequential", True))
     chunk_size = int(payload.get("chunk_size") or 1_000_000)
@@ -259,6 +262,24 @@ def add_plan_items(sm_id: str):
             tgt_schema = (tgt_schema or "").strip().upper()
             if not src_schema or not tgt_schema:
                 return jsonify({"error": "schema migration src_schema/tgt_schema required"}), 400
+            if strategy.has_cdc:
+                cur.execute("""
+                    SELECT status, topic_prefix, run_id
+                    FROM   connector_groups
+                    WHERE  group_id = %s
+                """, (connector_group_id,))
+                group_row = cur.fetchone()
+                if not group_row:
+                    return jsonify({"error": "connector group not found"}), 400
+                group_status, group_topic_prefix, group_run_id = group_row
+                if group_status != "RUNNING":
+                    return jsonify({"error": f"connector group is {group_status}, expected RUNNING"}), 400
+                active_topic_prefix = (
+                    f"{group_topic_prefix}.{group_run_id}"
+                    if group_run_id else group_topic_prefix
+                )
+            else:
+                active_topic_prefix = None
 
             if plan_id is None:
                 defaults = {
@@ -269,10 +290,15 @@ def add_plan_items(sm_id: str):
                 }
                 cur.execute("""
                     INSERT INTO migration_plans
-                        (name, src_schema, tgt_schema, defaults_json, status)
-                    VALUES (%s, %s, %s, %s, 'READY')
+                        (name, src_schema, tgt_schema, connector_group_id, defaults_json, status)
+                    VALUES (%s, %s, %s, %s, %s, 'READY')
                     RETURNING plan_id
-                """, (sm_name or f"{src_schema}->{tgt_schema}", src_schema, tgt_schema, json.dumps(defaults)))
+                """, (
+                    sm_name or f"{src_schema}->{tgt_schema}",
+                    src_schema, tgt_schema,
+                    connector_group_id if strategy.has_cdc else None,
+                    json.dumps(defaults),
+                ))
                 plan_id = cur.fetchone()[0]
                 cur.execute("""
                     UPDATE schema_migrations
@@ -280,6 +306,12 @@ def add_plan_items(sm_id: str):
                            updated_at = NOW()
                     WHERE  schema_migration_id = %s
                 """, (plan_id, sm_id))
+            elif strategy.has_cdc:
+                cur.execute("""
+                    UPDATE migration_plans
+                    SET    connector_group_id = COALESCE(connector_group_id, %s)
+                    WHERE  plan_id = %s
+                """, (connector_group_id, plan_id))
 
             cur.execute("""
                 SELECT COALESCE(MAX(batch_order), 0)
@@ -302,6 +334,22 @@ def add_plan_items(sm_id: str):
                 batch_order = batch_base + idx + 1 if sequential else batch_base + 1
                 mid = str(uuid.uuid4())
                 stage_table = f"STG_{src_schema}_{table_name}"[:128]
+                if strategy.has_cdc:
+                    topic_name = f"{active_topic_prefix}.{src_schema}.{table_name}".replace("#", "_")
+                    cur.execute("""
+                        INSERT INTO group_tables
+                            (id, group_id, source_schema, source_table,
+                             target_schema, target_table,
+                             effective_key_type, effective_key_columns_json,
+                             source_pk_exists, source_uk_exists, topic_name)
+                        VALUES (%s, %s, %s, %s, %s, %s, 'NONE', '[]', FALSE, FALSE, %s)
+                        ON CONFLICT (group_id, source_schema, source_table) DO NOTHING
+                    """, (
+                        str(uuid.uuid4()), connector_group_id,
+                        src_schema, table_name,
+                        tgt_schema, target_table,
+                        topic_name,
+                    ))
 
                 cur.execute("""
                     INSERT INTO migrations (
@@ -326,7 +374,7 @@ def add_plan_items(sm_id: str):
                         %s,
                         %s,
                         %s,
-                        NULL,
+                        %s,
                         %s, %s
                     )
                 """, (
@@ -338,6 +386,7 @@ def add_plan_items(sm_id: str):
                     max(1, baseline_pd),
                     strategy.value,
                     truncate_target,
+                    connector_group_id if strategy.has_cdc else None,
                     now, now,
                 ))
 
@@ -381,6 +430,12 @@ def add_plan_items(sm_id: str):
             """, (plan_id,))
 
         conn.commit()
+        if strategy.has_cdc:
+            try:
+                from services.connector_groups import refresh_connector_tables
+                refresh_connector_tables(connector_group_id)
+            except Exception as exc:
+                print(f"[schema_migrations.add_plan_items] refresh_connector_tables warning: {exc}")
         _state["broadcast"]({
             "type": "schema_migration.plan_items_added",
             "id": sm_id,
