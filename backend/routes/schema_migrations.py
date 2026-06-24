@@ -11,10 +11,15 @@ POST   /api/schema-migrations/:id/resume   → resume
 POST   /api/schema-migrations/:id/rollback → cancel (mark child migrations)
 """
 
+import json
+import uuid
+from datetime import datetime, timezone
+
 from flask import Blueprint, jsonify, request
 
 import services.schema_migrations as svc
 import services.ddl_apply_jobs as ddl_jobs
+from services.strategy import Strategy
 
 bp = Blueprint("schema_migrations", __name__)
 
@@ -206,6 +211,185 @@ def list_ddl_jobs(sm_id: str):
     try:
         return jsonify(ddl_jobs.list_jobs(conn, sm_id, limit=limit))
     except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
+@bp.post("/api/schema-migrations/<sm_id>/plan/items")
+def add_plan_items(sm_id: str):
+    """Create or extend this schema migration's table-migration plan."""
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    payload = request.get_json(silent=True) or {}
+    tables = payload.get("tables") or []
+    if not isinstance(tables, list) or not tables:
+        return jsonify({"error": "tables required"}), 400
+
+    raw_strategy = payload.get("strategy") or "BULK_DIRECT"
+    try:
+        strategy = Strategy.parse(raw_strategy)
+    except ValueError as exc:
+        return jsonify({"error": f"Invalid strategy: {exc}"}), 400
+    truncate_target = bool(payload.get("truncate_target", True))
+    if strategy.uses_stage and not truncate_target:
+        return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
+
+    sequential = bool(payload.get("sequential", True))
+    chunk_size = int(payload.get("chunk_size") or 1_000_000)
+    max_workers = int(payload.get("max_parallel_workers") or 1)
+    baseline_pd = int(payload.get("baseline_parallel_degree") or 4)
+    stage_tablespace = (payload.get("stage_tablespace") or "PAYSTAGE").strip().upper()
+
+    conn = _state["get_conn"]()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT schema_migration_id, name, src_schema, tgt_schema, plan_id
+                FROM   schema_migrations
+                WHERE  schema_migration_id = %s
+                FOR UPDATE
+            """, (sm_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "schema_migration not found"}), 404
+            _, sm_name, src_schema, tgt_schema, plan_id = row
+            src_schema = (src_schema or "").strip().upper()
+            tgt_schema = (tgt_schema or "").strip().upper()
+            if not src_schema or not tgt_schema:
+                return jsonify({"error": "schema migration src_schema/tgt_schema required"}), 400
+
+            if plan_id is None:
+                defaults = {
+                    "strategy": strategy.value,
+                    "truncate_target": truncate_target,
+                    "chunk_size": chunk_size,
+                    "max_parallel_workers": max_workers,
+                }
+                cur.execute("""
+                    INSERT INTO migration_plans
+                        (name, src_schema, tgt_schema, defaults_json, status)
+                    VALUES (%s, %s, %s, %s, 'READY')
+                    RETURNING plan_id
+                """, (sm_name or f"{src_schema}->{tgt_schema}", src_schema, tgt_schema, json.dumps(defaults)))
+                plan_id = cur.fetchone()[0]
+                cur.execute("""
+                    UPDATE schema_migrations
+                    SET    plan_id = %s,
+                           updated_at = NOW()
+                    WHERE  schema_migration_id = %s
+                """, (plan_id, sm_id))
+
+            cur.execute("""
+                SELECT COALESCE(MAX(batch_order), 0)
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+            """, (plan_id,))
+            batch_base = cur.fetchone()[0] or 0
+
+            created = []
+            for idx, table in enumerate(tables):
+                if isinstance(table, dict):
+                    table_name = (table.get("source_table") or table.get("table") or "").strip().upper()
+                    target_table = (table.get("target_table") or table_name).strip().upper()
+                else:
+                    table_name = str(table).strip().upper()
+                    target_table = table_name
+                if not table_name:
+                    continue
+
+                batch_order = batch_base + idx + 1 if sequential else batch_base + 1
+                mid = str(uuid.uuid4())
+                stage_table = f"STG_{src_schema}_{table_name}"[:128]
+
+                cur.execute("""
+                    INSERT INTO migrations (
+                        migration_id, migration_name, phase, state_changed_at,
+                        source_connection_id, target_connection_id,
+                        source_schema, source_table,
+                        target_schema, target_table,
+                        stage_table_name, stage_tablespace,
+                        chunk_size, max_parallel_workers,
+                        baseline_parallel_degree,
+                        strategy,
+                        truncate_target,
+                        group_id,
+                        created_at, updated_at
+                    ) VALUES (
+                        %s, %s, 'DRAFT', %s,
+                        'oracle_source', 'oracle_target',
+                        %s, %s,
+                        %s, %s,
+                        %s, %s,
+                        %s, %s,
+                        %s,
+                        %s,
+                        %s,
+                        NULL,
+                        %s, %s
+                    )
+                """, (
+                    mid, f"{src_schema}.{table_name}", now,
+                    src_schema, table_name,
+                    tgt_schema, target_table,
+                    stage_table, stage_tablespace,
+                    chunk_size, max(1, max_workers),
+                    max(1, baseline_pd),
+                    strategy.value,
+                    truncate_target,
+                    now, now,
+                ))
+
+                cur.execute("""
+                    INSERT INTO migration_state_history
+                        (migration_id, from_phase, to_phase, message, actor_type)
+                    VALUES (%s, NULL, 'DRAFT', %s, 'USER')
+                """, (mid, f"Added to schema migration plan {plan_id}"))
+
+                overrides = {
+                    "strategy": strategy.value,
+                    "truncate_target": truncate_target,
+                    "chunk_size": chunk_size,
+                    "max_parallel_workers": max_workers,
+                }
+                cur.execute("""
+                    INSERT INTO migration_plan_items
+                        (plan_id, table_name, mode, batch_order, sort_order,
+                         overrides_json, migration_id, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING')
+                    RETURNING item_id
+                """, (
+                    plan_id, table_name, "BULK" if not strategy.has_cdc else "CDC",
+                    batch_order, idx, json.dumps(overrides), mid,
+                ))
+                item_id = cur.fetchone()[0]
+                created.append({
+                    "item_id": item_id,
+                    "table": table_name,
+                    "migration_id": mid,
+                    "batch_order": batch_order,
+                })
+
+            cur.execute("""
+                UPDATE migration_plans
+                SET    status = CASE
+                           WHEN status IN ('DONE', 'FAILED', 'CANCELLED') THEN 'READY'
+                           ELSE status
+                       END
+                WHERE  plan_id = %s
+            """, (plan_id,))
+
+        conn.commit()
+        _state["broadcast"]({
+            "type": "schema_migration.plan_items_added",
+            "id": sm_id,
+            "plan_id": plan_id,
+            "count": len(created),
+        })
+        return jsonify({"plan_id": plan_id, "items": created}), 201
+    except Exception as exc:
+        conn.rollback()
         return jsonify({"error": str(exc)}), 500
     finally:
         conn.close()

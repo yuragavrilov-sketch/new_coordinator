@@ -154,3 +154,80 @@ export async function listDdlJobs(smId: string, limit = 100): Promise<DdlJob[]> 
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
+
+export interface MigrationPlanItem {
+  item_id:          number;
+  plan_id:          number;
+  table_name:       string;
+  mode:             string;
+  batch_order:      number;
+  sort_order:       number;
+  overrides_json:   Record<string, unknown> | string;
+  migration_id:     string | null;
+  status:           string;
+  phase?:           string | null;
+  strategy?:        string | null;
+  rows_loaded?:     number | null;
+  total_rows?:      number | null;
+  error_text?:      string | null;
+  state_changed_at?: string | null;
+}
+
+export interface MigrationPlanDetail {
+  plan_id:       number;
+  name:          string;
+  src_schema:    string;
+  tgt_schema:    string;
+  status:        string;
+  defaults_json: Record<string, unknown> | string;
+  created_at:    string | null;
+  started_at:    string | null;
+  completed_at:  string | null;
+  items:         MigrationPlanItem[];
+}
+
+export async function getMigrationPlan(planId: number): Promise<MigrationPlanDetail> {
+  const r = await fetch(`/api/planner/plans/${planId}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+export async function startMigrationPlan(planId: number): Promise<void> {
+  const r = await fetch(`/api/planner/plans/${planId}/start`, { method: "POST" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${r.status}`);
+  }
+}
+
+export interface AddPlanItemsPayload {
+  tables: Array<{ source_table: string; target_table?: string }>;
+  strategy: "BULK_DIRECT" | "BULK_STAGE";
+  sequential: boolean;
+  truncate_target: boolean;
+  chunk_size: number;
+  max_parallel_workers: number;
+  baseline_parallel_degree: number;
+  stage_tablespace?: string;
+}
+
+export interface AddPlanItemsResp {
+  plan_id: number;
+  items: Array<{ item_id: number; table: string; migration_id: string; batch_order: number }>;
+}
+
+export async function addSchemaPlanItems(
+  smId: string,
+  payload: AddPlanItemsPayload,
+): Promise<AddPlanItemsResp> {
+  const r = await fetch(`/api/schema-migrations/${smId}/plan/items`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}

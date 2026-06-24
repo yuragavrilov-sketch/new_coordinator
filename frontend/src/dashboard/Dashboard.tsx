@@ -10,6 +10,8 @@ import { LoadSnapshotBanner } from "./LoadSnapshotBanner";
 import { ProblemsSummary } from "./ProblemsSummary";
 import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
 import { AddToCdcGroupModal } from "./AddToCdcGroupModal";
+import { AddToPlanModal } from "./AddToPlanModal";
+import { PlanPanel } from "./PlanPanel";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { t } from "../theme";
 import { fmtCompactNum } from "../utils/format";
@@ -18,7 +20,9 @@ import type { SSEEvent } from "../hooks/useSSE";
 import { OBJECT_TYPES, type SchemaObject, type ObjectType, type MigrationEvent } from "./types";
 import {
   type SchemaMigrationListItem,
+  type MigrationPlanDetail,
   createSchemaMigration,
+  startMigrationPlan,
 } from "./api";
 import type { MigrationPrefill } from "../components/CreateMigrationModal/types";
 
@@ -50,6 +54,10 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   const [selectedIds,         setSelectedIds]         = useState<Set<string>>(() => new Set());
   const [bulkOpen,            setBulkOpen]            = useState(false);
   const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
+  const [planOpen,            setPlanOpen]            = useState(false);
+  const [activePlanId,        setActivePlanId]        = useState<number | null>(schema?.planId ?? null);
+  const [planBusy,            setPlanBusy]            = useState(false);
+  const [planErr,             setPlanErr]             = useState("");
   const [toast,               setToast]               = useState<string>("");
 
   // Fetch objects and events for this schema migration (auto-poll 5s)
@@ -61,9 +69,17 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
     selectedId ? `/api/schema-migrations/${selectedId}/events?limit=200` : null,
     { intervalMs: 5000 },
   );
+  const planApi = useApi<MigrationPlanDetail>(
+    activePlanId ? `/api/planner/plans/${activePlanId}` : null,
+    { intervalMs: 5000 },
+  );
 
   const objects = objectsApi.data || [];
   const events  = eventsApi.data  || [];
+
+  useEffect(() => {
+    setActivePlanId(schema?.planId ?? null);
+  }, [schema?.id, schema?.planId]);
 
   // Aggregate KPIs from current objects (or use server-side KPI from schema header)
   const overall = useMemo(() => {
@@ -241,6 +257,22 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
     [],
   );
 
+  const handleStartPlan = useCallback(async () => {
+    if (!activePlanId) return;
+    setPlanBusy(true);
+    setPlanErr("");
+    try {
+      await startMigrationPlan(activePlanId);
+      planApi.reload();
+      objectsApi.reload();
+      eventsApi.reload();
+    } catch (e) {
+      setPlanErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setPlanBusy(false);
+    }
+  }, [activePlanId, planApi, objectsApi, eventsApi]);
+
   // Empty state
   if (!schema) {
     return (
@@ -328,6 +360,15 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
         onLoaded={() => objectsApi.reload()}
       />
 
+      <PlanPanel
+        plan={activePlanId ? (planApi.data || null) : null}
+        loading={!!activePlanId && planApi.loading}
+        onStart={handleStartPlan}
+        onReload={() => planApi.reload()}
+        busy={planBusy}
+        error={planErr || planApi.error || ""}
+      />
+
       {selectedId && (
         <ProblemsSummary
           missing={problems.missing}
@@ -364,6 +405,7 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
           onClear={() => setSelectedIds(new Set())}
           onCreate={() => setBulkOpen(true)}
           onCdcGroup={() => setCdcGroupOpen(true)}
+          onPlan={() => setPlanOpen(true)}
         />
       )}
 
@@ -390,6 +432,24 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
             setToast(msg);
             objectsApi.reload();
             eventsApi.reload();
+            setTimeout(() => setToast(""), 5000);
+          }}
+        />
+      )}
+
+      {planOpen && selectedTables.length > 0 && selectedId && (
+        <AddToPlanModal
+          schemaMigrationId={selectedId}
+          tables={selectedTables}
+          onClose={() => setPlanOpen(false)}
+          onDone={(planId, count) => {
+            setPlanOpen(false);
+            setSelectedIds(new Set());
+            setActivePlanId(planId);
+            setToast(`Добавлено в пачку: ${count}`);
+            objectsApi.reload();
+            eventsApi.reload();
+            planApi.reload();
             setTimeout(() => setToast(""), 5000);
           }}
         />
@@ -454,9 +514,9 @@ export function Dashboard({ selectedId, schema, onCreated, showEmptyState, sseEv
   );
 }
 
-function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup }: {
+function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup, onPlan }: {
   count: number; onClear: () => void; onCreate: () => void;
-  onCdcGroup: () => void;
+  onCdcGroup: () => void; onPlan: () => void;
 }) {
   return (
     <div style={{
@@ -480,6 +540,9 @@ function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup }: {
       <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
       <button onClick={onCdcGroup} style={secondaryActionStyle()}>
         В CDC-группу ({count})
+      </button>
+      <button onClick={onPlan} style={secondaryActionStyle()}>
+        В пачку ({count})
       </button>
       <button onClick={onCreate} style={primaryActionStyle(false)}>
         Создать миграции ({count})

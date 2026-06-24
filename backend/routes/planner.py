@@ -211,8 +211,17 @@ def get_plan(plan_id):
             plan = _state["row_to_dict"](cur, row)
 
             cur.execute("""
-                SELECT * FROM migration_plan_items
-                WHERE plan_id = %s ORDER BY batch_order, sort_order
+                SELECT i.*,
+                       m.phase,
+                       m.strategy,
+                       m.rows_loaded,
+                       m.total_rows,
+                       m.error_text,
+                       m.state_changed_at
+                FROM migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE i.plan_id = %s
+                ORDER BY i.batch_order, i.sort_order
             """, (plan_id,))
             plan["items"] = [_state["row_to_dict"](cur, r) for r in cur.fetchall()]
         return jsonify(plan)
@@ -546,6 +555,15 @@ def start_plan(plan_id):
 
             if plan["status"] not in ("READY", "RUNNING"):
                 return jsonify({"error": f"Cannot start plan in status {plan['status']}"}), 400
+
+            cur.execute("""
+                SELECT COUNT(*)
+                FROM   migration_plan_items
+                WHERE  plan_id = %s
+                  AND  status = 'RUNNING'
+            """, (plan_id,))
+            if (cur.fetchone()[0] or 0) > 0:
+                return jsonify({"error": "A plan batch is already running"}), 400
 
             # Find the lowest batch that has PENDING items
             cur.execute("""
