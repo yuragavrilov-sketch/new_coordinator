@@ -66,6 +66,8 @@ export function PlanPanel({
     || batches.find(([, items]) => items.some(i => i.status === "PENDING"))
     || batches[batches.length - 1];
   const modeCounts = countModes(plan.items);
+  const isCdcPlan = plan.items.some(i => i.mode === "CDC" || String(i.strategy || "").startsWith("CDC"));
+  const groupLabel = isCdcPlan ? "Batch" : "Шаг";
 
   return (
     <Shell>
@@ -130,6 +132,7 @@ export function PlanPanel({
           failed={failed}
           currentBatch={currentBatch}
           modeCounts={modeCounts}
+          groupLabel={groupLabel}
         />
       )}
 
@@ -146,7 +149,7 @@ export function PlanPanel({
                 display: "flex", justifyContent: "space-between", alignItems: "center",
                 padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
               }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Batch {batch}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>{groupLabel} {batch}</span>
                 <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
               </div>
               {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
@@ -176,6 +179,7 @@ function PlanOverview({
   failed,
   currentBatch,
   modeCounts,
+  groupLabel,
 }: {
   batchCount: number;
   total: number;
@@ -185,6 +189,7 @@ function PlanOverview({
   failed: number;
   currentBatch?: [number, MigrationPlanItem[]];
   modeCounts: Array<[string, number]>;
+  groupLabel: string;
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
   const batchDone = batchItems.filter(i => DONE.has(i.status)).length;
@@ -198,7 +203,7 @@ function PlanOverview({
         gridTemplateColumns: "repeat(5, minmax(92px, 1fr))",
         gap: 8,
       }}>
-        <Stat label="Batch" value={batchCount}/>
+        <Stat label={groupLabel === "Batch" ? "Batch" : "Шагов"} value={batchCount}/>
         <Stat label="Всего" value={total}/>
         <Stat label="Done" value={done}/>
         <Stat label="Running" value={running}/>
@@ -217,10 +222,12 @@ function PlanOverview({
           background: t.bg.s2,
           minWidth: 0,
         }}>
-          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Текущий batch</div>
+          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>
+            {groupLabel === "Batch" ? "Текущий batch" : "Текущий шаг запуска"}
+          </div>
           {batchNo ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>Batch {batchNo}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>{groupLabel} {batchNo}</span>
               <span style={{ fontSize: 12, color: t.text.muted }}>
                 {batchDone}/{batchItems.length} done · {batchRunning} running · {batchFailed} failed
               </span>
