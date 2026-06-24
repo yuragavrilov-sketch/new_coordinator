@@ -74,7 +74,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
     setErr("");
     try {
       if (mode === "cdc" && !connectorGroupId) {
-        setErr("Для CDC-пачки выберите RUNNING группу коннекторов.");
+        setErr("Для CDC-пачки выберите RUNNING CDC-пачку.");
         setBusy(false);
         return;
       }
@@ -168,7 +168,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
               lineHeight: 1.45,
             }}>
               {mode === "cdc"
-                ? "CDC-пачка создаёт DRAFT-миграции с выбранной connector group. После старта batch coordinator запустит bulk и CDC apply по обычному CDC flow."
+                ? "CDC-пачка создаёт DRAFT-миграции с выбранной CDC-пачкой. После старта batch coordinator запустит bulk и CDC apply по обычному CDC flow."
                 : "SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source. Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса."}
             </div>
             <Field label="Стратегия">
@@ -187,7 +187,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
               </select>
             </Field>
             {mode === "cdc" && (
-              <Field label="Группа коннекторов (RUNNING)" required>
+              <Field label="CDC-пачка (RUNNING)" required>
                 <select
                   value={connectorGroupId}
                   onChange={e => setConnectorGroupId(e.target.value)}
@@ -195,7 +195,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
                   disabled={runningGroups.length === 0}
                 >
                   {runningGroups.length === 0 ? (
-                    <option value="">нет запущенных групп</option>
+                    <option value="">нет запущенных CDC-пачек</option>
                   ) : runningGroups.map(g => (
                     <option key={g.group_id} value={g.group_id}>
                       {g.group_name} · {g.topic_prefix}

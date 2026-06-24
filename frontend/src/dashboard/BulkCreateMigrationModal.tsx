@@ -46,7 +46,7 @@ export function BulkCreateMigrationModal({ tables, onClose, onCreated }: Props) 
     if (usesStage(strategy) && !truncateTarget) setTruncateTarget(true);
   }, [strategy, truncateTarget]);
 
-  // Load running connector groups when CDC strategy is picked
+  // Load running CDC packs when CDC strategy is picked
   useEffect(() => {
     if (!isCdc(strategy)) return;
     fetch("/api/connector-groups")
@@ -71,7 +71,7 @@ export function BulkCreateMigrationModal({ tables, onClose, onCreated }: Props) 
     if (busy) return;
     setErr("");
     if (isCdc(strategy) && !groupId) {
-      setErr("Для CDC-стратегии нужно выбрать запущенную группу коннекторов.");
+      setErr("Для CDC-стратегии нужно выбрать запущенную CDC-пачку.");
       return;
     }
     setBusy(true);
@@ -188,7 +188,7 @@ export function BulkCreateMigrationModal({ tables, onClose, onCreated }: Props) 
               </select>
             </Field>
             {isCdc(strategy) && (
-              <Field label="Группа коннекторов (RUNNING)" required>
+              <Field label="CDC-пачка (RUNNING)" required>
                 <select
                   style={S.select}
                   value={groupId}
@@ -196,7 +196,7 @@ export function BulkCreateMigrationModal({ tables, onClose, onCreated }: Props) 
                   disabled={runningGroups.length === 0}
                 >
                   {runningGroups.length === 0
-                    ? <option value="">— нет запущенных групп —</option>
+                    ? <option value="">— нет запущенных CDC-пачек —</option>
                     : runningGroups.map(g => (
                         <option key={g.group_id} value={g.group_id}>
                           {g.group_name} · {g.topic_prefix}

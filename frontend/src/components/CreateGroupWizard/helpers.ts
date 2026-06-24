@@ -20,4 +20,4 @@ export const INIT_FORM: GroupForm = {
   topic_prefix:   "",
 };
 
-export const STEP_LABELS = ["Группа", "Таблицы и ключи"];
+export const STEP_LABELS = ["CDC-пачка", "Таблицы и ключи"];

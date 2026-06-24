@@ -68,7 +68,7 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
   const [starting,     setStarting]     = useState(false);
   const [startError,   setStartError]   = useState<string | null>(null);
 
-  // Load connector groups
+  // Load CDC packs
   useEffect(() => {
     fetch("/api/connector-groups")
       .then(r => r.ok ? r.json() : Promise.reject())

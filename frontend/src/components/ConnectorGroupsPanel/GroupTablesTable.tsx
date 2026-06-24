@@ -25,7 +25,7 @@ export function GroupTablesTable({
   tables, topicCounts, tableMigrationMap, onMigrate,
 }: Props) {
   if (tables.length === 0) {
-    return <div style={{ color: t.text.disabled, fontSize: t.size.sm }}>Нет таблиц в группе</div>;
+    return <div style={{ color: t.text.disabled, fontSize: t.size.sm }}>Нет таблиц в CDC-пачке</div>;
   }
 
   return (

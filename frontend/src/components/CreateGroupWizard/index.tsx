@@ -27,7 +27,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
   const [loadingTables,   setLoadingTables]  = useState(false);
   const [tableFilter,     setTableFilter]    = useState("");
 
-  // map "SCHEMA.TABLE" → group_name for tables already in some group
+  // map "SCHEMA.TABLE" → pack name for tables already in some CDC pack
   const [tableGroupMap, setTableGroupMap] = useState<Map<string, string>>(new Map());
 
   const setF = useCallback((up: Partial<GroupForm>) =>
@@ -246,7 +246,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
         {/* Header */}
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: t.text.primary }}>
-            Новая группа коннекторов
+            Новая CDC-пачка
           </span>
           <span style={{ flex: 1 }} />
           <StepIndicator step={step} total={2} labels={STEP_LABELS} />
@@ -262,8 +262,8 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
 
           {/* STEP 0: Group info */}
           {step === 0 && (
-            <Section title="Настройки группы" accent={t.blue.dim}>
-              <Field label="Имя группы" required error={fieldErrs.group_name}>
+            <Section title="Настройки CDC-пачки" accent={t.blue.dim}>
+              <Field label="Имя CDC-пачки" required error={fieldErrs.group_name}>
                 <input
                   style={fieldErrs.group_name ? S.inputErr : S.input}
                   value={form.group_name}
@@ -273,7 +273,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
               </Field>
               <div style={S.row2}>
                 <Field label="Имя коннектора (Debezium)" required error={fieldErrs.connector_name}
-                  hint="Автозаполняется из имени группы">
+                  hint="Автозаполняется из имени CDC-пачки">
                   <input
                     style={fieldErrs.connector_name ? S.inputErr : S.input}
                     value={form.connector_name}
@@ -281,7 +281,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                   />
                 </Field>
                 <Field label="Topic prefix (Kafka)" required error={fieldErrs.topic_prefix}
-                  hint="Автозаполняется из имени группы">
+                  hint="Автозаполняется из имени CDC-пачки">
                   <input
                     style={fieldErrs.topic_prefix ? S.inputErr : S.input}
                     value={form.topic_prefix}
@@ -438,7 +438,7 @@ export function CreateGroupWizard({ onClose, onCreated }: Props) {
                 fontWeight: 600, opacity: submitting ? 0.6 : 1,
               }}
             >
-              {submitting ? "Создание..." : `Создать группу (${tables.length} табл.)`}
+              {submitting ? "Создание..." : `Создать CDC-пачку (${tables.length} табл.)`}
             </button>
           )}
         </div>

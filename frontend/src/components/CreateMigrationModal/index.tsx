@@ -35,7 +35,7 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
   const [connGroups, setConnGroups] = useState<ConnectorGroup[]>([]);
   const nameTouched = useRef(false);
 
-  // Load connector groups
+  // Load CDC packs
   useEffect(() => {
     fetch("/api/connector-groups")
       .then(r => r.ok ? r.json() : [])
@@ -361,13 +361,13 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
           <Section title="Параметры миграции">
             {hasCdc(form.strategy) && (
               <>
-                <Field label="Группа коннектора" hint="Выберите группу для общего Debezium-коннектора или оставьте пустым для отдельного">
+                <Field label="CDC-пачка" hint="Выберите пачку для общего Debezium-коннектора или оставьте пустым для отдельного">
                   <select
                     value={form.group_id}
                     onChange={e => setF({ group_id: e.target.value })}
                     style={{ ...S.input, cursor: "pointer", appearance: "auto" }}
                   >
-                    <option value="">-- Без группы (отдельный коннектор) --</option>
+                    <option value="">-- Без CDC-пачки (отдельный коннектор) --</option>
                     {connGroups.map(g => (
                       <option key={g.group_id} value={g.group_id}>
                         {g.group_name} ({g.status}) — {g.connector_name}
@@ -395,7 +395,7 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
                 )}
                 {form.group_id && (
                   <div style={{ fontSize: t.size.xs, color: t.green.fg, padding: "4px 0" }}>
-                    Connector, topic prefix и consumer group будут унаследованы от группы
+                    Connector, topic prefix и consumer group будут унаследованы от CDC-пачки
                   </div>
                 )}
               </>

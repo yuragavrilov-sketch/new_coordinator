@@ -152,25 +152,25 @@ export function TableSelectionStep({
         </div>
       </div>
 
-      {/* Connector group */}
+      {/* CDC pack */}
       {(planMode === "cdc" || hasCdc(defaults.strategy)) && (
       <div style={S.card}>
         <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>Группа коннекторов</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>CDC-пачка</span>
         </div>
         <div style={S.cardBody}>
           <div style={S.field}>
-            <label style={S.label}>Выберите группу коннекторов</label>
+            <label style={S.label}>Выберите CDC-пачку</label>
             <SearchSelect
               value={selectedGroup}
               onChange={onSelectGroup}
               options={groups.map(g => g.group_name)}
-              placeholder="Выберите группу..."
+              placeholder="Выберите CDC-пачку..."
             />
           </div>
           {selectedGroup && (
             <div style={{ fontSize: 11, color: t.text.muted }}>
-              Группа: <span style={{ color: t.blue.fg }}>{selectedGroup}</span>
+              CDC-пачка: <span style={{ color: t.blue.fg }}>{selectedGroup}</span>
               {(() => {
                 const g = groups.find(gg => gg.group_name === selectedGroup);
                 return g ? <> | Статус: <span style={{ color: g.status === "RUNNING" ? t.green.base : t.amber.base }}>{g.status}</span></> : null;

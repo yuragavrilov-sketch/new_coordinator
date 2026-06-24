@@ -442,7 +442,7 @@ function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup, onPlan }: {
       </span>
       <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
       <button onClick={onCdcGroup} style={secondaryActionStyle()}>
-        В CDC-группу ({count})
+        В CDC-пачку ({count})
       </button>
       <button onClick={onPlan} style={secondaryActionStyle()}>
         В пачку ({count})

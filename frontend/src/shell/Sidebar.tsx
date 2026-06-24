@@ -7,7 +7,7 @@ export type NavKey =
   | "dashboard"   // Эта миграция
   | "plan"        // Пачка таблиц
   | "history"     // Миграции
-  | "clusters"    // Кластеры
+  | "clusters"    // CDC-пачки
   | "rules"       // Правила conversion
   | "settings";
 
@@ -15,7 +15,7 @@ export const NAV_ITEMS: { key: NavKey; label: string; icon: IconName; badge?: nu
   { key: "dashboard", label: "Эта миграция", icon: "dashboard" },
   { key: "plan",      label: "Пачка",        icon: "flow" },
   { key: "history",   label: "Миграции",     icon: "history" },
-  { key: "clusters",  label: "Кластеры",     icon: "clusters" },
+  { key: "clusters",  label: "CDC-пачки",    icon: "flow" },
   { key: "rules",     label: "Правила conversion", icon: "rules" },
   { key: "settings",  label: "Настройки",    icon: "settings" },
 ];

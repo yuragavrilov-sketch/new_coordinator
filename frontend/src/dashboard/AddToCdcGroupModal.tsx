@@ -253,11 +253,11 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
   function validate(): boolean {
     setErr("");
     if (mode === "new") {
-      if (!groupName.trim())     { setErr("Введите имя группы"); return false; }
+      if (!groupName.trim())     { setErr("Введите имя CDC-пачки"); return false; }
       if (!connectorName.trim()) { setErr("connector_name обязателен"); return false; }
       if (!topicPrefix.trim())   { setErr("topic_prefix обязателен"); return false; }
     } else {
-      if (!selectedGroup) { setErr("Выберите группу"); return false; }
+      if (!selectedGroup) { setErr("Выберите CDC-пачку"); return false; }
     }
     for (const s of tableStates) {
       if (s.loading)  { setErr(`Подождите — загружается ${s.schema}.${s.table}`); return false; }
@@ -290,7 +290,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
     setBusy(true);
     try {
       if (mode === "new") {
-        setPhase("Создание группы...");
+        setPhase("Создание CDC-пачки...");
         const r = await fetch("/api/connector-groups/wizard", {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
@@ -306,21 +306,21 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
         });
         const d = await r.json();
         if (!r.ok && r.status !== 207) { setErr(d.error || `HTTP ${r.status}`); return; }
-        if (d.migrations_error) { setErr(`Группа создана, но миграции не создались: ${d.migrations_error}`); return; }
+        if (d.migrations_error) { setErr(`CDC-пачка создана, но миграции не создались: ${d.migrations_error}`); return; }
         const gid = d.group?.group_id;
         if (autoStart && gid) {
           setPhase("Запуск коннектора...");
           const sr = await fetch(`/api/connector-groups/${gid}/start`, { method: "POST" });
           if (!sr.ok) {
             const sd = await sr.json().catch(() => ({}));
-            setErr(`Группа создана, но запуск не удался: ${sd.error || sr.status}`);
+            setErr(`CDC-пачка создана, но запуск не удался: ${sd.error || sr.status}`);
             return;
           }
         }
         const mCount = (d.migrations || []).filter((x: any) => !x.skipped).length;
-        onDone(buildDoneMsg(`Группа «${groupName}»`, autoStart, mCount, tableStates.length));
+        onDone(buildDoneMsg(`CDC-пачка «${groupName}»`, autoStart, mCount, tableStates.length));
       } else {
-        setPhase("Добавление таблиц в группу...");
+        setPhase("Добавление таблиц в CDC-пачку...");
         const r = await fetch(`/api/connector-groups/${selectedGroup}/tables`, {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
@@ -335,7 +335,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
         const addedTables = Array.isArray(d.tables) ? d.tables.length : tableStates.length;
         const mCount = (d.migrations || []).filter((x: any) => !x.skipped).length;
         const grp = groups.find(g => g.group_id === selectedGroup);
-        onDone(`Добавлено ${addedTables} табл. в «${grp?.group_name ?? "группу"}»`
+        onDone(`Добавлено ${addedTables} табл. в «${grp?.group_name ?? "CDC-пачку"}»`
                + (createMigrations ? `, миграций создано: ${mCount}.` : "."));
       }
     } catch (e) {
@@ -351,7 +351,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
       <div style={{ ...S.modal, maxWidth: 780, maxHeight: "calc(100vh - 80px)" }}>
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: t.text.primary }}>
-            CDC-группа · {inputTables.length} {plural(inputTables.length, "таблица", "таблицы", "таблиц")}
+            CDC-пачка · {inputTables.length} {plural(inputTables.length, "таблица", "таблицы", "таблиц")}
           </span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{
@@ -371,7 +371,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
           <Block>
             <div style={{ display: "flex", gap: 8 }}>
               <ModeBtn active={mode === "new"} onClick={() => setMode("new")}
-                label="Новая группа"/>
+                label="Новая CDC-пачка"/>
               <ModeBtn active={mode === "existing"} onClick={() => setMode("existing")}
                 label={`В существующую (${groups.length})`}
                 disabled={groupsLoading || groups.length === 0}/>
@@ -426,8 +426,8 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
           {/* Mode-specific form */}
           <Block>
           {mode === "new" ? (
-            <Section title="Новая группа" accent={t.blue.dim}>
-              <Field label="Имя группы" required>
+            <Section title="Новая CDC-пачка" accent={t.blue.dim}>
+              <Field label="Имя CDC-пачки" required>
                 <input
                   style={S.input}
                   value={groupName}
@@ -436,12 +436,12 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                 />
               </Field>
               <div style={S.row2}>
-                <Field label="connector_name" required hint="Авто из имени группы">
+                <Field label="connector_name" required hint="Авто из имени CDC-пачки">
                   <input style={S.input}
                     value={connectorName}
                     onChange={e => setConnectorName(e.target.value)}/>
                 </Field>
-                <Field label="topic_prefix" required hint="Авто из имени группы">
+                <Field label="topic_prefix" required hint="Авто из имени CDC-пачки">
                   <input style={S.input}
                     value={topicPrefix}
                     onChange={e => setTopicPrefix(e.target.value)}/>
@@ -455,12 +455,12 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
               </label>
             </Section>
           ) : (
-            <Section title="Целевая группа" accent={t.blue.dim}>
+            <Section title="Целевая CDC-пачка" accent={t.blue.dim}>
               {groupsLoading && (
                 <div style={{ fontSize: t.size.sm, color: t.text.muted }}>Загрузка…</div>
               )}
               {!groupsLoading && groups.length === 0 && (
-                <div style={{ fontSize: t.size.sm, color: t.text.muted }}>Групп ещё нет</div>
+                <div style={{ fontSize: t.size.sm, color: t.text.muted }}>CDC-пачек ещё нет</div>
               )}
               {!groupsLoading && groups.length > 0 && (
                 <div style={{
@@ -588,7 +588,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
                   </Field>
                 </div>
                 <div style={{ fontSize: 11.5, color: t.text.muted }}>
-                  Миграции создаются в фазе <code>NEW</code> с привязкой к группе и идут по очереди (FIFO).
+                  Миграции создаются в фазе <code>NEW</code> с привязкой к CDC-пачке и идут по очереди (FIFO).
                 </div>
               </>
             )}
@@ -696,7 +696,7 @@ export function AddToCdcGroupModal({ tables: inputTables, onClose, onDone }: Pro
             {busy
               ? "…"
               : mode === "new"
-                ? `Создать группу${autoStart ? " и запустить" : ""}${createMigrations ? " (+ миграции)" : ""}`
+                ? `Создать CDC-пачку${autoStart ? " и запустить" : ""}${createMigrations ? " (+ миграции)" : ""}`
                 : `Добавить ${tableStates.length}${createMigrations ? " (+ миграции)" : ""}`}
           </button>
         </div>
@@ -852,7 +852,7 @@ function buildDoneMsg(prefix: string, autoStart: boolean, migrationsCount: numbe
   if (migrationsCount === tablesCount) {
     return autoStart
       ? `${head}; ${migrationsCount} миграций в очереди — первая стартует автоматически.`
-      : `${head}; ${migrationsCount} миграций в фазе NEW (ждут Start группы).`;
+      : `${head}; ${migrationsCount} миграций в фазе NEW (ждут запуска CDC-пачки).`;
   }
   return `${head}; миграций создано: ${migrationsCount} из ${tablesCount}.`;
 }

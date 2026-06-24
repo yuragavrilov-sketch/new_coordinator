@@ -73,7 +73,7 @@ export function ConnectorGroupsPanel() {
   const createTopics = (gid: string) => fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" }).then(() => loadTopicCounts(gid)).catch(() => {});
 
   const deleteGroup = async (gid: string) => {
-    if (!confirm("Удалить группу?")) return;
+    if (!confirm("Удалить CDC-пачку?")) return;
     try {
       const r = await fetch(`/api/connector-groups/${gid}`, { method: "DELETE" });
       if (r.ok) {
@@ -85,7 +85,7 @@ export function ConnectorGroupsPanel() {
       const msg  = body?.error || `HTTP ${r.status}`;
       // Backend отказался — обычно из-за активных миграций. Предлагаем force.
       if (r.status === 400 && /активных миграций/i.test(msg)) {
-        if (!confirm(`${msg}.\n\nПеревести их в CANCELLED и удалить группу?`)) return;
+        if (!confirm(`${msg}.\n\nПеревести их в CANCELLED и удалить CDC-пачку?`)) return;
         const r2 = await fetch(`/api/connector-groups/${gid}?force=true`, { method: "DELETE" });
         if (r2.ok) {
           load();
@@ -142,7 +142,7 @@ export function ConnectorGroupsPanel() {
         display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
       }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.text.secondary }}>
-          Группы коннекторов
+          CDC-пачки
         </h2>
         <button
           onClick={() => setShowCreate(true)}
@@ -152,7 +152,7 @@ export function ConnectorGroupsPanel() {
             padding: "5px 14px", fontSize: t.size.base, cursor: "pointer",
           }}
         >
-          + Создать группу
+          + Создать CDC-пачку
         </button>
       </div>
 
@@ -165,7 +165,7 @@ export function ConnectorGroupsPanel() {
 
       {groups.length === 0 && !showCreate && (
         <div style={{ color: t.text.disabled, padding: 24, textAlign: "center" }}>
-          Нет групп коннекторов. Создайте группу для объединения таблиц в один Debezium-коннектор.
+          Нет CDC-пачек. Создайте пачку таблиц для одного Debezium-коннектора.
         </div>
       )}
 
@@ -256,7 +256,7 @@ export function ConnectorGroupsPanel() {
                   >{configLoading ? "..." : "Debezium Config"}</button>
                 </div>
 
-                {/* Group tables */}
+                {/* Pack tables */}
                 <h4 style={{ color: t.text.muted, fontSize: t.size.base, margin: "12px 0 6px" }}>
                   Таблицы ({detail.tables?.length || 0})
                 </h4>

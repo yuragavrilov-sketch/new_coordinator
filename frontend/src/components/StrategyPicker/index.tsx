@@ -7,7 +7,7 @@ interface Props {
   onChange: (s: Strategy) => void;
   truncateTarget: boolean;
   onTruncateChange: (b: boolean) => void;
-  /** Disable «С CDC» если коннектор группы не RUNNING */
+  /** Disable «С CDC» если коннектор CDC-пачки не RUNNING */
   cdcDisabledReason?: string;
 }
 
