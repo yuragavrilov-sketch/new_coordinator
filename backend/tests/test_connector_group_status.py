@@ -100,3 +100,25 @@ def test_active_migration_for_group_table_allows_terminal_phase_absent():
     assert connector_groups._active_migration_for_group_table(
         cur, "gid", "TCBPAY", "ALLORDERS",
     ) is None
+
+
+def test_topic_count_consumer_uses_supported_timeout_configs(monkeypatch):
+    captured = {}
+
+    class FakeKafkaConsumer:
+        def __init__(self, **configs):
+            captured.update(configs)
+
+    import kafka
+
+    monkeypatch.setattr(kafka, "KafkaConsumer", FakeKafkaConsumer)
+
+    assert isinstance(
+        connector_groups._new_topic_count_consumer(["broker:9092"]),
+        FakeKafkaConsumer,
+    )
+    assert captured == {
+        "bootstrap_servers": ["broker:9092"],
+        "request_timeout_ms": 5000,
+        "connections_max_idle_ms": 8000,
+    }

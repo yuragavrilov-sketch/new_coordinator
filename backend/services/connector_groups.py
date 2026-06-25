@@ -602,9 +602,18 @@ def _delete_group_topics(group: dict) -> None:
         log.warning("failed to delete schema topic %s: %s", schema_topic, exc)
 
 
+def _new_topic_count_consumer(bootstrap: list[str]):
+    from kafka import KafkaConsumer
+
+    return KafkaConsumer(
+        bootstrap_servers=bootstrap,
+        request_timeout_ms=5000,
+        connections_max_idle_ms=8000,
+    )
+
+
 def get_topic_message_counts(group_id: str) -> list[dict]:
     """Return message counts for each topic in the group."""
-    from kafka import KafkaConsumer
     from kafka.structs import TopicPartition
 
     topics = _build_topic_names(group_id)
@@ -616,7 +625,7 @@ def get_topic_message_counts(group_id: str) -> list[dict]:
     results = []
     consumer = None
     try:
-        consumer = KafkaConsumer(bootstrap_servers=bootstrap)
+        consumer = _new_topic_count_consumer(bootstrap)
         for topic_name in topics:
             try:
                 partitions = consumer.partitions_for_topic(topic_name)
