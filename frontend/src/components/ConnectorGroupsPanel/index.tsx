@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ConnectorGroup, MigrationSummary } from "../../types/migration";
+import type { SSEEvent } from "../../hooks/useSSE";
 import { t } from "../../theme";
 import type { GroupTable, TopicCount, GroupHistoryEntry } from "./types";
 import { STATUS_COLORS, actionBtn } from "./helpers";
@@ -8,7 +9,7 @@ import { GroupHistory } from "./GroupHistory";
 import { DebeziumConfigModal } from "./DebeziumConfigModal";
 import { MigrateModal } from "./MigrateModal";
 
-export function ConnectorGroupsPanel() {
+export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[] }) {
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [expanded,      setExpanded]      = useState<string | null>(null);
@@ -20,19 +21,19 @@ export function ConnectorGroupsPanel() {
   const [history,       setHistory]       = useState<GroupHistoryEntry[]>([]);
   const [migrateModal,  setMigrateModal]  = useState<{ groupId: string; table: GroupTable } | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     fetch("/api/connector-groups")
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(setGroups)
       .catch(() => {})
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
     load();
     const id = setInterval(load, 10_000);
     return () => clearInterval(id);
-  }, []);
+  }, [load]);
 
   const toggleExpand = (gid: string) => {
     if (expanded === gid) {
@@ -46,14 +47,14 @@ export function ConnectorGroupsPanel() {
     }
   };
 
-  const loadHistory = (gid: string) => {
+  const loadHistory = useCallback((gid: string) => {
     fetch(`/api/connector-groups/${gid}/history`)
       .then(r => r.ok ? r.json() : [])
       .then(setHistory)
       .catch(() => setHistory([]));
-  };
+  }, []);
 
-  const loadTopicCounts = (gid: string) => {
+  const loadTopicCounts = useCallback((gid: string) => {
     setTopicLoading(true);
     fetch(`/api/connector-groups/${gid}/topic-counts`)
       .then(r => r.ok ? r.json() : [])
@@ -64,7 +65,26 @@ export function ConnectorGroupsPanel() {
       })
       .catch(() => {})
       .finally(() => setTopicLoading(false));
-  };
+  }, []);
+
+  useEffect(() => {
+    const event = sseEvents[0];
+    if (!event) return;
+    if (
+      event.type !== "connector_group_status"
+      && event.type !== "schema_migration.plan_items_added"
+    ) return;
+
+    load();
+    if (expanded) {
+      fetch(`/api/connector-groups/${expanded}`)
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(setDetail)
+        .catch(() => setDetail(null));
+      loadTopicCounts(expanded);
+      loadHistory(expanded);
+    }
+  }, [sseEvents, expanded, load, loadHistory, loadTopicCounts]);
 
   const startGroup  = (gid: string) => fetch(`/api/connector-groups/${gid}/start`,  { method: "POST" }).then(load).catch(() => {});
   const stopGroup   = (gid: string) => fetch(`/api/connector-groups/${gid}/stop`,   { method: "POST" }).then(load).catch(() => {});

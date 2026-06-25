@@ -151,7 +151,7 @@ export default function App() {
           />
         )}
         {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}
-        {nav === "clusters"  && <ConnectorGroupsPanel/>}
+        {nav === "clusters"  && <ConnectorGroupsPanel sseEvents={sseEvents}/>}
         {nav === "rules"     && <RulesTabs/>}
       </main>
 
