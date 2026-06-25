@@ -357,6 +357,7 @@ export function Dashboard({
             let startNote = "";
             if (planMode === "cdc" && !response.connector_start_error) {
               const connectorCount = response.cdc_group?.tables?.length;
+              const connectorStatus = String(response.connector_start?.status || response.cdc_group?.status || "").trim();
               if (response.plan_start_error) {
                 autoStartOk = false;
                 startNote = " · автозапуск не выполнен";
@@ -391,6 +392,9 @@ export function Dashboard({
               }
               if (connectorCount !== undefined) {
                 startNote += ` · Debezium tables: ${connectorCount}`;
+              }
+              if (connectorStatus) {
+                startNote += ` · коннектор: ${connectorStatus}`;
               }
             }
             setPlanMode(null);
