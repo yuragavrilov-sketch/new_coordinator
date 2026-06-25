@@ -26,14 +26,33 @@ bp = Blueprint("schema_migrations", __name__)
 _state: dict = {}
 
 
-def init(*, get_conn_fn, db_available_ref, broadcast_fn):
+def init(*, get_conn_fn, db_available_ref, broadcast_fn, load_configs_fn=None):
     _state["get_conn"]     = get_conn_fn
     _state["db_available"] = db_available_ref
     _state["broadcast"]    = broadcast_fn
+    _state["load_configs"] = load_configs_fn
 
 
 def _db_ok() -> bool:
     return _state["db_available"]["value"]
+
+
+def _source_oracle_conn():
+    load_configs = _state.get("load_configs")
+    if load_configs is None:
+        raise RuntimeError("load_configs not wired")
+    from db.oracle_browser import get_oracle_conn
+    return get_oracle_conn("source", load_configs(), prefer_owner=True)
+
+
+def _derive_cdc_key_info(info: dict) -> tuple[str, str, list[str], bool, bool]:
+    pk_columns = info.get("pk_columns") or []
+    uk_constraints = info.get("uk_constraints") or []
+    if pk_columns:
+        return "PRIMARY_KEY", "PK", pk_columns, True, bool(uk_constraints)
+    if uk_constraints:
+        return "UNIQUE_KEY", "UK", uk_constraints[0].get("columns") or [], False, True
+    return "NONE", "NONE", [], False, False
 
 
 @bp.get("/api/schema-migrations")
@@ -243,6 +262,7 @@ def add_plan_items(sm_id: str):
     stage_tablespace = (payload.get("stage_tablespace") or "PAYSTAGE").strip().upper()
 
     conn = _state["get_conn"]()
+    src_oconn = None
     now = datetime.now(timezone.utc).isoformat()
     try:
         with conn.cursor() as cur:
@@ -343,14 +363,54 @@ def add_plan_items(sm_id: str):
 
             created = []
             for idx, table in enumerate(tables):
+                manual_key_columns = []
                 if isinstance(table, dict):
                     table_name = (table.get("source_table") or table.get("table") or "").strip().upper()
                     target_table = (table.get("target_table") or table_name).strip().upper()
+                    raw_manual_key_columns = table.get("effective_key_columns") or table.get("key_columns") or []
+                    if isinstance(raw_manual_key_columns, str):
+                        manual_key_columns = [
+                            c.strip().upper()
+                            for c in raw_manual_key_columns.split(",")
+                            if c.strip()
+                        ]
+                    elif isinstance(raw_manual_key_columns, list):
+                        manual_key_columns = [
+                            str(c).strip().upper()
+                            for c in raw_manual_key_columns
+                            if str(c).strip()
+                        ]
                 else:
                     table_name = str(table).strip().upper()
                     target_table = table_name
                 if not table_name:
                     continue
+
+                effective_key_type = "NONE"
+                effective_key_source = "NONE"
+                effective_key_columns: list[str] = []
+                source_pk_exists = False
+                source_uk_exists = False
+                if strategy.has_cdc:
+                    if manual_key_columns:
+                        effective_key_type = "CUSTOM"
+                        effective_key_source = "USER"
+                        effective_key_columns = manual_key_columns
+                    else:
+                        if src_oconn is None:
+                            src_oconn = _source_oracle_conn()
+                        from db.oracle_browser import get_table_info
+                        info = get_table_info(src_oconn, src_schema, table_name)
+                        (effective_key_type,
+                         effective_key_source,
+                         effective_key_columns,
+                         source_pk_exists,
+                         source_uk_exists) = _derive_cdc_key_info(info)
+                    if not source_pk_exists and not source_uk_exists and not effective_key_columns:
+                        raise ValueError(
+                            f"CDC table {src_schema}.{table_name} has no PK/UK and no key columns. "
+                            "Add it to the regular pack or provide CDC key columns."
+                        )
 
                 batch_order = batch_base + idx + 1 if sequential else batch_base + 1
                 mid = str(uuid.uuid4())
@@ -363,12 +423,23 @@ def add_plan_items(sm_id: str):
                              target_schema, target_table,
                              effective_key_type, effective_key_columns_json,
                              source_pk_exists, source_uk_exists, topic_name)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'NONE', '[]', FALSE, FALSE, %s)
-                        ON CONFLICT (group_id, source_schema, source_table) DO NOTHING
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (group_id, source_schema, source_table) DO UPDATE
+                        SET    target_schema = EXCLUDED.target_schema,
+                               target_table = EXCLUDED.target_table,
+                               effective_key_type = EXCLUDED.effective_key_type,
+                               effective_key_columns_json = EXCLUDED.effective_key_columns_json,
+                               source_pk_exists = EXCLUDED.source_pk_exists,
+                               source_uk_exists = EXCLUDED.source_uk_exists,
+                               topic_name = EXCLUDED.topic_name
                     """, (
                         str(uuid.uuid4()), connector_group_id,
                         src_schema, table_name,
                         tgt_schema, target_table,
+                        effective_key_type,
+                        json.dumps(effective_key_columns),
+                        source_pk_exists,
+                        source_uk_exists,
                         topic_name,
                     ))
 
@@ -381,6 +452,8 @@ def add_plan_items(sm_id: str):
                         stage_table_name, stage_tablespace,
                         chunk_size, max_parallel_workers,
                         baseline_parallel_degree,
+                        source_pk_exists, source_uk_exists,
+                        effective_key_type, effective_key_source, effective_key_columns_json,
                         strategy,
                         truncate_target,
                         group_id,
@@ -393,6 +466,8 @@ def add_plan_items(sm_id: str):
                         %s, %s,
                         %s, %s,
                         %s,
+                        %s, %s,
+                        %s, %s, %s,
                         %s,
                         %s,
                         %s,
@@ -405,6 +480,8 @@ def add_plan_items(sm_id: str):
                     stage_table, stage_tablespace,
                     chunk_size, max(1, max_workers),
                     max(1, baseline_pd),
+                    source_pk_exists, source_uk_exists,
+                    effective_key_type, effective_key_source, json.dumps(effective_key_columns),
                     strategy.value,
                     truncate_target,
                     connector_group_id if strategy.has_cdc else None,
@@ -464,10 +541,18 @@ def add_plan_items(sm_id: str):
             "count": len(created),
         })
         return jsonify({"plan_id": plan_id, "items": created}), 201
+    except ValueError as exc:
+        conn.rollback()
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 500
     finally:
+        if src_oconn is not None:
+            try:
+                src_oconn.close()
+            except Exception:
+                pass
         conn.close()
 
 

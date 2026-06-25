@@ -205,6 +205,7 @@ schema_mig_mod.init(
     get_conn_fn=get_conn,
     db_available_ref=_db_available,
     broadcast_fn=broadcast,
+    load_configs_fn=_load_cfg,
 )
 app.register_blueprint(schema_mig_bp)
 

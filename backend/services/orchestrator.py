@@ -360,6 +360,95 @@ def _oracle_cfg(connection_id: str) -> dict:
     return _configs().get(connection_id, {})
 
 
+def _open_source_metadata_conn(connection_id: str):
+    if connection_id == "oracle_source":
+        return oracle_browser.get_oracle_conn("source", _configs(), prefer_owner=True)
+    return oracle_scn.open_oracle_conn(_oracle_cfg(connection_id))
+
+
+def _derive_source_key_from_info(info: dict) -> dict | None:
+    pk_columns = info.get("pk_columns") or []
+    uk_constraints = info.get("uk_constraints") or []
+    if pk_columns:
+        return {
+            "source_pk_exists": True,
+            "source_uk_exists": bool(uk_constraints),
+            "effective_key_type": "PRIMARY_KEY",
+            "effective_key_source": "PK",
+            "effective_key_columns_json": json.dumps(pk_columns),
+        }
+    if uk_constraints:
+        return {
+            "source_pk_exists": False,
+            "source_uk_exists": True,
+            "effective_key_type": "UNIQUE_KEY",
+            "effective_key_source": "UK",
+            "effective_key_columns_json": json.dumps(uk_constraints[0].get("columns") or []),
+        }
+    return None
+
+
+def _sync_group_table_key(m: dict, key_fields: dict) -> None:
+    group_id = m.get("group_id")
+    if not group_id:
+        return
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE group_tables
+                SET    source_pk_exists = %s,
+                       source_uk_exists = %s,
+                       effective_key_type = %s,
+                       effective_key_columns_json = %s
+                WHERE  group_id = %s
+                  AND  UPPER(source_schema) = UPPER(%s)
+                  AND  UPPER(source_table) = UPPER(%s)
+            """, (
+                bool(key_fields.get("source_pk_exists")),
+                bool(key_fields.get("source_uk_exists")),
+                key_fields.get("effective_key_type") or "NONE",
+                key_fields.get("effective_key_columns_json") or "[]",
+                group_id,
+                m.get("source_schema") or "",
+                m.get("source_table") or "",
+            ))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        connector_groups_svc.refresh_connector_tables(str(group_id))
+    except Exception as exc:
+        print(f"[orchestrator] refresh_connector_tables warning: {exc}")
+
+
+def _try_infer_cdc_key(mid: str, m: dict) -> dict | None:
+    source_schema = (m.get("source_schema") or "").strip().upper()
+    source_table = (m.get("source_table") or "").strip().upper()
+    source_connection_id = m.get("source_connection_id") or "oracle_source"
+    if not source_schema or not source_table:
+        return None
+    conn = None
+    try:
+        conn = _open_source_metadata_conn(source_connection_id)
+        info = oracle_browser.get_table_info(conn, source_schema, source_table)
+        key_fields = _derive_source_key_from_info(info)
+        if not key_fields:
+            return None
+        _update(mid, key_fields)
+        _sync_group_table_key(m, key_fields)
+        return key_fields
+    except Exception as exc:
+        print(f"[orchestrator] could not infer CDC key for {source_schema}.{source_table}: {exc}")
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def _current_phase(migration_id: str) -> str | None:
     """Read the current phase from the DB.  Used by threaded handlers to
     detect if the user cancelled while they were running."""
@@ -1103,6 +1192,13 @@ def _handle_new(mid: str, m: dict) -> None:
     pk = m.get("source_pk_exists", False)
     uk = m.get("source_uk_exists", False)
     key_cols = json.loads(m.get("effective_key_columns_json") or "[]")
+
+    if strategy.has_cdc and not pk and not uk and not key_cols:
+        inferred = _try_infer_cdc_key(mid, m)
+        if inferred:
+            pk = inferred.get("source_pk_exists", False)
+            uk = inferred.get("source_uk_exists", False)
+            key_cols = json.loads(inferred.get("effective_key_columns_json") or "[]")
 
     if strategy.has_cdc and not pk and not uk and not key_cols:
         _fail(mid,
