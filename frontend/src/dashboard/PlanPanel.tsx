@@ -235,6 +235,7 @@ export function PlanPanel({
           failed={failed}
           currentBatch={currentBatch}
           items={plan.items}
+          planSourceSchema={plan.src_schema}
           cdcGroup={effectiveCdcGroup}
           cdcActionBusy={cdcActionBusy}
           onSyncCdcGroup={syncCdcGroup}
@@ -287,6 +288,7 @@ export function PlanPanel({
                   <CdcConnectorCard
                     group={effectiveCdcGroup}
                     planItems={pack.items}
+                    planSourceSchema={plan.src_schema}
                     busyAction={cdcActionBusy}
                     onSync={syncCdcGroup}
                     onStart={startCdcGroup}
@@ -294,6 +296,7 @@ export function PlanPanel({
                   <CdcConnectorDetails
                     group={effectiveCdcGroup}
                     planItems={pack.items}
+                    planSourceSchema={plan.src_schema}
                     busyKey={cdcActionBusy}
                     onRemoveExtra={removeCdcGroupTable}
                   />
@@ -337,6 +340,7 @@ function PlanOverview({
   failed,
   currentBatch,
   items,
+  planSourceSchema,
   cdcGroup,
   cdcActionBusy,
   onSyncCdcGroup,
@@ -351,6 +355,7 @@ function PlanOverview({
   failed: number;
   currentBatch?: [number, MigrationPlanItem[]];
   items: MigrationPlanItem[];
+  planSourceSchema: string;
   cdcGroup: MigrationPlanCdcGroup | null;
   cdcActionBusy: string;
   onSyncCdcGroup: (group: MigrationPlanCdcGroup) => void;
@@ -384,6 +389,7 @@ function PlanOverview({
         <CdcConnectorCard
           group={cdcGroup}
           planItems={items.filter(isCdcItem)}
+          planSourceSchema={planSourceSchema}
           busyAction={cdcActionBusy}
           onSync={onSyncCdcGroup}
           onStart={onStartCdcGroup}
@@ -428,6 +434,7 @@ function PlanOverview({
 function CdcConnectorCard({
   group,
   planItems,
+  planSourceSchema = "",
   busyAction,
   onSync,
   onStart,
@@ -435,15 +442,16 @@ function CdcConnectorCard({
 }: {
   group: MigrationPlanCdcGroup;
   planItems: MigrationPlanItem[];
+  planSourceSchema?: string;
   busyAction: string;
   onSync: (group: MigrationPlanCdcGroup) => void;
   onStart: (group: MigrationPlanCdcGroup) => void;
   showExtraTables?: boolean;
 }) {
-  const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
+  const planKeys = new Set(planItems.map(item => planItemTableKey(item, planSourceSchema)));
   const connectorTables = group.tables || [];
   const extraTables = showExtraTables
-    ? connectorTables.filter(tbl => !planKeys.has(tbl.source_table.toUpperCase()))
+    ? connectorTables.filter(tbl => !planKeys.has(cdcTableKey(tbl)))
     : [];
   const keyColsCount = connectorTables.filter(tbl => {
     if (tbl.source_pk_exists || tbl.source_uk_exists) return false;
@@ -583,17 +591,19 @@ function CdcConnectorCard({
 function CdcConnectorDetails({
   group,
   planItems,
+  planSourceSchema,
   busyKey,
   onRemoveExtra,
 }: {
   group: MigrationPlanCdcGroup;
   planItems: MigrationPlanItem[];
+  planSourceSchema: string;
   busyKey: string;
   onRemoveExtra: (group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) => void;
 }) {
   const planItemsByTable = new Map<string, MigrationPlanItem[]>();
   for (const item of planItems) {
-    const key = item.table_name.toUpperCase();
+    const key = planItemTableKey(item, planSourceSchema);
     if (!planItemsByTable.has(key)) planItemsByTable.set(key, []);
     planItemsByTable.get(key)!.push(item);
   }
@@ -617,7 +627,7 @@ function CdcConnectorDetails({
         <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} таблиц</span>
       </div>
       {rows.map(tbl => {
-        const tablePlanItems = planItemsByTable.get(tbl.source_table.toUpperCase()) || [];
+        const tablePlanItems = planItemsByTable.get(cdcTableKey(tbl)) || [];
         const inPlan = tablePlanItems.length > 0;
         const hasActivePlanItem = tablePlanItems.some(isActiveCdcPlanItem);
         const canRemove = !hasActivePlanItem;
@@ -692,6 +702,14 @@ function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] 
 
 function tableLabel(tbl: { source_schema: string; source_table: string }) {
   return `${tbl.source_schema}.${tbl.source_table}`;
+}
+
+function cdcTableKey(tbl: { source_schema: string; source_table: string }) {
+  return `${tbl.source_schema}.${tbl.source_table}`.toUpperCase();
+}
+
+function planItemTableKey(item: MigrationPlanItem, sourceSchema: string) {
+  return `${sourceSchema}.${item.table_name}`.toUpperCase();
 }
 
 function MonoLine({ children }: { children: React.ReactNode }) {
