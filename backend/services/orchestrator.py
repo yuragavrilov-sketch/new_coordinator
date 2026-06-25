@@ -1741,6 +1741,7 @@ def _handle_group_connector_starting(group_id: str) -> None:
     def _run():
         try:
             result = connector_groups_svc.do_start_connector(group_id)
+            connector_groups_svc.refresh_connector_tables(group_id)
             connector_groups_svc.transition_group(
                 group_id, "RUNNING",
                 f"Коннектор запущен: {result.get('name', '?')}")

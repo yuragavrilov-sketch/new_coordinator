@@ -314,7 +314,9 @@ export function Dashboard({
           onClose={() => setPlanMode(null)}
           onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
+            let autoStartOk = true;
             if (response.connector_start_error) {
+              autoStartOk = false;
               setPlanErr(`CDC-коннектор не стартовал: ${response.connector_start_error}`);
             }
             let startNote = "";
@@ -329,6 +331,8 @@ export function Dashboard({
                 if (/already running/i.test(msg)) {
                   startNote = " · в очереди за текущей миграцией";
                 } else {
+                  autoStartOk = false;
+                  startNote = " · автозапуск не выполнен";
                   setPlanErr(msg);
                 }
               }
@@ -337,7 +341,11 @@ export function Dashboard({
             setSelectedIds(new Set());
             setActivePlanId(planId);
             onPlanChanged(planId);
-            setToast(`Добавлено в ${target}: ${count}${startNote}`);
+            setToast(
+              autoStartOk
+                ? `Добавлено в ${target}: ${count}${startNote}`
+                : `Добавлено в ${target}: ${count} · проверьте ошибку автозапуска`
+            );
             objectsApi.reload();
             eventsApi.reload();
             planApi.reload();
