@@ -95,6 +95,24 @@ def test_schema_migration_starts_each_created_cdc_queue_position(monkeypatch):
     ]
 
 
+def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+
+    schema_migrations._kick_cdc_group_best_effort("gid-1")
+
+    assert calls == [
+        ("queue",),
+        ("kick", "gid-1"),
+    ]
+
+
 def test_schema_migration_reuses_plan_cdc_group_when_schema_group_is_empty():
     assert schema_migrations._resolve_cdc_connector_group_id(
         sm_group_id=None,

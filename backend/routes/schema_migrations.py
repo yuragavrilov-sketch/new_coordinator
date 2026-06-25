@@ -72,6 +72,17 @@ def _start_created_cdc_plan_batches(plan_id: int, created: list[dict]) -> list[d
     return starts
 
 
+def _kick_cdc_group_best_effort(group_id: str | None) -> None:
+    if not group_id:
+        return
+    try:
+        from services import orchestrator
+        orchestrator._update_queue_positions()
+        orchestrator._kick_new_migrations_for_group(group_id)
+    except Exception as exc:
+        print(f"[schema_migrations] CDC queue kick warning: {exc}")
+
+
 def _resolve_cdc_connector_group_id(
     sm_group_id,
     plan_group_id,
@@ -675,6 +686,7 @@ def add_plan_items(sm_id: str):
                 try:
                     plan_starts = _start_created_cdc_plan_batches(plan_id, created)
                     plan_start = plan_starts[0] if plan_starts else None
+                    _kick_cdc_group_best_effort(connector_group_id)
                 except Exception as start_exc:
                     plan_start_error = str(start_exc)
                     print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
