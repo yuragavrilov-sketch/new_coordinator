@@ -64,13 +64,13 @@ export function PlanPanel({
   const hasPending = actualPending > 0;
   const nextPendingBatch = batches.find(([, items]) => items.some(i => i.status === "PENDING"));
   const nextPendingItems = nextPendingBatch?.[1].filter(i => i.status === "PENDING") || [];
-  const runningItems = plan.items.filter(i => i.status === "RUNNING");
+  const runningItems = plan.items.filter(isRunningItem);
   const runningHasNonCdc = runningItems.some(i => !isCdcItem(i));
   const nextPendingIsCdc = nextPendingItems.length > 0 && nextPendingItems.every(isCdcItem);
   const canStart = ["READY", "RUNNING"].includes(plan.status)
     && hasPending
     && (running === 0 || (nextPendingIsCdc && !runningHasNonCdc));
-  const currentBatch = batches.find(([, items]) => items.some(i => i.status === "RUNNING"))
+  const currentBatch = batches.find(([, items]) => items.some(isRunningItem))
     || batches.find(([, items]) => items.some(i => i.status === "PENDING"))
     || batches[batches.length - 1];
 
@@ -366,7 +366,7 @@ function PlanRow({ item }: { item: MigrationPlanItem }) {
 function itemVisualState(item: MigrationPlanItem): "done" | "failed" | "queued" | "running" | "idle" {
   const phase = String(item.phase || "").toUpperCase();
   const status = String(item.status || "").toUpperCase();
-  if (status === "DONE" || phase === "COMPLETED") return "done";
+  if (status === "DONE" || phase === "COMPLETED" || phase === "STEADY_STATE") return "done";
   if (BAD.has(status) || phase === "FAILED" || phase === "CANCELLED") return "failed";
   if (status === "PENDING" || phase === "DRAFT" || phase === "NEW") return "queued";
   if (status === "RUNNING") return "running";
