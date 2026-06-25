@@ -302,6 +302,12 @@ def _build_add_plan_items_response_payload(
     }
 
 
+def _requested_plan_table_name(table) -> str:
+    if isinstance(table, dict):
+        return (table.get("source_table") or table.get("table") or "").strip().upper()
+    return str(table).strip().upper()
+
+
 def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list[str]:
     available = {
         str(col.get("name") or "").strip().upper()
@@ -569,6 +575,8 @@ def add_plan_items(sm_id: str):
     tables = payload.get("tables") or []
     if not isinstance(tables, list) or not tables:
         return jsonify({"error": "tables required"}), 400
+    if not any(_requested_plan_table_name(table) for table in tables):
+        return jsonify({"error": "at least one table name is required"}), 400
 
     raw_strategy = payload.get("strategy") or "BULK_DIRECT"
     try:
@@ -698,12 +706,12 @@ def add_plan_items(sm_id: str):
             for idx, table in enumerate(tables):
                 manual_key_columns = []
                 if isinstance(table, dict):
-                    table_name = (table.get("source_table") or table.get("table") or "").strip().upper()
+                    table_name = _requested_plan_table_name(table)
                     target_table = (table.get("target_table") or table_name).strip().upper()
                     raw_manual_key_columns = table.get("effective_key_columns") or table.get("key_columns") or []
                     manual_key_columns = _normalize_manual_cdc_key_columns(raw_manual_key_columns)
                 else:
-                    table_name = str(table).strip().upper()
+                    table_name = _requested_plan_table_name(table)
                     target_table = table_name
                 if not table_name:
                     continue

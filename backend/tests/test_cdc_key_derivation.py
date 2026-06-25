@@ -312,6 +312,24 @@ def test_schema_migration_cdc_group_endpoint_uses_schema_group_without_plan(monk
     assert conn.closed
 
 
+def test_schema_migration_add_items_rejects_payload_without_table_names(monkeypatch):
+    monkeypatch.setitem(schema_migrations._state, "db_available", {"value": True})
+
+    app = Flask(__name__)
+    app.register_blueprint(schema_migrations.bp)
+
+    res = app.test_client().post(
+        "/api/schema-migrations/sm-1/plan/items",
+        json={
+            "strategy": "CDC_DIRECT",
+            "tables": [{}, {"source_table": "  "}],
+        },
+    )
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "at least one table name is required"
+
+
 def test_schema_migration_add_items_response_includes_cdc_autostart_snapshot(monkeypatch):
     monkeypatch.setattr(
         schema_migrations,
