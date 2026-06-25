@@ -245,6 +245,21 @@ def update_group_status(group_id: str, status: str, error_text: str | None = Non
     transition_group(group_id, status, error_text=error_text)
 
 
+def clear_group_error(group_id: str) -> None:
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE connector_groups
+                SET    error_text = NULL,
+                       updated_at = NOW()
+                WHERE  group_id = %s
+            """, (group_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _normalize_polled_connector_status(group_status: str | None,
                                        connector_status: str) -> tuple[str, str | None]:
     """Return (reported_status, db_status_to_write).

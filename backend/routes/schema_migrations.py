@@ -101,6 +101,14 @@ def _record_cdc_connector_start_error(
     return next_status
 
 
+def _clear_cdc_connector_start_error(connector_group_id: str | None) -> None:
+    if not connector_group_id:
+        return
+    from services import connector_groups as groups
+
+    groups.clear_group_error(connector_group_id)
+
+
 def _kick_cdc_group_best_effort(group_id: str | None) -> None:
     if not group_id:
         return
@@ -779,6 +787,7 @@ def add_plan_items(sm_id: str):
                     connector_group_id,
                     connector_group_status,
                 )
+                _clear_cdc_connector_start_error(connector_group_id)
                 _state["broadcast"]({
                     "type": "connector_group_status",
                     "group_id": connector_group_id,

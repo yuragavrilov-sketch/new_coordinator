@@ -267,6 +267,20 @@ def test_schema_migration_records_running_connector_sync_error_without_stopping(
     assert calls == [("gid-1", "RUNNING", "bad table.include.list")]
 
 
+def test_schema_migration_clears_connector_start_error_after_success(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "clear_group_error",
+        lambda group_id: calls.append(group_id),
+    )
+
+    schema_migrations._clear_cdc_connector_start_error("gid-1")
+
+    assert calls == ["gid-1"]
+
+
 def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     calls = []
 
