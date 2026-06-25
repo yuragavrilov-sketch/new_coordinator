@@ -368,16 +368,26 @@ def _delete_row(conn, schema: str, table: str, key_data: dict, key_cols: list) -
         )
 
 
+def _require_event_keys(row: dict, key_cols: list, op: str) -> None:
+    missing = [col for col in key_cols if col not in row]
+    if missing:
+        raise ValueError(
+            f"CDC {op} event is missing key columns: {', '.join(missing)}"
+        )
+
+
 def _apply_event(oracle_conn, event: dict, target_schema: str,
                  target_table: str, key_cols: list) -> None:
     op = event["op"]
     if op in ("c", "r", "u"):
         row = event.get("after") or {}
         if row:
+            _require_event_keys(row, key_cols, op)
             _merge_upsert(oracle_conn, target_schema, target_table, row, key_cols)
     elif op == "d":
         row = event.get("before") or {}
         if row and key_cols:
+            _require_event_keys(row, key_cols, op)
             _delete_row(oracle_conn, target_schema, target_table, row, key_cols)
 
 
