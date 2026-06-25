@@ -51,7 +51,11 @@ export function PlanPanel({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
       onReload();
+      if (body.sync_error) {
+        setCdcActionErr(`Таблица убрана из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
+      }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
     } finally {

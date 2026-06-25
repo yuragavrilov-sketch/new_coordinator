@@ -215,8 +215,12 @@ export function AddToPlanModal({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
       setHiddenCdcTableKeys(prev => new Set(prev).add(label));
       await onReloadCdcGroup?.();
+      if (body.sync_error) {
+        setErr(`Таблица убрана из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
+      }
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
     } finally {

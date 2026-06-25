@@ -228,7 +228,10 @@ def remove_group_table(group_id: str, source_schema: str, source_table: str):
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
-        return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
+        return jsonify({
+            "removed": True,
+            "sync_error": f"CDC connector config sync failed: {exc}",
+        }), 200
     return "", 204
 
 
