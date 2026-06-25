@@ -1901,6 +1901,78 @@ def test_orchestrator_skips_trigger_job_when_cdc_catchup_phase_changed(monkeypat
     assert calls == [("transition", "mid-cdc", "CDC_CAUGHT_UP", "STEADY_STATE")]
 
 
+def test_orchestrator_waits_for_real_cdc_lag_checkin_before_caught_up(monkeypatch):
+    calls = []
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, *_args):
+            pass
+
+        def fetchone(self):
+            return (0, None, None)
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event)))
+    monkeypatch.setattr(orchestrator, "_update", lambda *_args, **_kwargs: calls.append(("update",)))
+    monkeypatch.setattr(orchestrator, "_transition", lambda *_args, **_kwargs: calls.append(("transition",)))
+
+    orchestrator._handle_cdc_catching_up("mid-cdc", {"migration_id": "mid-cdc"})
+
+    assert calls == [("close",)]
+
+
+def test_orchestrator_transitions_cdc_caught_up_after_lag_checkin(monkeypatch):
+    calls = []
+
+    class UpdatedAt:
+        def isoformat(self):
+            return "2026-06-25T00:00:00"
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, *_args):
+            pass
+
+        def fetchone(self):
+            return (0, {}, UpdatedAt())
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event["type"], event["total_lag"])))
+    monkeypatch.setattr(orchestrator, "_update", lambda mid, fields: calls.append(("update", mid, fields["kafka_lag"])))
+    monkeypatch.setattr(orchestrator, "_transition", lambda mid, phase, **kwargs: calls.append(("transition", mid, phase)))
+
+    orchestrator._handle_cdc_catching_up("mid-cdc", {"migration_id": "mid-cdc"})
+
+    assert ("update", "mid-cdc", 0) in calls
+    assert ("broadcast", "kafka_lag", 0) in calls
+    assert ("transition", "mid-cdc", "CDC_CAUGHT_UP") in calls
+
+
 def test_orchestrator_broadcasts_created_pending_trigger_job(monkeypatch):
     calls = []
 

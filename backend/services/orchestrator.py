@@ -1274,7 +1274,7 @@ def _handle_cdc_catching_up(mid: str, m: dict) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT total_lag, updated_at
+                SELECT total_lag, lag_by_partition, updated_at
                 FROM   migration_cdc_state
                 WHERE  migration_id = %s
             """, (m["migration_id"],))
@@ -1285,7 +1285,10 @@ def _handle_cdc_catching_up(mid: str, m: dict) -> None:
     if not row:
         return
 
-    lag, updated_at = int(row[0] or 0), row[1]
+    lag, lag_by_partition, updated_at = int(row[0] or 0), row[1], row[2]
+    if lag_by_partition is None:
+        return
+
     _update(mid, {"kafka_lag": lag, "kafka_lag_checked_at": updated_at})
     _state["broadcast"]({
         "type":         "kafka_lag",
