@@ -634,6 +634,28 @@ def _update_queue_positions() -> None:
         conn.close()
 
 
+def _kick_new_migrations_for_group(group_id: str) -> None:
+    """Try to process the first NEW CDC migration for a just-running group."""
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT m.*
+                FROM   migrations m
+                WHERE  m.group_id = %s
+                  AND  m.phase = 'NEW'
+                  AND  LEFT(COALESCE(m.strategy, ''), 4) = 'CDC_'
+                ORDER BY m.state_changed_at ASC
+                LIMIT  1
+            """, (group_id,))
+            rows = [row_to_dict(cur, r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    for m in rows:
+        _handle_new(m["migration_id"], m)
+
+
 def _prepare_target_for_direct_load(mid: str, m: dict, dst_cfg: dict, message_parts: list[str]) -> None:
     """Prepare target table for a DIRECT bulk load.
 
@@ -1821,6 +1843,7 @@ def _handle_group_connector_starting(group_id: str) -> None:
                 group_id, "RUNNING",
                 f"Коннектор запущен: {result.get('name', '?')}")
             _update_queue_positions()
+            _kick_new_migrations_for_group(group_id)
             _broadcast({
                 "type": "connector_group_status",
                 "group_id": group_id, "status": "RUNNING",

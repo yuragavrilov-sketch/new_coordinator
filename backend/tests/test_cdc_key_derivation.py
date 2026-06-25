@@ -262,6 +262,11 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
         "_update_queue_positions",
         lambda: calls.append(("queue",)),
     )
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
     monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event["status"])))
     orchestrator._group_in_progress.clear()
 
@@ -272,5 +277,51 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
         ("refresh", "gid-1"),
         ("transition", "gid-1", "RUNNING"),
         ("queue",),
+        ("kick", "gid-1"),
         ("broadcast", "RUNNING"),
     ]
+
+
+def test_orchestrator_kicks_first_new_cdc_migration_for_group(monkeypatch):
+    executed = []
+    handled = []
+    row = {
+        "migration_id": "mid-1",
+        "group_id": "gid-1",
+        "phase": "NEW",
+        "strategy": "CDC_DIRECT",
+        "state_changed_at": "2026-06-25T00:00:00Z",
+    }
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            executed.append((query, params))
+
+        def fetchall(self):
+            return [row]
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setattr(orchestrator, "row_to_dict", lambda _cur, value: dict(value))
+    monkeypatch.setattr(orchestrator, "_handle_new", lambda mid, migration: handled.append((mid, migration)))
+
+    orchestrator._kick_new_migrations_for_group("gid-1")
+
+    assert handled == [("mid-1", row)]
+    query, params = executed[0]
+    assert params == ("gid-1",)
+    assert "m.phase = 'NEW'" in query
+    assert "LEFT(COALESCE(m.strategy, ''), 4) = 'CDC_'" in query
+    assert "LIMIT  1" in query

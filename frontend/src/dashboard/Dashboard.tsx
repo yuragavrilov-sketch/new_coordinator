@@ -311,6 +311,7 @@ export function Dashboard({
           schemaMigrationId={selectedId}
           tables={selectedTables}
           initialMode={planMode}
+          cdcGroup={planApi.data?.cdc_group || null}
           onClose={() => setPlanMode(null)}
           onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
@@ -321,6 +322,7 @@ export function Dashboard({
             }
             let startNote = "";
             if (planMode === "cdc" && !response.connector_start_error) {
+              const connectorCount = response.cdc_group?.tables?.length;
               if (response.plan_start_error) {
                 autoStartOk = false;
                 startNote = " · автозапуск не выполнен";
@@ -350,6 +352,9 @@ export function Dashboard({
                     setPlanErr(msg);
                   }
                 }
+              }
+              if (connectorCount !== undefined) {
+                startNote += ` · Debezium tables: ${connectorCount}`;
               }
             }
             setPlanMode(null);

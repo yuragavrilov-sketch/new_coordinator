@@ -90,6 +90,27 @@ def _resolve_cdc_connector_group_id(
     return values[0] if values else None
 
 
+def _load_cdc_connector_summary(group_id: str | None) -> dict | None:
+    if not group_id:
+        return None
+    try:
+        from services import connector_groups as groups
+
+        group = groups.get_group(group_id)
+        if not group:
+            return None
+        tables = groups.get_group_tables(group_id)
+        group["active_connector_name"] = groups._active_connector_name(group)
+        group["active_topic_prefix"] = groups._active_topic_prefix(group)
+        group["tables"] = tables
+        group["table_include_list"] = groups._build_table_include_list(group_id)
+        group["message_key_columns"] = groups._build_key_columns(group_id)
+        return group
+    except Exception as exc:
+        print(f"[schema_migrations] CDC connector summary warning: {exc}")
+        return None
+
+
 def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list[str]:
     available = {
         str(col.get("name") or "").strip().upper()
@@ -670,6 +691,7 @@ def add_plan_items(sm_id: str):
             "plan_id": plan_id,
             "items": created,
             "connector_group_id": connector_group_id if strategy.has_cdc else None,
+            "cdc_group": _load_cdc_connector_summary(connector_group_id) if strategy.has_cdc else None,
             "connector_start": connector_start,
             "connector_start_error": connector_start_error,
             "plan_start": plan_start,

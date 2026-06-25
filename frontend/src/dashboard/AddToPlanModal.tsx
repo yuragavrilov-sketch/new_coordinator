@@ -3,7 +3,13 @@ import { t } from "../theme";
 import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
-import { addSchemaPlanItems, type AddPlanItemsPayload, type AddPlanItemsResp } from "./api";
+import {
+  addSchemaPlanItems,
+  type AddPlanItemsPayload,
+  type AddPlanItemsResp,
+  type MigrationPlanCdcGroup,
+  type MigrationPlanCdcTable,
+} from "./api";
 
 interface BulkTable {
   source_schema: string;
@@ -24,11 +30,12 @@ interface Props {
   schemaMigrationId: string;
   tables: BulkTable[];
   initialMode?: "historical" | "cdc";
+  cdcGroup?: MigrationPlanCdcGroup | null;
   onClose: () => void;
   onDone: (planId: number, count: number, response: AddPlanItemsResp) => void | Promise<void>;
 }
 
-export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", onClose, onDone }: Props) {
+export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", cdcGroup, onClose, onDone }: Props) {
   const [mode, setMode] = useState<"historical" | "cdc">(initialMode);
   const [strategy, setStrategy] = useState<AddPlanItemsPayload["strategy"]>(
     initialMode === "cdc" ? "CDC_DIRECT" : "BULK_DIRECT",
@@ -50,6 +57,13 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     () => tables.map(x => `${x.source_schema}.${x.source_table}`).join("|"),
     [tables],
   );
+  const selectedKeys = useMemo(
+    () => new Set(tables.map(x => `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`)),
+    [tables],
+  );
+  const connectorTables = cdcGroup?.tables || [];
+  const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
+  const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -59,6 +73,14 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     const raw = String(info?.supplemental_log_data_all ?? "").trim().toUpperCase();
     if (!raw) return null;
     return raw === "YES" || raw === "TRUE" || raw === "1";
+  }
+
+  function cdcTableKey(x: MigrationPlanCdcTable) {
+    return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
+  }
+
+  function cdcTableLabel(x: MigrationPlanCdcTable) {
+    return cdcTableKey(x);
   }
 
   useEffect(() => {
@@ -293,6 +315,61 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
               </Field>
             )}
           </Section>
+
+          {mode === "cdc" && (
+            <Section title="CDC-коннектор">
+              {cdcGroup ? (
+                <div style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: "9px 10px",
+                  border: `1px solid ${t.border.subtle}`,
+                  borderRadius: t.radius.sm,
+                  background: t.bg.s1,
+                  fontSize: 12,
+                  color: t.text.secondary,
+                }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <span>Статус: <strong style={{ color: t.text.primary }}>{cdcGroup.status}</strong></span>
+                    <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+                  </div>
+                  {connectorSelectedTables.length > 0 && (
+                    <div style={{ color: t.amber.fg }}>
+                      Уже в коннекторе из выбранных: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
+                    </div>
+                  )}
+                  {connectorOtherTables.length > 0 && (
+                    <div>
+                      Остальные таблицы коннектора: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                    </div>
+                  )}
+                  {cdcGroup.table_include_list && (
+                    <div style={{
+                      fontFamily: t.font.mono,
+                      fontSize: 11,
+                      color: t.text.muted,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}>
+                      table.include.list: {cdcGroup.table_include_list}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  padding: "9px 10px",
+                  border: `1px solid ${t.blue.dim}`,
+                  borderRadius: t.radius.sm,
+                  background: t.blue.bg,
+                  color: t.blue.fg,
+                  fontSize: 12,
+                }}>
+                  CDC-коннектор еще не создан. Он будет создан автоматически для этой миграции.
+                </div>
+              )}
+            </Section>
+          )}
 
           {mode === "cdc" && (
             <Section title="Ключи CDC">
