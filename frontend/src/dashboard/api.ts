@@ -173,17 +173,47 @@ export interface MigrationPlanItem {
   state_changed_at?: string | null;
 }
 
+export interface MigrationPlanCdcTable {
+  id:                         string;
+  source_schema:              string;
+  source_table:               string;
+  target_schema:              string;
+  target_table:               string;
+  effective_key_type:         string;
+  effective_key_columns_json: string | string[];
+  source_pk_exists:           boolean;
+  source_uk_exists:           boolean;
+  topic_name:                 string;
+  created_at?:                string | null;
+}
+
+export interface MigrationPlanCdcGroup {
+  group_id:               string;
+  group_name:             string;
+  status:                 string;
+  connector_name:         string;
+  topic_prefix:           string;
+  consumer_group_prefix?: string | null;
+  run_id?:                string | null;
+  error_text?:            string | null;
+  table_include_list:     string;
+  message_key_columns:    string;
+  tables:                 MigrationPlanCdcTable[];
+}
+
 export interface MigrationPlanDetail {
   plan_id:       number;
   name:          string;
   src_schema:    string;
   tgt_schema:    string;
+  connector_group_id?: string | null;
   status:        string;
   defaults_json: Record<string, unknown> | string;
   created_at:    string | null;
   started_at:    string | null;
   completed_at:  string | null;
   items:         MigrationPlanItem[];
+  cdc_group?:    MigrationPlanCdcGroup | null;
 }
 
 export async function getMigrationPlan(planId: number): Promise<MigrationPlanDetail> {

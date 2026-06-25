@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { t } from "../theme";
 import { ProgressBar } from "../components/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
-import type { MigrationPlanDetail, MigrationPlanItem } from "./api";
+import type { MigrationPlanCdcGroup, MigrationPlanDetail, MigrationPlanItem } from "./api";
 
 interface Props {
   plan: MigrationPlanDetail | null;
@@ -137,6 +137,7 @@ export function PlanPanel({
           failed={failed}
           currentBatch={currentBatch}
           items={plan.items}
+          cdcGroup={plan.cdc_group || null}
           canStart={canStart}
         />
       )}
@@ -174,6 +175,9 @@ export function PlanPanel({
                   {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
                 </div>
               ))}
+              {pack.key === "cdc" && plan.cdc_group && (
+                <CdcConnectorDetails group={plan.cdc_group} planItems={pack.items}/>
+              )}
             </div>
           ))}
         </div>
@@ -212,6 +216,7 @@ function PlanOverview({
   failed,
   currentBatch,
   items,
+  cdcGroup,
   canStart,
 }: {
   batchCount: number;
@@ -222,6 +227,7 @@ function PlanOverview({
   failed: number;
   currentBatch?: [number, MigrationPlanItem[]];
   items: MigrationPlanItem[];
+  cdcGroup: MigrationPlanCdcGroup | null;
   canStart: boolean;
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
@@ -246,6 +252,8 @@ function PlanOverview({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {packGroups(items).map(pack => <PackCard key={pack.key} title={pack.title} items={pack.items}/>)}
       </div>
+
+      {cdcGroup && <CdcConnectorCard group={cdcGroup} planItems={items.filter(isCdcItem)}/>}
 
       <div style={{
         display: "grid",
@@ -282,6 +290,103 @@ function PlanOverview({
   );
 }
 
+function CdcConnectorCard({ group, planItems }: { group: MigrationPlanCdcGroup; planItems: MigrationPlanItem[] }) {
+  const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
+  const connectorTables = group.tables || [];
+  const extraTables = connectorTables.filter(tbl => !planKeys.has(tbl.source_table.toUpperCase()));
+  const keyColsCount = connectorTables.filter(tbl => {
+    if (tbl.source_pk_exists || tbl.source_uk_exists) return false;
+    const raw = tbl.effective_key_columns_json;
+    if (Array.isArray(raw)) return raw.length > 0;
+    return String(raw || "[]") !== "[]";
+  }).length;
+
+  return (
+    <div style={{
+      padding: "9px 10px",
+      border: `1px solid ${extraTables.length ? t.amber.dim : t.border.subtle}`,
+      borderRadius: t.radius.md,
+      background: extraTables.length ? t.amber.bg : t.bg.s2,
+      minWidth: 0,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>CDC connector</div>
+          <Badge tone={group.status === "RUNNING" ? "run" : group.status === "FAILED" ? "bad" : "idle"}>
+            {group.status}
+          </Badge>
+        </div>
+        <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {group.connector_name}
+        </span>
+      </div>
+      <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
+        <span>Debezium tables: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+        <span>CDC rows in plan: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
+        <span>Manual keys: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
+      </div>
+      {extraTables.length > 0 && (
+        <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
+          In connector, not in this plan: {extraTables.map(tableLabel).join(", ")}
+        </div>
+      )}
+      {group.table_include_list && (
+        <MonoLine>table.include.list: {group.table_include_list}</MonoLine>
+      )}
+      {group.message_key_columns && (
+        <MonoLine>message.key.columns: {group.message_key_columns}</MonoLine>
+      )}
+    </div>
+  );
+}
+
+function CdcConnectorDetails({ group, planItems }: { group: MigrationPlanCdcGroup; planItems: MigrationPlanItem[] }) {
+  const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
+  const rows = group.tables || [];
+  if (rows.length === 0) return null;
+  return (
+    <div style={{
+      border: `1px solid ${t.border.subtle}`,
+      borderRadius: t.radius.md,
+      overflow: "hidden",
+      background: t.bg.s2,
+    }}>
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "7px 10px",
+        borderBottom: `1px solid ${t.border.subtle}`,
+      }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Actual Debezium connector</span>
+        <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} tables</span>
+      </div>
+      {rows.map(tbl => {
+        const inPlan = planKeys.has(tbl.source_table.toUpperCase());
+        return (
+          <div key={tbl.id} style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(170px, 1fr) 100px minmax(150px, 1fr)",
+            gap: 10,
+            alignItems: "center",
+            padding: "7px 10px",
+            borderTop: `1px solid ${t.bg.s1}`,
+            fontSize: 12,
+          }}>
+            <div style={{ fontFamily: t.font.mono, color: t.text.primary, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {tableLabel(tbl)}
+            </div>
+            <Badge tone={inPlan ? "ok" : "idle"}>{inPlan ? "in plan" : "connector"}</Badge>
+            <div style={{ fontFamily: t.font.mono, color: t.text.muted, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {tbl.topic_name || "-"}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] }) {
   const done = items.filter(isDoneItem).length;
   const running = items.filter(isRunningItem).length;
@@ -307,6 +412,26 @@ function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] 
         <span>Running: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{running}</strong></span>
         <span>Failed: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{failed}</strong></span>
       </div>
+    </div>
+  );
+}
+
+function tableLabel(tbl: { source_schema: string; source_table: string }) {
+  return `${tbl.source_schema}.${tbl.source_table}`;
+}
+
+function MonoLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      marginTop: 6,
+      fontFamily: t.font.mono,
+      fontSize: 11,
+      color: t.text.muted,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    }}>
+      {children}
     </div>
   );
 }

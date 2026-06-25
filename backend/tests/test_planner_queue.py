@@ -94,3 +94,37 @@ def test_plan_item_status_for_terminal_phase():
     assert planner._plan_item_status_for_phase("STEADY_STATE") == "DONE"
     assert planner._plan_item_status_for_phase("FAILED") == "FAILED"
     assert planner._plan_item_status_for_phase("CANCELLED") == "CANCELLED"
+
+
+def test_group_table_include_list_is_whole_cdc_pack():
+    tables = [
+        {"source_schema": "tcbpay", "source_table": "allorders"},
+        {"source_schema": "TCBPAY", "source_table": "MERCHANTS#ORDERS"},
+        {"source_schema": "TCBPAY", "source_table": "ALLORDERS"},
+    ]
+
+    assert (
+        planner._group_table_include_list(tables)
+        == "TCBPAY.ALLORDERS,TCBPAY.MERCHANTS#ORDERS"
+    )
+
+
+def test_group_message_key_columns_uses_only_tables_without_pk_or_uk():
+    tables = [
+        {
+            "source_schema": "TCBPAY",
+            "source_table": "ALLORDERS",
+            "source_pk_exists": False,
+            "source_uk_exists": False,
+            "effective_key_columns_json": '["ID", "MERCHANT_ID"]',
+        },
+        {
+            "source_schema": "TCBPAY",
+            "source_table": "MERCHANTS",
+            "source_pk_exists": True,
+            "source_uk_exists": False,
+            "effective_key_columns_json": '["ID"]',
+        },
+    ]
+
+    assert planner._group_message_key_columns(tables) == "TCBPAY.ALLORDERS:ID,MERCHANT_ID"

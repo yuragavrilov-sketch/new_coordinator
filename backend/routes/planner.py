@@ -87,6 +87,67 @@ def _plan_item_status_for_phase(phase: str | None) -> str | None:
     return None
 
 
+def _group_table_include_list(tables: list[dict]) -> str:
+    entries: list[str] = []
+    for table in tables:
+        source_schema = str(table.get("source_schema") or "").strip().upper()
+        source_table = str(table.get("source_table") or "").strip().upper()
+        if not source_schema or not source_table:
+            continue
+        entry = f"{source_schema}.{source_table}"
+        if entry not in entries:
+            entries.append(entry)
+    return ",".join(entries)
+
+
+def _group_message_key_columns(tables: list[dict]) -> str:
+    parts: list[str] = []
+    for table in tables:
+        if table.get("source_pk_exists") or table.get("source_uk_exists"):
+            continue
+        raw = table.get("effective_key_columns_json") or "[]"
+        try:
+            key_columns = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            key_columns = []
+        if not key_columns:
+            continue
+        source_schema = str(table.get("source_schema") or "").strip().upper()
+        source_table = str(table.get("source_table") or "").strip().upper()
+        cols = ",".join(str(col).strip().upper() for col in key_columns if str(col).strip())
+        if source_schema and source_table and cols:
+            parts.append(f"{source_schema}.{source_table}:{cols}")
+    return ";".join(parts)
+
+
+def _load_cdc_group_snapshot(cur, group_id) -> dict | None:
+    if not group_id:
+        return None
+    cur.execute("""
+        SELECT group_id, group_name, status, connector_name,
+               topic_prefix, consumer_group_prefix, run_id, error_text
+        FROM   connector_groups
+        WHERE  group_id = %s
+    """, (group_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    group = _state["row_to_dict"](cur, row)
+    cur.execute("""
+        SELECT id, source_schema, source_table, target_schema, target_table,
+               effective_key_type, effective_key_columns_json,
+               source_pk_exists, source_uk_exists, topic_name, created_at
+        FROM   group_tables
+        WHERE  group_id = %s
+        ORDER BY source_schema, source_table
+    """, (group_id,))
+    tables = [_state["row_to_dict"](cur, r) for r in cur.fetchall()]
+    group["tables"] = tables
+    group["table_include_list"] = _group_table_include_list(tables)
+    group["message_key_columns"] = _group_message_key_columns(tables)
+    return group
+
+
 # ── helpers (reused from target_prep) ────────────────────────────────────────
 
 def _start_next_plan_batch(
@@ -404,6 +465,7 @@ def get_plan(plan_id):
                 ORDER BY i.batch_order, i.sort_order
             """, (plan_id,))
             plan["items"] = [_state["row_to_dict"](cur, r) for r in cur.fetchall()]
+            plan["cdc_group"] = _load_cdc_group_snapshot(cur, plan.get("connector_group_id"))
         return jsonify(plan)
     finally:
         conn.close()
