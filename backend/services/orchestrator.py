@@ -206,6 +206,7 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
         item_status = "FAILED"
 
     started_ids: list[str] = []
+    started_cdc_group_ids: set[str] = set()
     next_batch: int | None = None
 
     conn = _state["get_conn"]()
@@ -282,7 +283,7 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
 
             next_batch = pending[0]
             cur.execute("""
-                SELECT i.item_id, i.migration_id, m.phase
+                SELECT i.item_id, i.migration_id, m.phase, m.group_id, m.strategy
                 FROM   migration_plan_items i
                 LEFT JOIN migrations m ON m.migration_id = i.migration_id
                 WHERE  i.plan_id = %s
@@ -293,7 +294,7 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
             items = cur.fetchall()
 
             now = datetime.now(timezone.utc).isoformat()
-            for item_id, next_mid, phase in items:
+            for item_id, next_mid, phase, group_id, strategy in items:
                 next_mid = str(next_mid)
                 cur.execute("""
                     UPDATE migrations
@@ -327,6 +328,8 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
                       AND  status = 'PENDING'
                 """, (item_id,))
                 started_ids.append(next_mid)
+                if str(strategy or "").startswith("CDC_") and group_id:
+                    started_cdc_group_ids.add(str(group_id))
 
             cur.execute("""
                 UPDATE migration_plans
@@ -355,6 +358,8 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
             f"[orchestrator] plan batch {next_batch} auto-started: "
             f"{', '.join(started_ids)}"
         )
+    for group_id in sorted(started_cdc_group_ids):
+        _kick_new_migrations_for_group(group_id)
 
 
 def _fail(migration_id: str, error_text: str, error_code: str = "ORCHESTRATOR_ERROR") -> None:

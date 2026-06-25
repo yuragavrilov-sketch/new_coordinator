@@ -837,6 +837,73 @@ def test_orchestrator_closes_plan_when_no_pending_or_active_items():
     ) == "DONE"
 
 
+def test_orchestrator_kicks_cdc_group_after_auto_starting_next_plan_batch(monkeypatch):
+    calls = []
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=()):
+            self.sql = sql
+            self.params = params
+            calls.append(("execute", " ".join(sql.split())[:80], params))
+            self.rowcount = 0
+            if "UPDATE migrations" in sql and "phase = 'DRAFT'" in sql:
+                self.rowcount = 1
+
+        def fetchone(self):
+            if "RETURNING plan_id, batch_order" in self.sql:
+                return (42, 1)
+            if "SELECT COUNT(*)" in self.sql:
+                return (0,)
+            if "SELECT batch_order" in self.sql:
+                return (2,)
+            return None
+
+        def fetchall(self):
+            if "SELECT i.item_id, i.migration_id" in self.sql:
+                return [(7, "mid-next", "DRAFT", "gid-1", "CDC_DIRECT")]
+            return []
+
+    class ConnStub:
+        def __init__(self):
+            self.cursor_stub = CursorStub()
+
+        def cursor(self):
+            return self.cursor_stub
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(
+        orchestrator._state,
+        "broadcast",
+        lambda event: calls.append(("broadcast", event["migration_id"], event["phase"])),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+
+    orchestrator._sync_plan_after_transition("mid-done", "STEADY_STATE")
+
+    assert ("broadcast", "mid-next", "NEW") in calls
+    assert ("kick", "gid-1") in calls
+    assert ("rollback",) not in calls
+
+
 def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
     updates = {}
     monkeypatch.setattr(
