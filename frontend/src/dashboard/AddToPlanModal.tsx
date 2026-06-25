@@ -25,6 +25,8 @@ interface TableInfo {
   error?:         string;
 }
 
+type CdcPackAction = "append" | "replace";
+
 interface Props {
   schemaMigrationId: string;
   tables: BulkTable[];
@@ -62,7 +64,7 @@ export function AddToPlanModal({
   const [keyColumns, setKeyColumns] = useState<Record<string, string[]>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pruneCdcPack, setPruneCdcPack] = useState(false);
+  const [cdcPackAction, setCdcPackAction] = useState<CdcPackAction>("append");
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
@@ -80,7 +82,7 @@ export function AddToPlanModal({
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
   const connectorNewTables = tables.filter(t => !connectorTableKeys.has(rowKey(t)));
-  const shouldPruneCdcPack = mode === "cdc" && pruneCdcPack && connectorOtherTables.length > 0;
+  const shouldPruneCdcPack = mode === "cdc" && cdcPackAction === "replace" && connectorOtherTables.length > 0;
   const projectedConnectorLabels = shouldPruneCdcPack
     ? tables.map(rowKey)
     : [
@@ -89,6 +91,8 @@ export function AddToPlanModal({
       ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
+  const connectorOtherPreview = connectorOtherTables.slice(0, 8).map(cdcTableLabel);
+  const connectorOtherRest = Math.max(0, connectorOtherTables.length - connectorOtherPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
   const projectedIncludeList = projectedConnectorLabels.join(",");
   const cdcSubmitLabel = shouldPruneCdcPack
@@ -188,7 +192,7 @@ export function AddToPlanModal({
   function setPackMode(next: "historical" | "cdc") {
     setMode(next);
     setErr("");
-    setPruneCdcPack(false);
+    setCdcPackAction("append");
     if (next === "historical") {
       setStrategy("BULK_DIRECT");
       setWorkers(1);
@@ -424,36 +428,58 @@ export function AddToPlanModal({
                       Уже есть в CDC-пачке, но строка очереди будет создана: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
-                  {connectorOtherTables.length > 0 && !shouldPruneCdcPack && (
-                    <div style={{ color: t.amber.fg }}>
-                      Это уже существующая CDC-пачка: выбранные таблицы добавятся к текущему составу,
-                      а остальные таблицы останутся в table.include.list: {connectorOtherTables.map(cdcTableLabel).join(", ")}
-                    </div>
-                  )}
-                  {connectorOtherTables.length > 0 && shouldPruneCdcPack && (
-                    <div style={{ color: t.amber.fg }}>
-                      При сохранении из CDC-коннектора будут убраны: {connectorOtherTables.map(cdcTableLabel).join(", ")}
-                    </div>
-                  )}
                   {connectorOtherTables.length > 0 && (
-                    <label style={{
-                      display: "flex",
+                    <div style={{
+                      display: "grid",
                       gap: 8,
-                      alignItems: "flex-start",
-                      color: t.text.secondary,
-                      lineHeight: 1.4,
+                      padding: "8px",
+                      borderRadius: t.radius.sm,
+                      border: `1px solid ${t.amber.dim}`,
+                      background: t.bg.s2,
                     }}>
-                      <input
-                        type="checkbox"
-                        checked={pruneCdcPack}
-                        disabled={busy}
-                        onChange={e => setPruneCdcPack(e.target.checked)}
-                        style={{ marginTop: 2 }}
-                      />
-                      <span>
-                        Оставить в CDC-коннекторе только выбранные сейчас таблицы. Лишние таблицы будут удалены из пачки в одной транзакции с созданием очереди; активные миграции backend не даст удалить.
-                      </span>
-                    </label>
+                      <div style={{ color: t.amber.fg, lineHeight: 1.4 }}>
+                        В CDC-пачке уже есть другие таблицы: {connectorOtherPreview.join(", ")}
+                        {connectorOtherRest > 0 && <span style={{ color: t.text.muted }}> +{connectorOtherRest} еще</span>}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setCdcPackAction("append")}
+                          style={{
+                            ...secondaryActionStyle(busy),
+                            justifyContent: "flex-start",
+                            borderColor: cdcPackAction === "append" ? t.blue.base : t.border.subtle,
+                            background: cdcPackAction === "append" ? t.blue.bg : t.bg.s1,
+                            color: cdcPackAction === "append" ? t.blue.fg : t.text.secondary,
+                          }}
+                        >
+                          Добавить к пачке
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => setCdcPackAction("replace")}
+                          style={{
+                            ...secondaryActionStyle(busy),
+                            justifyContent: "flex-start",
+                            borderColor: cdcPackAction === "replace" ? t.amber.base : t.border.subtle,
+                            background: cdcPackAction === "replace" ? t.amber.bg : t.bg.s1,
+                            color: cdcPackAction === "replace" ? t.amber.fg : t.text.secondary,
+                          }}
+                        >
+                          Оставить только выбранные
+                        </button>
+                      </div>
+                      <div style={{
+                        color: shouldPruneCdcPack ? t.amber.fg : t.text.secondary,
+                        lineHeight: 1.4,
+                      }}>
+                        {shouldPruneCdcPack
+                          ? "При сохранении остальные таблицы будут удалены из CDC-коннектора в одной транзакции с созданием очереди. Активные миграции backend не даст удалить."
+                          : "При сохранении выбранные таблицы добавятся к текущему составу. Все таблицы CDC-пачки останутся в Debezium table.include.list."}
+                      </div>
+                    </div>
                   )}
                   {connectorOtherTables.length > 0 && (
                     <div style={{
