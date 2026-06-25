@@ -55,6 +55,23 @@ def _derive_cdc_key_info(info: dict) -> tuple[str, str, list[str], bool, bool]:
     return "NONE", "NONE", [], False, False
 
 
+def _start_created_cdc_plan_batches(plan_id: int, created: list[dict]) -> list[dict]:
+    """Move each newly added CDC queue position from PENDING/DRAFT to RUNNING/NEW."""
+    if not created:
+        return []
+    from routes.planner import _start_next_plan_batch
+
+    starts: list[dict] = []
+    for batch_order in sorted({item["batch_order"] for item in created}):
+        starts.append(_start_next_plan_batch(
+            plan_id,
+            actor="SYSTEM",
+            batch_order=batch_order,
+            allow_cdc_queue_when_blocked=True,
+        ))
+    return starts
+
+
 @bp.get("/api/schema-migrations")
 def list_schema_migrations():
     if not _db_ok():
@@ -573,15 +590,7 @@ def add_plan_items(sm_id: str):
                     "status": connector_start.get("status"),
                 })
                 try:
-                    from routes.planner import _start_next_plan_batch
-                    for batch_order in sorted({item["batch_order"] for item in created}):
-                        started_batch = _start_next_plan_batch(
-                            plan_id,
-                            actor="SYSTEM",
-                            batch_order=batch_order,
-                            allow_cdc_queue_when_blocked=True,
-                        )
-                        plan_starts.append(started_batch)
+                    plan_starts = _start_created_cdc_plan_batches(plan_id, created)
                     plan_start = plan_starts[0] if plan_starts else None
                 except Exception as start_exc:
                     plan_start_error = str(start_exc)

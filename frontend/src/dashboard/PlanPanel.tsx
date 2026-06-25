@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { t } from "../theme";
 import { ProgressBar } from "../components/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
-import type { MigrationPlanCdcGroup, MigrationPlanDetail, MigrationPlanItem } from "./api";
+import type { MigrationPlanCdcGroup, MigrationPlanCdcTable, MigrationPlanDetail, MigrationPlanItem } from "./api";
 
 interface Props {
   plan: MigrationPlanDetail | null;
@@ -37,6 +37,47 @@ export function PlanPanel({
     }
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
   }, [plan]);
+  const [cdcActionBusy, setCdcActionBusy] = React.useState("");
+  const [cdcActionErr, setCdcActionErr] = React.useState("");
+
+  async function syncCdcGroup(group: MigrationPlanCdcGroup) {
+    setCdcActionBusy("sync");
+    setCdcActionErr("");
+    try {
+      const res = await fetch(`/api/connector-groups/${group.group_id}/refresh-tables`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      onReload();
+    } catch (e) {
+      setCdcActionErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCdcActionBusy("");
+    }
+  }
+
+  async function removeCdcGroupTable(group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) {
+    const label = tableLabel(table);
+    if (!window.confirm(`Remove ${label} from CDC connector? Debezium table.include.list will be updated.`)) return;
+    setCdcActionBusy(label);
+    setCdcActionErr("");
+    try {
+      const res = await fetch(
+        `/api/connector-groups/${group.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      onReload();
+    } catch (e) {
+      setCdcActionErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCdcActionBusy("");
+    }
+  }
 
   if (!plan && loading) {
     return <Shell><Muted>Загрузка пачки...</Muted></Shell>;
@@ -126,6 +167,15 @@ export function PlanPanel({
           {error}
         </div>
       )}
+      {cdcActionErr && (
+        <div style={{
+          marginBottom: 10, padding: "7px 10px", borderRadius: t.radius.sm,
+          background: `${t.red.border}22`, border: `1px solid ${t.red.border}`,
+          color: t.red.fg, fontSize: 12,
+        }}>
+          {cdcActionErr}
+        </div>
+      )}
 
       {variant === "overview" && (
         <PlanOverview
@@ -138,6 +188,8 @@ export function PlanPanel({
           currentBatch={currentBatch}
           items={plan.items}
           cdcGroup={plan.cdc_group || null}
+          cdcActionBusy={cdcActionBusy}
+          onSyncCdcGroup={syncCdcGroup}
           canStart={canStart}
         />
       )}
@@ -176,7 +228,12 @@ export function PlanPanel({
                 </div>
               ))}
               {pack.key === "cdc" && plan.cdc_group && (
-                <CdcConnectorDetails group={plan.cdc_group} planItems={pack.items}/>
+                <CdcConnectorDetails
+                  group={plan.cdc_group}
+                  planItems={pack.items}
+                  busyKey={cdcActionBusy}
+                  onRemoveExtra={removeCdcGroupTable}
+                />
               )}
             </div>
           ))}
@@ -217,6 +274,8 @@ function PlanOverview({
   currentBatch,
   items,
   cdcGroup,
+  cdcActionBusy,
+  onSyncCdcGroup,
   canStart,
 }: {
   batchCount: number;
@@ -228,6 +287,8 @@ function PlanOverview({
   currentBatch?: [number, MigrationPlanItem[]];
   items: MigrationPlanItem[];
   cdcGroup: MigrationPlanCdcGroup | null;
+  cdcActionBusy: string;
+  onSyncCdcGroup: (group: MigrationPlanCdcGroup) => void;
   canStart: boolean;
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
@@ -253,7 +314,14 @@ function PlanOverview({
         {packGroups(items).map(pack => <PackCard key={pack.key} title={pack.title} items={pack.items}/>)}
       </div>
 
-      {cdcGroup && <CdcConnectorCard group={cdcGroup} planItems={items.filter(isCdcItem)}/>}
+      {cdcGroup && (
+        <CdcConnectorCard
+          group={cdcGroup}
+          planItems={items.filter(isCdcItem)}
+          busy={cdcActionBusy === "sync"}
+          onSync={onSyncCdcGroup}
+        />
+      )}
 
       <div style={{
         display: "grid",
@@ -290,7 +358,17 @@ function PlanOverview({
   );
 }
 
-function CdcConnectorCard({ group, planItems }: { group: MigrationPlanCdcGroup; planItems: MigrationPlanItem[] }) {
+function CdcConnectorCard({
+  group,
+  planItems,
+  busy,
+  onSync,
+}: {
+  group: MigrationPlanCdcGroup;
+  planItems: MigrationPlanItem[];
+  busy: boolean;
+  onSync: (group: MigrationPlanCdcGroup) => void;
+}) {
   const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
   const connectorTables = group.tables || [];
   const extraTables = connectorTables.filter(tbl => !planKeys.has(tbl.source_table.toUpperCase()));
@@ -316,9 +394,23 @@ function CdcConnectorCard({ group, planItems }: { group: MigrationPlanCdcGroup; 
             {group.status}
           </Badge>
         </div>
-        <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
-          {group.connector_name}
-        </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+          <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {group.connector_name}
+          </span>
+          <button
+            onClick={() => onSync(group)}
+            disabled={busy}
+            style={{
+              ...secondaryActionStyle(false),
+              padding: "3px 8px",
+              fontSize: 11,
+              opacity: busy ? 0.55 : 1,
+            }}
+          >
+            {busy ? "Sync..." : "Sync Debezium"}
+          </button>
+        </div>
       </div>
       <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
         <span>Debezium tables: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
@@ -340,7 +432,17 @@ function CdcConnectorCard({ group, planItems }: { group: MigrationPlanCdcGroup; 
   );
 }
 
-function CdcConnectorDetails({ group, planItems }: { group: MigrationPlanCdcGroup; planItems: MigrationPlanItem[] }) {
+function CdcConnectorDetails({
+  group,
+  planItems,
+  busyKey,
+  onRemoveExtra,
+}: {
+  group: MigrationPlanCdcGroup;
+  planItems: MigrationPlanItem[];
+  busyKey: string;
+  onRemoveExtra: (group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) => void;
+}) {
   const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
   const rows = group.tables || [];
   if (rows.length === 0) return null;
@@ -366,7 +468,7 @@ function CdcConnectorDetails({ group, planItems }: { group: MigrationPlanCdcGrou
         return (
           <div key={tbl.id} style={{
             display: "grid",
-            gridTemplateColumns: "minmax(170px, 1fr) 100px minmax(150px, 1fr)",
+            gridTemplateColumns: "minmax(170px, 1fr) 100px minmax(150px, 1fr) 92px",
             gap: 10,
             alignItems: "center",
             padding: "7px 10px",
@@ -379,6 +481,22 @@ function CdcConnectorDetails({ group, planItems }: { group: MigrationPlanCdcGrou
             <Badge tone={inPlan ? "ok" : "idle"}>{inPlan ? "in plan" : "connector"}</Badge>
             <div style={{ fontFamily: t.font.mono, color: t.text.muted, overflow: "hidden", textOverflow: "ellipsis" }}>
               {tbl.topic_name || "-"}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              {!inPlan && (
+                <button
+                  onClick={() => onRemoveExtra(group, tbl)}
+                  disabled={busyKey === tableLabel(tbl)}
+                  style={{
+                    ...secondaryActionStyle(false),
+                    padding: "3px 8px",
+                    fontSize: 11,
+                    opacity: busyKey === tableLabel(tbl) ? 0.55 : 1,
+                  }}
+                >
+                  {busyKey === tableLabel(tbl) ? "..." : "Remove"}
+                </button>
+              )}
             </div>
           </div>
         );

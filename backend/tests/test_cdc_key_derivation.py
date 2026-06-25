@@ -57,6 +57,44 @@ def test_cdc_group_table_keys_normalizes_names(monkeypatch):
     }
 
 
+def test_schema_migration_starts_each_created_cdc_queue_position(monkeypatch):
+    calls = []
+
+    def fake_start(plan_id, **kwargs):
+        calls.append((plan_id, kwargs))
+        return {"batch": kwargs["batch_order"], "started": [f"mid-{kwargs['batch_order']}"]}
+
+    import routes.planner as planner
+
+    monkeypatch.setattr(planner, "_start_next_plan_batch", fake_start)
+
+    result = schema_migrations._start_created_cdc_plan_batches(
+        42,
+        [
+            {"batch_order": 3},
+            {"batch_order": 1},
+            {"batch_order": 3},
+        ],
+    )
+
+    assert result == [
+        {"batch": 1, "started": ["mid-1"]},
+        {"batch": 3, "started": ["mid-3"]},
+    ]
+    assert calls == [
+        (42, {
+            "actor": "SYSTEM",
+            "batch_order": 1,
+            "allow_cdc_queue_when_blocked": True,
+        }),
+        (42, {
+            "actor": "SYSTEM",
+            "batch_order": 3,
+            "allow_cdc_queue_when_blocked": True,
+        }),
+    ]
+
+
 def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
