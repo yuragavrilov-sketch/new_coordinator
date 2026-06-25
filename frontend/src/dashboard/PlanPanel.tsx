@@ -83,7 +83,19 @@ export function PlanPanel({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
       onReload();
+      if (body.plan_start_error) {
+        setCdcActionErr(`CDC-коннектор запущен, но очередь не продолжена: ${body.plan_start_error}`);
+      } else {
+        const startedCount = (body.plan_starts || []).reduce(
+          (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
+          0,
+        );
+        setCdcActionInfo(startedCount
+          ? `CDC-коннектор запущен, запущено CDC строк: ${startedCount}`
+          : "CDC-коннектор запущен");
+      }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
     } finally {

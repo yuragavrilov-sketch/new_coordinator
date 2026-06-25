@@ -159,6 +159,49 @@ def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
     ]
 
 
+def test_start_group_starts_pending_cdc_batches_after_request_start(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "request_start",
+        lambda group_id: calls.append(("request-start", group_id)) or {
+            "group_id": group_id,
+            "status": "RUNNING",
+        },
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_start_pending_cdc_plan_batches_for_group",
+        lambda group_id: calls.append(("start-pending", group_id)) or [
+            {"batch": 2, "started": ["mid-1"]},
+        ],
+    )
+    monkeypatch.setitem(
+        connector_groups._state,
+        "broadcast",
+        lambda event: calls.append(("broadcast", event["group_id"], event["status"])),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post("/api/connector-groups/gid-1/start")
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "group_id": "gid-1",
+        "status": "RUNNING",
+        "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
+        "plan_start_error": None,
+    }
+    assert calls == [
+        ("request-start", "gid-1"),
+        ("broadcast", "gid-1", "RUNNING"),
+        ("start-pending", "gid-1"),
+    ]
+
+
 def test_start_pending_cdc_plan_batches_kicks_group(monkeypatch):
     calls = []
 

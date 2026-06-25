@@ -372,6 +372,14 @@ def start_group(group_id: str):
         "group_id": group_id,
         "status": result["status"],
     })
+    plan_starts = []
+    plan_start_error = None
+    try:
+        plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+    except Exception as exc:
+        plan_start_error = str(exc)
+    result["plan_starts"] = plan_starts
+    result["plan_start_error"] = plan_start_error
     return jsonify(result)
 
 
