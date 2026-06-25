@@ -67,6 +67,7 @@ BULK_POLL_INTERVAL = int(os.environ.get("BULK_POLL_INTERVAL", 5))
 CDC_BATCH_SIZE     = int(os.environ.get("CDC_BATCH_SIZE",     500))
 CDC_CHECKIN_SEC    = int(os.environ.get("CDC_CHECKIN_SEC",    30))
 CDC_POLL_MS        = int(os.environ.get("CDC_POLL_MS",        1_000))
+CDC_POLL_ERROR_THRESHOLD = max(1, int(os.environ.get("CDC_POLL_ERROR_THRESHOLD", 3)))
 CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  15))
 CMP_POLL_INTERVAL  = int(os.environ.get("CMP_POLL_INTERVAL",  5))
 
@@ -584,15 +585,32 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
     # тот же offset падает >=POISON_THRESHOLD раз, миграция помечается FAILED.
     fail_offsets: dict = {}        # (topic, partition, offset) → count
     POISON_THRESHOLD = 3
+    consecutive_poll_errors = 0
 
     try:
         while not stop_event.is_set():
             try:
                 raw_msgs = consumer.poll(timeout_ms=CDC_POLL_MS)
             except Exception as exc:
-                print(f"[cdc:{tag}] poll error: {exc}")
+                consecutive_poll_errors += 1
+                detail = f"{type(exc).__name__}: {exc}"
+                print(
+                    f"[cdc:{tag}] poll error "
+                    f"({consecutive_poll_errors}/{CDC_POLL_ERROR_THRESHOLD}): {detail}"
+                )
+                try:
+                    db.cdc_heartbeat(pg, migration_id)
+                except Exception as heartbeat_exc:
+                    print(f"[cdc:{tag}] heartbeat after poll error failed: {heartbeat_exc}")
+                if consecutive_poll_errors >= CDC_POLL_ERROR_THRESHOLD:
+                    try:
+                        db.fail_cdc_migration(pg, migration_id, "CDC_POLL_FAILED", detail)
+                    except Exception as fail_exc:
+                        print(f"[cdc:{tag}] mark-FAILED error: {fail_exc}")
+                    return
                 time.sleep(5)
                 continue
+            consecutive_poll_errors = 0
 
             polled = sum(len(v) for v in raw_msgs.values())
             applied_in_batch = 0

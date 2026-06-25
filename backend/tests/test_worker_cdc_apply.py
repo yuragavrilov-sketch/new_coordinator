@@ -293,6 +293,62 @@ def test_cdc_thread_uses_heartbeat_only_until_lag_partitions_exist(monkeypatch):
     assert ("oracle-close",) in calls
 
 
+def test_cdc_thread_marks_failed_after_repeated_poll_errors(monkeypatch):
+    calls = []
+
+    class PgConn:
+        def close(self):
+            calls.append(("pg-close",))
+
+    class OracleConn:
+        def close(self):
+            calls.append(("oracle-close",))
+
+    class KafkaConsumer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def poll(self, timeout_ms=None):
+            calls.append(("poll", timeout_ms))
+            raise RuntimeError("broker connection lost")
+
+        def close(self):
+            calls.append(("consumer-close",))
+
+    class StopEvent:
+        def is_set(self):
+            return False
+
+    import kafka
+
+    monkeypatch.setattr(kafka, "KafkaConsumer", KafkaConsumer)
+    monkeypatch.setattr(worker, "CDC_POLL_ERROR_THRESHOLD", 2)
+    monkeypatch.setattr(worker.db, "get_pg_conn", lambda: PgConn())
+    monkeypatch.setattr(worker.db, "load_configs", lambda _pg: {"kafka": {"bootstrap_servers": "broker:9092"}})
+    monkeypatch.setattr(worker.db, "open_oracle", lambda *_args: OracleConn())
+    monkeypatch.setattr(worker.db, "cdc_heartbeat", lambda _pg, mid: calls.append(("heartbeat", mid)))
+    monkeypatch.setattr(
+        worker.db,
+        "fail_cdc_migration",
+        lambda pg, mid, code, detail: calls.append(("fail", mid, code, detail)),
+    )
+    monkeypatch.setattr(time, "sleep", lambda *_args: None)
+
+    worker.cdc_thread(_migration(), stop_event=StopEvent())
+
+    assert calls.count(("poll", worker.CDC_POLL_MS)) == 2
+    assert calls.count(("heartbeat", "mid-1")) == 2
+    assert (
+        "fail",
+        "mid-1",
+        "CDC_POLL_FAILED",
+        "RuntimeError: broker connection lost",
+    ) in calls
+    assert ("consumer-close",) in calls
+    assert ("oracle-close",) in calls
+    assert ("pg-close",) in calls
+
+
 def test_cdc_thread_marks_failed_on_runtime_fatal_error(monkeypatch):
     calls = []
 
