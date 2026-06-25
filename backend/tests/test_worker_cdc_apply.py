@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
 import time
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,6 +38,78 @@ class ConnStub:
 
     def close(self):
         self.calls.append(("close", []))
+
+
+def test_parse_debezium_unwrapped_upsert_strips_meta_and_coerces_temporal_values():
+    event = worker._parse_debezium(json.dumps({
+        "schema": {
+            "type": "struct",
+            "fields": [
+                {"field": "ID", "type": "int64"},
+                {"field": "AMOUNT", "type": "float"},
+                {
+                    "field": "CREATED_AT",
+                    "type": "int64",
+                    "name": "io.debezium.time.Timestamp",
+                },
+                {
+                    "field": "BUSINESS_DATE",
+                    "type": "int32",
+                    "name": "io.debezium.time.Date",
+                },
+                {"field": "__op", "type": "string"},
+                {"field": "__table", "type": "string"},
+                {"field": "__deleted", "type": "string"},
+            ],
+        },
+        "payload": {
+            "ID": 7,
+            "AMOUNT": 100.5,
+            "CREATED_AT": 1000,
+            "BUSINESS_DATE": 1,
+            "__op": "u",
+            "__table": "ALLORDERS",
+            "__deleted": "false",
+        },
+    }).encode("utf-8"))
+
+    assert event == {
+        "op": "u",
+        "before": None,
+        "after": {
+            "ID": 7,
+            "AMOUNT": 100.5,
+            "CREATED_AT": datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
+            "BUSINESS_DATE": date(1970, 1, 2),
+        },
+    }
+
+
+def test_parse_debezium_unwrapped_delete_uses_before_record_and_skips_tombstone():
+    event = worker._parse_debezium(json.dumps({
+        "schema": {
+            "type": "struct",
+            "fields": [
+                {"field": "ID", "type": "int64"},
+                {"field": "AMOUNT", "type": "float"},
+                {"field": "__op", "type": "string"},
+                {"field": "__deleted", "type": "string"},
+            ],
+        },
+        "payload": {
+            "ID": 7,
+            "AMOUNT": 100.5,
+            "__op": "d",
+            "__deleted": "true",
+        },
+    }).encode("utf-8"))
+
+    assert event == {
+        "op": "d",
+        "before": {"ID": 7, "AMOUNT": 100.5},
+        "after": None,
+    }
+    assert worker._parse_debezium(None) is None
 
 
 def test_cdc_apply_upsert_requires_key_columns_before_sql():
