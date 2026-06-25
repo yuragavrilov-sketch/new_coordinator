@@ -93,7 +93,7 @@ export function OverviewTab({
               В очереди на загрузку
             </div>
             <div style={{ fontSize: t.size.sm, color: t.amber.dim }}>
-              Ожидание завершения загрузки другой миграции. SCN ещё не зафиксирован.
+              Ожидание своей позиции в очереди. Для исторических таблиц и CDC-пачки SCN не фиксируется.
             </div>
           </div>
         </div>
@@ -291,8 +291,12 @@ export function OverviewTab({
         <InfoRow label="Total chunks" value={detail.total_chunks ?? "—"} />
         <InfoRow label="Chunks done"  value={detail.chunks_done} />
         <InfoRow label="Rows loaded"  value={fmtNum(detail.rows_loaded)} />
-        <InfoRow label="Start SCN"    value={detail.start_scn} />
-        <InfoRow label="SCN fixed at" value={fmtTs(detail.scn_fixed_at)} />
+        {(detail.start_scn || detail.scn_fixed_at) && (
+          <>
+            <InfoRow label="Start SCN"    value={detail.start_scn} />
+            <InfoRow label="SCN fixed at" value={fmtTs(detail.scn_fixed_at)} />
+          </>
+        )}
         <InfoRow label="Hash/sample validate" value={
           detail.validate_hash_sample ? "включено" : "выключено"
         } />
