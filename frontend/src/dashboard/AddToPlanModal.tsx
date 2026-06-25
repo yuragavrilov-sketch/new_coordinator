@@ -64,6 +64,7 @@ export function AddToPlanModal({
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cdcRemoveBusy, setCdcRemoveBusy] = useState("");
+  const [hiddenCdcTableKeys, setHiddenCdcTableKeys] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
@@ -75,7 +76,8 @@ export function AddToPlanModal({
     () => new Set(tables.map(x => `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`)),
     [tables],
   );
-  const connectorTables = cdcGroup?.tables || [];
+  const rawConnectorTables = cdcGroup?.tables || [];
+  const connectorTables = rawConnectorTables.filter(t => !hiddenCdcTableKeys.has(cdcTableKey(t)));
   const connectorTableKeys = new Set(connectorTables.map(cdcTableKey));
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
@@ -110,6 +112,16 @@ export function AddToPlanModal({
     setPackMode(initialMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMode]);
+
+  useEffect(() => {
+    setHiddenCdcTableKeys(prev => {
+      if (prev.size === 0) return prev;
+      const actualKeys = new Set(rawConnectorTables.map(cdcTableKey));
+      const next = new Set([...prev].filter(key => actualKeys.has(key)));
+      return next.size === prev.size ? prev : next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cdcGroup?.group_id, rawConnectorTables.length, rawConnectorTables.map(cdcTableKey).join("|")]);
 
   useEffect(() => {
     if (usesStage && !truncateTarget) setTruncateTarget(true);
@@ -203,6 +215,7 @@ export function AddToPlanModal({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      setHiddenCdcTableKeys(prev => new Set(prev).add(label));
       await onReloadCdcGroup?.();
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
