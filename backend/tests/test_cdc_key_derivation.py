@@ -200,6 +200,29 @@ def test_schema_migration_starts_each_created_cdc_queue_position(monkeypatch):
     ]
 
 
+def test_schema_migration_queues_created_cdc_items_when_connector_not_running():
+    assert schema_migrations._should_start_created_cdc_plan_batches(
+        "STOPPED",
+        "Kafka Connect unavailable",
+    )
+    assert schema_migrations._should_start_created_cdc_plan_batches(
+        "TOPICS_CREATING",
+        "topic creation failed",
+    )
+    assert schema_migrations._should_start_created_cdc_plan_batches(
+        None,
+        "Oracle source is not configured",
+    )
+
+
+def test_schema_migration_does_not_queue_running_cdc_items_after_sync_error():
+    assert not schema_migrations._should_start_created_cdc_plan_batches(
+        "RUNNING",
+        "bad table.include.list",
+    )
+    assert schema_migrations._should_start_created_cdc_plan_batches("RUNNING", None)
+
+
 def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     calls = []
 

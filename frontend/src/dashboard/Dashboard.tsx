@@ -356,7 +356,7 @@ export function Dashboard({
               setPlanErr(`CDC-коннектор не стартовал: ${response.connector_start_error}`);
             }
             let startNote = "";
-            if (planMode === "cdc" && !response.connector_start_error) {
+            if (planMode === "cdc") {
               const connectorCount = response.cdc_group?.tables?.length;
               const connectorStatus = String(response.connector_start?.status || response.cdc_group?.status || "").trim();
               if (response.plan_start_error) {
@@ -373,7 +373,7 @@ export function Dashboard({
                 startNote = startedCount
                   ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
                   : " · запуск уже обработан";
-              } else {
+              } else if (!response.connector_start_error) {
                 try {
                   const started = await startMigrationPlan(planId);
                   const startedCount = started.started.length;
@@ -390,6 +390,8 @@ export function Dashboard({
                     setPlanErr(msg);
                   }
                 }
+              } else {
+                startNote = " · ожидает запуска CDC-коннектора";
               }
               if (connectorCount !== undefined) {
                 startNote += ` · Debezium tables: ${connectorCount}`;
