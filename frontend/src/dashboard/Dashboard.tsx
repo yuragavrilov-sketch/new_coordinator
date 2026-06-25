@@ -47,13 +47,22 @@ const CDC_STARTED_PHASES = new Set([
   "CDC_CAUGHT_UP",
 ]);
 
-function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number) {
+function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number, connectorStatus = "") {
   const states = response.item_states || [];
   if (!states.length) return "";
+  const normalizedConnectorStatus = connectorStatus.toUpperCase();
   const ready = states.filter(item =>
     String(item.status || "").toUpperCase() === "RUNNING"
     && String(item.phase || "").toUpperCase() === "NEW"
     && item.queue_position == null
+    && (!normalizedConnectorStatus || normalizedConnectorStatus === "RUNNING")
+  ).length;
+  const waitingConnector = states.filter(item =>
+    String(item.status || "").toUpperCase() === "RUNNING"
+    && String(item.phase || "").toUpperCase() === "NEW"
+    && item.queue_position == null
+    && !!normalizedConnectorStatus
+    && normalizedConnectorStatus !== "RUNNING"
   ).length;
   const queued = states.filter(item =>
     String(item.status || "").toUpperCase() === "RUNNING"
@@ -74,6 +83,7 @@ function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number) {
   ).length;
   const parts = [];
   if (active) parts.push(`в работе: ${active}`);
+  if (waitingConnector) parts.push(`ждут коннектор: ${waitingConnector}`);
   if (ready) parts.push(`готовы к старту: ${ready}`);
   if (queued) parts.push(`в очереди: ${queued}`);
   if (pending) parts.push(`ожидают: ${pending}`);
@@ -435,29 +445,34 @@ export function Dashboard({
             if (planMode === "cdc") {
               const connectorCount = response.cdc_group?.tables?.length;
               const connectorStatus = String(response.connector_start?.status || response.cdc_group?.status || "").trim();
-              const stateNote = cdcItemStateNote(response, count);
+              const normalizedConnectorStatus = connectorStatus.toUpperCase();
+              const stateNote = cdcItemStateNote(response, count, connectorStatus);
               if (response.plan_start_error) {
                 autoStartOk = false;
                 startNote = " · автозапуск не выполнен";
                 setPlanErr(response.plan_start_error);
-              } else if (stateNote) {
-                startNote = stateNote;
               } else if (response.plan_starts?.length) {
                 const startedCount = response.plan_starts.reduce((sum, item) => sum + item.started.length, 0);
                 startNote = startedCount
-                  ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
+                  ? normalizedConnectorStatus === "RUNNING"
+                    ? ` · CDC: ${count} таблиц (передано в очередь: ${startedCount})`
+                    : ` · CDC: ${count} таблиц (ждут коннектор: ${startedCount})`
                   : " · запуск уже обработан";
               } else if (response.plan_start) {
                 const startedCount = response.plan_start.started.length;
                 startNote = startedCount
-                  ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
+                  ? normalizedConnectorStatus === "RUNNING"
+                    ? ` · CDC: ${count} таблиц (передано в очередь: ${startedCount})`
+                    : ` · CDC: ${count} таблиц (ждут коннектор: ${startedCount})`
                   : " · запуск уже обработан";
+              } else if (stateNote) {
+                startNote = stateNote;
               } else if (!response.connector_start_error) {
                 try {
                   const started = await startMigrationPlan(planId);
                   const startedCount = started.started.length;
                   startNote = startedCount
-                    ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
+                    ? ` · CDC: ${count} таблиц (передано в очередь: ${startedCount})`
                     : " · запуск уже обработан";
                 } catch (e) {
                   const msg = e instanceof Error ? e.message : String(e);
