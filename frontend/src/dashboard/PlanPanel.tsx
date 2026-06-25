@@ -18,6 +18,28 @@ interface Props {
 
 const DONE = new Set(["DONE"]);
 const BAD = new Set(["FAILED", "CANCELLED"]);
+const ACTIVE_WORK_PHASES = new Set([
+  "PREPARING",
+  "SCN_FIXED",
+  "CONNECTOR_STARTING",
+  "CDC_BUFFERING",
+  "TOPIC_CREATING",
+  "CHUNKING",
+  "BULK_LOADING",
+  "BULK_LOADED",
+  "STAGE_VALIDATING",
+  "STAGE_VALIDATED",
+  "BASELINE_PUBLISHING",
+  "BASELINE_LOADING",
+  "BASELINE_PUBLISHED",
+  "STAGE_DROPPING",
+  "INDEXES_ENABLING",
+  "DATA_VERIFYING",
+  "CDC_APPLY_STARTING",
+  "CDC_APPLYING",
+  "CDC_CATCHING_UP",
+  "CDC_CAUGHT_UP",
+]);
 
 export function PlanPanel({
   plan,
@@ -203,6 +225,7 @@ export function PlanPanel({
   const total = plan.items.length;
   const done = plan.items.filter(isDoneItem).length;
   const failed = plan.items.filter(isFailedItem).length;
+  const active = plan.items.filter(isActiveWorkItem).length;
   const running = plan.items.filter(isRunningItem).length;
   const pending = plan.items.filter(isQueuedItem).length;
   const actualPending = plan.items.filter(i => i.status === "PENDING").length;
@@ -216,7 +239,8 @@ export function PlanPanel({
   const canStart = ["READY", "RUNNING"].includes(plan.status)
     && hasPending
     && (running === 0 || (nextPendingIsCdc && !runningHasNonCdc));
-  const currentBatch = batches.find(([, items]) => items.some(isRunningItem))
+  const currentBatch = batches.find(([, items]) => items.some(isActiveWorkItem))
+    || batches.find(([, items]) => items.some(isRunningItem))
     || batches.find(([, items]) => items.some(i => i.status === "PENDING"))
     || batches[batches.length - 1];
 
@@ -233,7 +257,7 @@ export function PlanPanel({
               {plan.status}
             </Badge>
             <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 12 }}>
-              #{plan.plan_id} · {done}/{total} готово · {running} в работе
+              #{plan.plan_id} · {done}/{total} готово · {active} в работе
             </span>
           </div>
         </div>
@@ -296,7 +320,7 @@ export function PlanPanel({
           batchCount={batches.length}
           total={total}
           done={done}
-          running={running}
+          running={active}
           pending={pending}
           failed={failed}
           currentBatch={currentBatch}
@@ -430,7 +454,7 @@ function PlanOverview({
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
   const batchDone = batchItems.filter(isDoneItem).length;
-  const batchRunning = batchItems.filter(isRunningItem).length;
+  const batchRunning = batchItems.filter(isActiveWorkItem).length;
   const batchFailed = batchItems.filter(isFailedItem).length;
 
   return (
@@ -742,7 +766,7 @@ function CdcConnectorDetails({
 
 function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] }) {
   const done = items.filter(isDoneItem).length;
-  const running = items.filter(isRunningItem).length;
+  const running = items.filter(isActiveWorkItem).length;
   const failed = items.filter(isFailedItem).length;
   const steps = new Set(items.map(i => i.batch_order || 1)).size;
   return (
@@ -918,6 +942,11 @@ function isFailedItem(item: MigrationPlanItem) {
 
 function isQueuedItem(item: MigrationPlanItem) {
   return itemVisualState(item) === "queued";
+}
+
+function isActiveWorkItem(item: MigrationPlanItem) {
+  const phase = String(item.phase || "").toUpperCase();
+  return ACTIVE_WORK_PHASES.has(phase);
 }
 
 function isRunningItem(item: MigrationPlanItem) {
