@@ -194,10 +194,10 @@ def _transition(migration_id: str, to_phase: str,
 
 def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
     """Keep migration_plan_items in step with child migrations."""
-    if to_phase not in ("COMPLETED", "DATA_MISMATCH", "FAILED", "CANCELLED"):
+    if to_phase not in ("COMPLETED", "STEADY_STATE", "DATA_MISMATCH", "FAILED", "CANCELLED"):
         return
 
-    if to_phase == "COMPLETED":
+    if to_phase in ("COMPLETED", "STEADY_STATE"):
         item_status = "DONE"
     elif to_phase == "CANCELLED":
         item_status = "CANCELLED"
@@ -363,7 +363,7 @@ def _update(migration_id: str, fields: dict) -> None:
 
 def _plan_item_status_for_phase(phase: str | None) -> str | None:
     phase = str(phase or "").upper()
-    if phase == "COMPLETED":
+    if phase in ("COMPLETED", "STEADY_STATE"):
         return "DONE"
     if phase == "CANCELLED":
         return "CANCELLED"

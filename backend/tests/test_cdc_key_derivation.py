@@ -57,6 +57,10 @@ def test_cdc_group_table_keys_normalizes_names(monkeypatch):
     }
 
 
+def test_orchestrator_treats_steady_state_as_plan_done():
+    assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
+
+
 def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
     updates = {}
     monkeypatch.setattr(

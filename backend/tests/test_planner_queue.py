@@ -91,5 +91,6 @@ def test_plan_item_status_for_active_phase_is_running():
 
 def test_plan_item_status_for_terminal_phase():
     assert planner._plan_item_status_for_phase("COMPLETED") == "DONE"
+    assert planner._plan_item_status_for_phase("STEADY_STATE") == "DONE"
     assert planner._plan_item_status_for_phase("FAILED") == "FAILED"
     assert planner._plan_item_status_for_phase("CANCELLED") == "CANCELLED"

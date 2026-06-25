@@ -76,7 +76,7 @@ def _can_force_queue_cdc_batch(batch_order, pending_items) -> bool:
 
 def _plan_item_status_for_phase(phase: str | None) -> str | None:
     phase = str(phase or "").upper()
-    if phase == "COMPLETED":
+    if phase in ("COMPLETED", "STEADY_STATE"):
         return "DONE"
     if phase == "CANCELLED":
         return "CANCELLED"
