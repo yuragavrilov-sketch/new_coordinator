@@ -468,7 +468,7 @@ function CdcConnectorCard({
   const readyCdc = runnableNewCdc.length - queuedCdc;
   const applyingCdc = planItems.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
-    return phase === "CDC_APPLYING" || phase === "CDC_CATCHING_UP";
+    return phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING" || phase === "CDC_CATCHING_UP";
   }).length;
   const hasRawConfig = Boolean(
     group.table_include_list
@@ -806,7 +806,7 @@ function itemProgressText(item: MigrationPlanItem, progress: number | undefined,
   if (phase === "NEW" && item.queue_position != null) {
     return `очередь #${item.queue_position}`;
   }
-  if (isCdcItem(item) && ["CDC_APPLYING", "CDC_CATCHING_UP", "STEADY_STATE"].includes(phase)) {
+  if (isCdcItem(item) && ["CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"].includes(phase)) {
     const rows = item.cdc_rows_applied ?? null;
     const lag = item.cdc_total_lag ?? null;
     if (rows !== null || lag !== null) {
@@ -826,7 +826,8 @@ function itemStatusLabel(item: MigrationPlanItem, cdcGroupStatus?: string) {
   const groupStatus = String(cdcGroupStatus || "").toUpperCase();
   if (isCdcItem(item) && status === "RUNNING" && phase === "NEW") {
     if (groupStatus && groupStatus !== "RUNNING") return `ЖДЕТ ${groupStatus}`;
-    return "В ОЧЕРЕДИ";
+    if (item.queue_position != null) return "В ОЧЕРЕДИ";
+    return "ГОТОВА";
   }
   return item.phase || item.status;
 }

@@ -25,6 +25,28 @@ const CreateMigrationModal = React.lazy(() =>
   import("../components/CreateMigrationModal").then(m => ({ default: m.CreateMigrationModal }))
 );
 
+const CDC_STARTED_PHASES = new Set([
+  "PREPARING",
+  "SCN_FIXED",
+  "CONNECTOR_STARTING",
+  "CDC_BUFFERING",
+  "TOPIC_CREATING",
+  "CHUNKING",
+  "BULK_LOADING",
+  "BULK_LOADED",
+  "STAGE_VALIDATING",
+  "STAGE_VALIDATED",
+  "BASELINE_PUBLISHING",
+  "BASELINE_LOADING",
+  "BASELINE_PUBLISHED",
+  "STAGE_DROPPING",
+  "INDEXES_ENABLING",
+  "CDC_APPLY_STARTING",
+  "CDC_APPLYING",
+  "CDC_CATCHING_UP",
+  "CDC_CAUGHT_UP",
+]);
+
 function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number) {
   const states = response.item_states || [];
   if (!states.length) return "";
@@ -40,7 +62,7 @@ function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number) {
   ).length;
   const active = states.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
-    return ["PREPARING", "TOPIC_CREATING", "CHUNKING", "LOADING", "CDC_APPLYING", "CDC_CATCHING_UP"].includes(phase);
+    return CDC_STARTED_PHASES.has(phase);
   }).length;
   const pending = states.filter(item =>
     String(item.status || "").toUpperCase() === "PENDING"
