@@ -27,6 +27,30 @@ def _is_cdc_plan_item(mode, strategy):
     )
 
 
+def _legacy_payload_has_cdc(batches, defaults) -> bool:
+    defaults = defaults or {}
+    for batch in batches or []:
+        for tbl_cfg in batch.get("tables", []) or []:
+            mode = tbl_cfg.get("mode", defaults.get("mode"))
+            overrides = tbl_cfg.get("overrides", {}) or {}
+            strategy = overrides.get("strategy") or defaults.get("strategy")
+            if mode is None and strategy is None:
+                return True
+            if _is_cdc_plan_item(mode, strategy):
+                return True
+    return False
+
+
+def _legacy_cdc_error_response():
+    return jsonify({
+        "error": (
+            "Legacy planner CDC flow is disabled. "
+            "Add CDC tables through the schema migration screen so the table is "
+            "registered in the single CDC connector pack and Debezium config is synced."
+        )
+    }), 400
+
+
 def _can_start_plan_batch(running_items, pending_items) -> bool:
     """Allow overlapping starts only when both running and pending items are CDC."""
     if not running_items:
@@ -286,6 +310,8 @@ def add_plan_items(plan_id):
 
     if not batches:
         return jsonify({"error": "batches required"}), 400
+    if _legacy_payload_has_cdc(batches, defaults):
+        return _legacy_cdc_error_response()
 
     conn = _state["get_conn"]()
     now = datetime.now(timezone.utc).isoformat()
@@ -431,6 +457,8 @@ def execute_plan():
 
     if not src_schema or not tgt_schema or not batches:
         return jsonify({"error": "src_schema, tgt_schema, batches required"}), 400
+    if _legacy_payload_has_cdc(batches, defaults):
+        return _legacy_cdc_error_response()
 
     conn = _state["get_conn"]()
     now = datetime.now(timezone.utc).isoformat()

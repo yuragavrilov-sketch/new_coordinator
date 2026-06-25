@@ -31,6 +31,41 @@ def test_running_cdc_does_not_allow_pending_bulk_batch():
     )
 
 
+def test_legacy_payload_detects_cdc_mode():
+    assert planner._legacy_payload_has_cdc(
+        batches=[{"tables": [{"table": "T1", "mode": "CDC", "overrides": {}}]}],
+        defaults={},
+    )
+
+
+def test_legacy_payload_detects_default_cdc_strategy():
+    assert planner._legacy_payload_has_cdc(
+        batches=[{"tables": [{"table": "T1", "overrides": {}}]}],
+        defaults={"strategy": "CDC_STAGE"},
+    )
+
+
+def test_legacy_payload_detects_implicit_cdc_defaults():
+    assert planner._legacy_payload_has_cdc(
+        batches=[{"tables": [{"table": "T1", "overrides": {}}]}],
+        defaults={},
+    )
+
+
+def test_legacy_payload_allows_bulk():
+    assert not planner._legacy_payload_has_cdc(
+        batches=[{"tables": [{"table": "T1", "mode": "BULK", "overrides": {"strategy": "BULK_STAGE"}}]}],
+        defaults={},
+    )
+
+
+def test_legacy_payload_allows_bulk_default_strategy_without_mode():
+    assert not planner._legacy_payload_has_cdc(
+        batches=[{"tables": [{"table": "T1", "overrides": {}}]}],
+        defaults={"strategy": "BULK_STAGE"},
+    )
+
+
 def test_plan_item_status_for_active_phase_is_running():
     assert planner._plan_item_status_for_phase("NEW") == "RUNNING"
     assert planner._plan_item_status_for_phase("CDC_APPLYING") == "RUNNING"

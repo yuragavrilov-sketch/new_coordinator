@@ -67,6 +67,24 @@ def _db_ok() -> bool:
     return _state["db_available"]["value"]
 
 
+def _cdc_group_table_keys(group_id: str) -> set[tuple[str, str]]:
+    from services.connector_groups import get_group_tables
+    return {
+        (
+            str(t.get("source_schema") or "").strip().upper(),
+            str(t.get("source_table") or "").strip().upper(),
+        )
+        for t in get_group_tables(group_id)
+    }
+
+
+def _cdc_pack_membership_error(source_schema: str, source_table: str) -> str:
+    return (
+        f"{source_schema}.{source_table} is not registered in the CDC connector pack. "
+        'Add the table through "This migration" before creating a CDC migration.'
+    )
+
+
 def _link_to_schema_migration(cur, migration_id: str,
                               source_schema: str, target_schema: str,
                               source_table: str, strategy: Strategy) -> None:
@@ -206,7 +224,7 @@ def create_migration():
                 if strategy.has_cdc:
                     if not group_id:
                         return jsonify({"error": "group_id is required for CDC strategies (Legacy per-migration connector is no longer supported)"}), 400
-                    from services.connector_groups import get_group as _get_group, _active_topic_prefix
+                    from services.connector_groups import get_group as _get_group, _active_topic_prefix, refresh_connector_tables
                     group = _get_group(group_id)
                     if not group:
                         return jsonify({"error": f"Группа {group_id} не найдена"}), 404
@@ -215,10 +233,16 @@ def create_migration():
                             f"Коннектор группы не запущен (status={group.get('status')}). "
                             "Запустите коннектор группы перед созданием CDC-миграции."
                         )}), 409
-                    connector_name = group["connector_name"]
-                    topic_prefix = _active_topic_prefix(group)
                     src_schema = body.get("source_schema", "").upper()
                     src_table = body.get("source_table", "").upper()
+                    if (src_schema, src_table) not in _cdc_group_table_keys(group_id):
+                        return jsonify({"error": _cdc_pack_membership_error(src_schema, src_table)}), 400
+                    try:
+                        refresh_connector_tables(group_id)
+                    except Exception as exc:
+                        return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
+                    connector_name = group["connector_name"]
+                    topic_prefix = _active_topic_prefix(group)
                     prefix = group.get("consumer_group_prefix") or group["topic_prefix"]
                     consumer_group = f"{prefix}_{src_schema}_{src_table}"
 
@@ -300,14 +324,6 @@ def create_migration():
         finally:
             conn.close()
 
-        # If group-based, update Debezium connector table list
-        if strategy.has_cdc:
-            try:
-                from services.connector_groups import refresh_connector_tables
-                refresh_connector_tables(group_id)
-            except Exception as exc:
-                print(f"[migrations] refresh_connector_tables warning: {exc}")
-
         _state["broadcast"]({
             "type":         "migration_phase",
             "migration_id": mid,
@@ -381,10 +397,11 @@ def create_migrations_bulk():
     # Validate group once for CDC strategies
     group_id = body.get("group_id") or None
     group = None
+    group_table_keys: set[tuple[str, str]] = set()
     if strategy.has_cdc:
         if not group_id:
             return jsonify({"error": "group_id is required for CDC strategies"}), 400
-        from services.connector_groups import get_group as _get_group
+        from services.connector_groups import get_group as _get_group, refresh_connector_tables
         group = _get_group(group_id)
         if not group:
             return jsonify({"error": f"Группа {group_id} не найдена"}), 404
@@ -393,6 +410,13 @@ def create_migrations_bulk():
                 f"Коннектор группы не запущен (status={group.get('status')}). "
                 "Запустите коннектор группы перед созданием CDC-миграций."
             )}), 409
+
+    if strategy.has_cdc:
+        group_table_keys = _cdc_group_table_keys(group_id)
+        try:
+            refresh_connector_tables(group_id)
+        except Exception as exc:
+            return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
 
     # Lazy Oracle source connection — only opened if we actually need to
     # fetch PK/UK info (i.e. there is at least one table to process).
@@ -423,6 +447,11 @@ def create_migrations_bulk():
                 if not src_schema or not src_table or not tgt_schema:
                     failed.append({"table": key_label or "—",
                                    "error": "source_schema/source_table/target_schema обязательны"})
+                    continue
+
+                if strategy.has_cdc and (src_schema, src_table) not in group_table_keys:
+                    failed.append({"table": key_label,
+                                   "error": _cdc_pack_membership_error(src_schema, src_table)})
                     continue
 
                 # Lookup PK/UK on source
@@ -552,14 +581,6 @@ def create_migrations_bulk():
     if src_oconn is not None:
         try: src_oconn.close()
         except Exception: pass
-
-    # Refresh connector tables once for the whole batch (CDC only)
-    if strategy.has_cdc and created:
-        try:
-            from services.connector_groups import refresh_connector_tables
-            refresh_connector_tables(group_id)
-        except Exception as exc:
-            print(f"[migrations/bulk] refresh_connector_tables warning: {exc}")
 
     # Per-migration broadcast
     for c in created:

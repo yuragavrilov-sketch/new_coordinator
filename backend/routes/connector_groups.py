@@ -229,7 +229,7 @@ def add_group_tables(group_id: str):
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
-        print(f"[add_group_tables] refresh_connector_tables warning: {exc}")
+        return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
 
     # ── optionally create migrations for the new tables ──────────────────
     migrations_created: list[dict] = []
@@ -266,7 +266,7 @@ def remove_group_table(group_id: str, source_schema: str, source_table: str):
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
-        print(f"[remove_group_table] refresh_connector_tables warning: {exc}")
+        return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
     return "", 204
 
 
@@ -481,6 +481,12 @@ def create_migration_from_table(group_id: str):
                      "Используйте DIRECT, если нужно сохранить существующие данные."
         }), 400
 
+    if strategy.has_cdc:
+        try:
+            refresh_connector_tables(group_id)
+        except Exception as exc:
+            return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
+
     stage_name       = f"STG_{src_schema}_{src_table}" if strategy.uses_stage else ""
     stage_tablespace = body.get("stage_tablespace", "PAYSTAGE") if strategy.uses_stage else ""
 
@@ -556,13 +562,6 @@ def create_migration_from_table(group_id: str):
         return jsonify({"error": str(exc)}), 500
     finally:
         conn.close()
-
-    # ── refresh Debezium table list ───────────────────────────────────────
-    if strategy.has_cdc:
-        try:
-            refresh_connector_tables(group_id)
-        except Exception as exc:
-            print(f"[create-migration] refresh_connector_tables warning: {exc}")
 
     _state["broadcast"]({
         "type":         "migration_phase",

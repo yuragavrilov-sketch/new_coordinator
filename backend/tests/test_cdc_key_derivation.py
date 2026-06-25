@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 from routes import schema_migrations
+from routes import migrations
 from services import orchestrator
+from services import connector_groups
 
 
 def test_schema_migration_cdc_key_derivation_prefers_pk():
@@ -37,6 +39,22 @@ def test_orchestrator_source_key_derivation_serializes_pk():
     assert result["source_pk_exists"] is True
     assert result["effective_key_type"] == "PRIMARY_KEY"
     assert json.loads(result["effective_key_columns_json"]) == ["ID"]
+
+
+def test_cdc_group_table_keys_normalizes_names(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group_tables",
+        lambda group_id: [
+            {"source_schema": "tcbpay", "source_table": "allorders"},
+            {"source_schema": "TCBPAY", "source_table": "Merchants#Orders"},
+        ],
+    )
+
+    assert migrations._cdc_group_table_keys("gid") == {
+        ("TCBPAY", "ALLORDERS"),
+        ("TCBPAY", "MERCHANTS#ORDERS"),
+    }
 
 
 def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
