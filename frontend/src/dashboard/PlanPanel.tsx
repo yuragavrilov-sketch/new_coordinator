@@ -927,8 +927,8 @@ function itemVisualState(item: MigrationPlanItem): "done" | "failed" | "queued" 
   const status = String(item.status || "").toUpperCase();
   if (status === "DONE" || phase === "COMPLETED" || phase === "STEADY_STATE") return "done";
   if (BAD.has(status) || phase === "FAILED" || phase === "CANCELLED") return "failed";
-  if (status === "RUNNING") return "running";
   if (status === "PENDING" || phase === "DRAFT" || phase === "NEW") return "queued";
+  if (status === "RUNNING") return "running";
   return "idle";
 }
 
