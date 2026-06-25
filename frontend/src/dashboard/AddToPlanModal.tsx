@@ -62,7 +62,6 @@ export function AddToPlanModal({
   const [keyColumns, setKeyColumns] = useState<Record<string, string[]>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [replaceCdcPack, setReplaceCdcPack] = useState(false);
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
@@ -80,18 +79,15 @@ export function AddToPlanModal({
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
   const connectorNewTables = tables.filter(t => !connectorTableKeys.has(rowKey(t)));
-  const projectedConnectorLabels = replaceCdcPack
-    ? tables.map(rowKey)
-    : [
-        ...connectorTables.map(cdcTableLabel),
-        ...connectorNewTables.map(rowKey),
-      ];
+  const projectedConnectorLabels = [
+    ...connectorTables.map(cdcTableLabel),
+    ...connectorNewTables.map(rowKey),
+  ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
-  const cdcSubmitLabel = replaceCdcPack && connectorOtherTables.length > 0
-    ? `Заменить CDC-пачку и добавить ${tables.length} в очередь`
-    : projectedConnectorCount > tables.length
+  const projectedIncludeList = projectedConnectorLabels.join(",");
+  const cdcSubmitLabel = projectedConnectorCount > tables.length
       ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
       : `Добавить ${tables.length} в CDC-коннектор`;
   const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
@@ -186,7 +182,6 @@ export function AddToPlanModal({
   function setPackMode(next: "historical" | "cdc") {
     setMode(next);
     setErr("");
-    setReplaceCdcPack(false);
     if (next === "historical") {
       setStrategy("BULK_DIRECT");
       setWorkers(1);
@@ -258,7 +253,6 @@ export function AddToPlanModal({
         max_parallel_workers: workers,
         baseline_parallel_degree: baselinePd,
         stage_tablespace: usesStage ? stageTablespace.trim().toUpperCase() : undefined,
-        prune_cdc_pack: mode === "cdc" && replaceCdcPack && connectorOtherTables.length > 0,
       };
       const res = await addSchemaPlanItems(schemaMigrationId, payload);
       await onDone(res.plan_id, res.items.length, res);
@@ -423,30 +417,9 @@ export function AddToPlanModal({
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
-                    <div style={{ display: "grid", gap: 7 }}>
-                      <div style={{ color: t.amber.fg }}>
-                        {replaceCdcPack
-                          ? `При добавлении из CDC-коннектора будут убраны: ${connectorOtherTables.map(cdcTableLabel).join(", ")}`
-                          : `Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: ${connectorOtherTables.map(cdcTableLabel).join(", ")}`}
-                      </div>
-                      <label style={{
-                        display: "flex",
-                        gap: 8,
-                        alignItems: "flex-start",
-                        color: t.text.secondary,
-                        cursor: busy ? "default" : "pointer",
-                      }}>
-                        <input
-                          type="checkbox"
-                          checked={replaceCdcPack}
-                          disabled={busy}
-                          onChange={e => setReplaceCdcPack(e.target.checked)}
-                          style={{ marginTop: 2 }}
-                        />
-                        <span>
-                          Заменить состав CDC-коннектора выбранными таблицами при добавлении. Лишние таблицы будут удалены из пачки в одной транзакции с созданием очереди; при ошибке пачка не изменится.
-                        </span>
-                      </label>
+                    <div style={{ color: t.amber.fg }}>
+                      Это уже существующая CDC-пачка: выбранные таблицы добавятся к текущему составу,
+                      а остальные таблицы останутся в Debezium: {connectorOtherTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
@@ -472,16 +445,14 @@ export function AddToPlanModal({
                       })}
                     </div>
                   )}
-                  {cdcGroup.table_include_list && (
+                  {projectedIncludeList && (
                     <div style={{
                       fontFamily: t.font.mono,
                       fontSize: 11,
                       color: t.text.muted,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      overflowWrap: "anywhere",
                     }}>
-                      table.include.list: {cdcGroup.table_include_list}
+                      После сохранения table.include.list: {projectedIncludeList}
                     </div>
                   )}
                 </div>
