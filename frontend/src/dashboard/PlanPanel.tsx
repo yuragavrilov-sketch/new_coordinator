@@ -657,7 +657,10 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
 function itemProgressText(item: MigrationPlanItem, progress: number | undefined) {
   const phase = String(item.phase || "").toUpperCase();
   if (phase === "NEW" && item.queue_position != null) {
-    return `queue #${item.queue_position}`;
+    return `очередь #${item.queue_position}`;
+  }
+  if (isCdcItem(item) && phase === "NEW") {
+    return "следующая";
   }
   return progress === undefined ? "rows n/a" : `${progress.toFixed(0)}%`;
 }
@@ -667,8 +670,8 @@ function itemStatusLabel(item: MigrationPlanItem, cdcGroupStatus?: string) {
   const status = String(item.status || "").toUpperCase();
   const groupStatus = String(cdcGroupStatus || "").toUpperCase();
   if (isCdcItem(item) && status === "RUNNING" && phase === "NEW") {
-    if (groupStatus && groupStatus !== "RUNNING") return `WAIT ${groupStatus}`;
-    return "LOAD QUEUE";
+    if (groupStatus && groupStatus !== "RUNNING") return `ЖДЕТ ${groupStatus}`;
+    return "В ОЧЕРЕДИ";
   }
   return item.phase || item.status;
 }
