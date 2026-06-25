@@ -157,6 +157,7 @@ def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
         "ok": True,
         "plan_starts": [{"batch": 4, "started": ["mid-1"]}],
         "plan_start_error": None,
+        "cdc_queue_kicked": False,
     }
     assert calls == [
         ("refresh", "gid-1"),
@@ -199,6 +200,7 @@ def test_start_group_starts_pending_cdc_batches_after_request_start(monkeypatch)
         "status": "RUNNING",
         "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
         "plan_start_error": None,
+        "cdc_queue_kicked": False,
     }
     assert calls == [
         ("request-start", "gid-1"),
@@ -251,6 +253,7 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
         "status": "RUNNING",
         "plan_starts": [],
         "plan_start_error": None,
+        "cdc_queue_kicked": True,
     }
     assert calls == [
         ("request-start", "gid-1"),
@@ -297,6 +300,7 @@ def test_refresh_tables_kicks_existing_new_cdc_when_group_running(monkeypatch):
         "ok": True,
         "plan_starts": [],
         "plan_start_error": None,
+        "cdc_queue_kicked": True,
     }
     assert calls == [
         ("refresh", "gid-1"),

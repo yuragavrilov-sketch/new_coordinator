@@ -86,7 +86,9 @@ export function PlanPanel({
         );
         setCdcActionInfo(startedCount
           ? `Debezium синхронизирован, запущено CDC строк: ${startedCount}`
-          : "Debezium синхронизирован");
+          : body.cdc_queue_kicked
+            ? "Debezium синхронизирован, очередь CDC продолжена"
+            : "Debezium синхронизирован");
       }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
@@ -125,6 +127,8 @@ export function PlanPanel({
           : "CDC строк переведено в ожидание коннектора";
         setCdcActionInfo(startedCount
           ? `${connectorText}, ${rowText}: ${startedCount}`
+          : body.cdc_queue_kicked
+            ? `${connectorText}, очередь CDC продолжена`
           : connectorText);
       }
     } catch (e) {

@@ -95,16 +95,17 @@ def _start_pending_cdc_plan_batches_for_group(group_id: str) -> list[dict]:
     return starts
 
 
-def _kick_existing_new_cdc_for_running_group(group_id: str) -> None:
+def _kick_existing_new_cdc_for_running_group(group_id: str) -> bool:
     """Resume CDC rows already in NEW when the connector is RUNNING."""
     from services import orchestrator
     from services.connector_groups import get_group as svc_get
 
     group = svc_get(group_id)
     if not group or str(group.get("status") or "").upper() != "RUNNING":
-        return
+        return False
     orchestrator._update_queue_positions()
     orchestrator._kick_new_migrations_for_group(group_id)
+    return True
 
 
 @bp.get("/api/connector-groups")
@@ -284,14 +285,16 @@ def start_group(group_id: str):
     })
     plan_starts = []
     plan_start_error = None
+    cdc_queue_kicked = False
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
         if not plan_starts and str(result.get("status") or "").upper() == "RUNNING":
-            _kick_existing_new_cdc_for_running_group(group_id)
+            cdc_queue_kicked = _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
         plan_start_error = str(exc)
     result["plan_starts"] = plan_starts
     result["plan_start_error"] = plan_start_error
+    result["cdc_queue_kicked"] = cdc_queue_kicked
     return jsonify(result)
 
 
@@ -337,16 +340,18 @@ def refresh_tables(group_id: str):
         return jsonify({"error": str(exc)}), 500
     plan_starts = []
     plan_start_error = None
+    cdc_queue_kicked = False
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
         if not plan_starts:
-            _kick_existing_new_cdc_for_running_group(group_id)
+            cdc_queue_kicked = _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
         plan_start_error = str(exc)
     return jsonify({
         "ok": True,
         "plan_starts": plan_starts,
         "plan_start_error": plan_start_error,
+        "cdc_queue_kicked": cdc_queue_kicked,
     })
 
 
