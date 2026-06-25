@@ -257,6 +257,16 @@ export interface AddPlanItemsPayload {
 export interface AddPlanItemsResp {
   plan_id: number;
   items: Array<{ item_id: number; table: string; migration_id: string; batch_order: number }>;
+  item_states?: Array<{
+    item_id: number;
+    table: string;
+    migration_id: string;
+    batch_order: number;
+    status: string | null;
+    phase: string | null;
+    queue_position?: number | null;
+    error_text?: string | null;
+  }>;
   connector_group_id?: string | null;
   cdc_group?: MigrationPlanCdcGroup | null;
   connector_start?: Record<string, unknown> | null;

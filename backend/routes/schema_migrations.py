@@ -283,6 +283,7 @@ def _build_add_plan_items_response_payload(
     created: list[dict],
     strategy: Strategy,
     connector_group_id: str | None,
+    item_states: list[dict] | None = None,
     connector_start: dict | None = None,
     connector_start_error: str | None = None,
     plan_start: dict | None = None,
@@ -292,6 +293,7 @@ def _build_add_plan_items_response_payload(
     return {
         "plan_id": plan_id,
         "items": created,
+        "item_states": item_states or [],
         "connector_group_id": connector_group_id if strategy.has_cdc else None,
         "cdc_group": _load_cdc_connector_summary(connector_group_id) if strategy.has_cdc else None,
         "connector_start": connector_start,
@@ -300,6 +302,49 @@ def _build_add_plan_items_response_payload(
         "plan_starts": plan_starts or [],
         "plan_start_error": plan_start_error,
     }
+
+
+def _load_created_plan_item_states(conn, created: list[dict]) -> list[dict]:
+    migration_ids = [
+        str(item.get("migration_id"))
+        for item in created
+        if item.get("migration_id")
+    ]
+    if not migration_ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT i.item_id,
+                   i.table_name AS table,
+                   i.migration_id,
+                   i.batch_order,
+                   i.status,
+                   m.phase,
+                   m.queue_position,
+                   m.error_text
+            FROM   migration_plan_items i
+            LEFT JOIN migrations m ON m.migration_id = i.migration_id
+            WHERE  i.migration_id = ANY(%s::uuid[])
+        """, (migration_ids,))
+        cols = [desc[0] for desc in cur.description]
+        rows = {
+            str(row_dict["migration_id"]): row_dict
+            for row_dict in (dict(zip(cols, row)) for row in cur.fetchall())
+        }
+    states = []
+    for item in created:
+        migration_id = str(item.get("migration_id"))
+        states.append(rows.get(migration_id, {
+            "item_id": item.get("item_id"),
+            "table": item.get("table"),
+            "migration_id": migration_id,
+            "batch_order": item.get("batch_order"),
+            "status": None,
+            "phase": None,
+            "queue_position": None,
+            "error_text": None,
+        }))
+    return states
 
 
 def _requested_plan_table_name(table) -> str:
@@ -909,6 +954,11 @@ def add_plan_items(sm_id: str):
             plan_start = autostart["plan_start"]
             plan_starts = autostart["plan_starts"]
             plan_start_error = autostart["plan_start_error"]
+        item_states = []
+        try:
+            item_states = _load_created_plan_item_states(conn, created)
+        except Exception as exc:
+            print(f"[schema_migrations.add_plan_items] item state summary warning: {exc}")
         _state["broadcast"]({
             "type": "schema_migration.plan_items_added",
             "id": sm_id,
@@ -920,6 +970,7 @@ def add_plan_items(sm_id: str):
             created=created,
             strategy=strategy,
             connector_group_id=connector_group_id,
+            item_states=item_states,
             connector_start=connector_start,
             connector_start_error=connector_start_error,
             plan_start=plan_start,

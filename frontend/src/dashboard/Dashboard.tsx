@@ -15,6 +15,7 @@ import {
   type SchemaMigrationListItem,
   type MigrationPlanDetail,
   type MigrationPlanCdcGroup,
+  type AddPlanItemsResp,
   createSchemaMigration,
   startMigrationPlan,
 } from "./api";
@@ -23,6 +24,42 @@ import type { MigrationPrefill } from "../components/CreateMigrationModal/types"
 const CreateMigrationModal = React.lazy(() =>
   import("../components/CreateMigrationModal").then(m => ({ default: m.CreateMigrationModal }))
 );
+
+function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number) {
+  const states = response.item_states || [];
+  if (!states.length) return "";
+  const ready = states.filter(item =>
+    String(item.status || "").toUpperCase() === "RUNNING"
+    && String(item.phase || "").toUpperCase() === "NEW"
+    && item.queue_position == null
+  ).length;
+  const queued = states.filter(item =>
+    String(item.status || "").toUpperCase() === "RUNNING"
+    && String(item.phase || "").toUpperCase() === "NEW"
+    && item.queue_position != null
+  ).length;
+  const active = states.filter(item => {
+    const phase = String(item.phase || "").toUpperCase();
+    return ["PREPARING", "TOPIC_CREATING", "CHUNKING", "LOADING", "CDC_APPLYING", "CDC_CATCHING_UP"].includes(phase);
+  }).length;
+  const pending = states.filter(item =>
+    String(item.status || "").toUpperCase() === "PENDING"
+    || String(item.phase || "").toUpperCase() === "DRAFT"
+  ).length;
+  const failed = states.filter(item =>
+    String(item.status || "").toUpperCase() === "FAILED"
+    || String(item.phase || "").toUpperCase() === "FAILED"
+  ).length;
+  const parts = [];
+  if (active) parts.push(`в работе: ${active}`);
+  if (ready) parts.push(`готовы к старту: ${ready}`);
+  if (queued) parts.push(`в очереди: ${queued}`);
+  if (pending) parts.push(`ожидают: ${pending}`);
+  if (failed) parts.push(`ошибки: ${failed}`);
+  return parts.length
+    ? ` · CDC: ${fallbackCount} таблиц (${parts.join(", ")})`
+    : ` · CDC: ${fallbackCount} таблиц`;
+}
 
 interface Props {
   selectedId:        string | null;
@@ -376,10 +413,13 @@ export function Dashboard({
             if (planMode === "cdc") {
               const connectorCount = response.cdc_group?.tables?.length;
               const connectorStatus = String(response.connector_start?.status || response.cdc_group?.status || "").trim();
+              const stateNote = cdcItemStateNote(response, count);
               if (response.plan_start_error) {
                 autoStartOk = false;
                 startNote = " · автозапуск не выполнен";
                 setPlanErr(response.plan_start_error);
+              } else if (stateNote) {
+                startNote = stateNote;
               } else if (response.plan_starts?.length) {
                 const startedCount = response.plan_starts.reduce((sum, item) => sum + item.started.length, 0);
                 startNote = startedCount

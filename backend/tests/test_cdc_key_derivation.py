@@ -346,12 +346,14 @@ def test_schema_migration_add_items_response_includes_cdc_autostart_snapshot(mon
         created=[{"item_id": 7, "table": "ALLORDERS", "migration_id": "mid-1", "batch_order": 3}],
         strategy=schema_migrations.Strategy.CDC_DIRECT,
         connector_group_id="gid-1",
+        item_states=[{"migration_id": "mid-1", "status": "RUNNING", "phase": "NEW"}],
         connector_start={"group_id": "gid-1", "status": "RUNNING"},
         plan_starts=[{"batch": 3, "started": ["mid-1"]}],
     )
 
     assert payload["plan_id"] == 42
     assert payload["connector_group_id"] == "gid-1"
+    assert payload["item_states"] == [{"migration_id": "mid-1", "status": "RUNNING", "phase": "NEW"}]
     assert payload["cdc_group"]["table_include_list"] == "TCBPAY.ALLORDERS"
     assert payload["connector_start"]["status"] == "RUNNING"
     assert payload["plan_starts"] == [{"batch": 3, "started": ["mid-1"]}]
@@ -374,8 +376,89 @@ def test_schema_migration_add_items_response_omits_cdc_snapshot_for_bulk(monkeyp
 
     assert payload["connector_group_id"] is None
     assert payload["cdc_group"] is None
+    assert payload["item_states"] == []
     assert payload["plan_starts"] == []
     assert calls == []
+
+
+def test_schema_migration_loads_created_plan_item_states_in_request_order():
+    class Cursor:
+        description = [
+            ("item_id",),
+            ("table",),
+            ("migration_id",),
+            ("batch_order",),
+            ("status",),
+            ("phase",),
+            ("queue_position",),
+            ("error_text",),
+        ]
+
+        def __init__(self):
+            self.params = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _sql, params):
+            self.params = params
+
+        def fetchall(self):
+            return [
+                (8, "PAYMENTS", "mid-2", 4, "PENDING", "DRAFT", None, None),
+                (7, "ALLORDERS", "mid-1", 3, "RUNNING", "NEW", None, None),
+            ]
+
+    class Conn:
+        def __init__(self):
+            self.cur = Cursor()
+
+        def cursor(self):
+            return self.cur
+
+    conn = Conn()
+    states = schema_migrations._load_created_plan_item_states(conn, [
+        {"item_id": 7, "table": "ALLORDERS", "migration_id": "mid-1", "batch_order": 3},
+        {"item_id": 9, "table": "MISSING", "migration_id": "mid-missing", "batch_order": 5},
+        {"item_id": 8, "table": "PAYMENTS", "migration_id": "mid-2", "batch_order": 4},
+    ])
+
+    assert conn.cur.params == (["mid-1", "mid-missing", "mid-2"],)
+    assert states == [
+        {
+            "item_id": 7,
+            "table": "ALLORDERS",
+            "migration_id": "mid-1",
+            "batch_order": 3,
+            "status": "RUNNING",
+            "phase": "NEW",
+            "queue_position": None,
+            "error_text": None,
+        },
+        {
+            "item_id": 9,
+            "table": "MISSING",
+            "migration_id": "mid-missing",
+            "batch_order": 5,
+            "status": None,
+            "phase": None,
+            "queue_position": None,
+            "error_text": None,
+        },
+        {
+            "item_id": 8,
+            "table": "PAYMENTS",
+            "migration_id": "mid-2",
+            "batch_order": 4,
+            "status": "PENDING",
+            "phase": "DRAFT",
+            "queue_position": None,
+            "error_text": None,
+        },
+    ]
 
 
 def test_schema_migration_records_stopped_connector_start_error_as_failed(monkeypatch):
