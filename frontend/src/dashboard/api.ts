@@ -207,6 +207,14 @@ export interface MigrationPlanCdcGroup {
   tables:                 MigrationPlanCdcTable[];
 }
 
+export interface MigrationPlanCdcPrunedTable {
+  id?:            string;
+  source_schema: string;
+  source_table:  string;
+  target_schema?: string;
+  target_table?:  string;
+}
+
 export interface MigrationPlanDetail {
   plan_id:       number;
   name:          string;
@@ -275,7 +283,7 @@ export interface AddPlanItemsResp {
   plan_start?: StartMigrationPlanResp | null;
   plan_starts?: StartMigrationPlanResp[] | null;
   plan_start_error?: string | null;
-  cdc_pruned_tables?: MigrationPlanCdcTable[];
+  cdc_pruned_tables?: MigrationPlanCdcPrunedTable[];
 }
 
 export async function addSchemaPlanItems(
