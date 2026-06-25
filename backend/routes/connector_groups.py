@@ -95,6 +95,23 @@ def _start_pending_cdc_plan_batches_for_group(group_id: str) -> list[dict]:
     return starts
 
 
+def _has_existing_new_cdc_rows_for_group(group_id: str) -> bool:
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 1
+                FROM   migrations
+                WHERE  group_id = %s
+                  AND  phase = 'NEW'
+                  AND  LEFT(COALESCE(strategy, ''), 4) = 'CDC_'
+                LIMIT  1
+            """, (group_id,))
+            return cur.fetchone() is not None
+    finally:
+        conn.close()
+
+
 def _kick_existing_new_cdc_for_running_group(group_id: str) -> bool:
     """Resume CDC rows already in NEW when the connector is RUNNING."""
     from services import orchestrator
@@ -102,6 +119,8 @@ def _kick_existing_new_cdc_for_running_group(group_id: str) -> bool:
 
     group = svc_get(group_id)
     if not group or str(group.get("status") or "").upper() != "RUNNING":
+        return False
+    if not _has_existing_new_cdc_rows_for_group(group_id):
         return False
     orchestrator._update_queue_positions()
     orchestrator._kick_new_migrations_for_group(group_id)

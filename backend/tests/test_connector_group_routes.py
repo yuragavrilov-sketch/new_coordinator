@@ -230,6 +230,11 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
         "get_group",
         lambda group_id: calls.append(("get-group", group_id)) or {"group_id": group_id, "status": "RUNNING"},
     )
+    monkeypatch.setattr(
+        connector_groups,
+        "_has_existing_new_cdc_rows_for_group",
+        lambda group_id: calls.append(("has-new", group_id)) or True,
+    )
     monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
     monkeypatch.setattr(
         orchestrator,
@@ -260,6 +265,7 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
         ("broadcast", "gid-1", "RUNNING"),
         ("start-pending", "gid-1"),
         ("get-group", "gid-1"),
+        ("has-new", "gid-1"),
         ("queue",),
         ("kick", "gid-1"),
     ]
@@ -282,6 +288,11 @@ def test_refresh_tables_kicks_existing_new_cdc_when_group_running(monkeypatch):
         connector_groups_svc,
         "get_group",
         lambda group_id: calls.append(("get-group", group_id)) or {"group_id": group_id, "status": "RUNNING"},
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_has_existing_new_cdc_rows_for_group",
+        lambda group_id: calls.append(("has-new", group_id)) or True,
     )
     monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
     monkeypatch.setattr(
@@ -306,9 +317,70 @@ def test_refresh_tables_kicks_existing_new_cdc_when_group_running(monkeypatch):
         ("refresh", "gid-1"),
         ("start-pending", "gid-1"),
         ("get-group", "gid-1"),
+        ("has-new", "gid-1"),
         ("queue",),
         ("kick", "gid-1"),
     ]
+
+
+def test_kick_existing_new_cdc_returns_false_when_no_new_rows(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "get_group",
+        lambda group_id: calls.append(("get-group", group_id)) or {"group_id": group_id, "status": "RUNNING"},
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_has_existing_new_cdc_rows_for_group",
+        lambda group_id: calls.append(("has-new", group_id)) or False,
+    )
+    monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+
+    assert connector_groups._kick_existing_new_cdc_for_running_group("gid-1") is False
+    assert calls == [
+        ("get-group", "gid-1"),
+        ("has-new", "gid-1"),
+    ]
+
+
+def test_has_existing_new_cdc_rows_filters_by_group_phase_and_strategy(monkeypatch):
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchone(self):
+            return (1,)
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(connector_groups._state, "get_conn", lambda: Conn())
+
+    assert connector_groups._has_existing_new_cdc_rows_for_group("gid-1") is True
+    sql = calls[0][1]
+    assert "WHERE group_id = %s AND phase = 'NEW'" in sql
+    assert "LEFT(COALESCE(strategy, ''), 4) = 'CDC_'" in sql
+    assert calls[0][2] == ("gid-1",)
+    assert ("close",) in calls
 
 
 def test_start_pending_cdc_plan_batches_kicks_group(monkeypatch):
