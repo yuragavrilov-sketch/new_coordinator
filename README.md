@@ -79,6 +79,16 @@ cd frontend
 npm run build
 ```
 
+CDC runtime smoke check:
+
+```powershell
+.\scripts\cdc-smoke-check.ps1 -Strict
+```
+
+The check is read-only. It verifies that the coordinator API is reachable, the
+State DB is available, the universal worker heartbeat is fresh with CDC
+capability, and the configured Oracle/Kafka/Kafka Connect services respond.
+
 ## Experimental Prototype
 
 `db_m/` is a separate experimental prototype with its own nested Git metadata,
