@@ -85,6 +85,14 @@ def _cdc_pack_membership_error(source_schema: str, source_table: str) -> str:
     )
 
 
+def _legacy_cdc_creation_error() -> str:
+    return (
+        "Legacy direct CDC migration creation is disabled. "
+        "Add CDC tables through the schema migration screen so the table is "
+        "registered in the single CDC connector pack, queued and autostarted."
+    )
+
+
 def _link_to_schema_migration(cur, migration_id: str,
                               source_schema: str, target_schema: str,
                               source_table: str, strategy: Strategy) -> None:
@@ -206,6 +214,8 @@ def create_migration():
                     strategy = Strategy.parse(body.get("strategy"))
                 except ValueError as exc:
                     return jsonify({"error": f"Invalid strategy: {exc}"}), 400
+                if strategy.has_cdc:
+                    return jsonify({"error": _legacy_cdc_creation_error()}), 400
 
                 # ── truncate_target: default TRUE; STAGE forces TRUE ──
                 truncate_target = bool(body.get("truncate_target", True))
@@ -377,6 +387,8 @@ def create_migrations_bulk():
         strategy = Strategy.parse(body.get("strategy"))
     except ValueError as exc:
         return jsonify({"error": f"Invalid strategy: {exc}"}), 400
+    if strategy.has_cdc:
+        return jsonify({"error": _legacy_cdc_creation_error()}), 400
 
     truncate_target = bool(body.get("truncate_target", True))
     if strategy.uses_stage and truncate_target is False:
