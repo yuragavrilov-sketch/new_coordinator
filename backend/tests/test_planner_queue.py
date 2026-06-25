@@ -29,3 +29,14 @@ def test_running_cdc_does_not_allow_pending_bulk_batch():
         running_items=[("CDC", "CDC_DIRECT")],
         pending_items=[("BULK", "BULK_DIRECT")],
     )
+
+
+def test_plan_item_status_for_active_phase_is_running():
+    assert planner._plan_item_status_for_phase("NEW") == "RUNNING"
+    assert planner._plan_item_status_for_phase("CDC_APPLYING") == "RUNNING"
+
+
+def test_plan_item_status_for_terminal_phase():
+    assert planner._plan_item_status_for_phase("COMPLETED") == "DONE"
+    assert planner._plan_item_status_for_phase("FAILED") == "FAILED"
+    assert planner._plan_item_status_for_phase("CANCELLED") == "CANCELLED"

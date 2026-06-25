@@ -265,17 +265,18 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
 
             next_batch = pending[0]
             cur.execute("""
-                SELECT item_id, migration_id
-                FROM   migration_plan_items
-                WHERE  plan_id = %s
-                  AND  batch_order = %s
-                  AND  status = 'PENDING'
+                SELECT i.item_id, i.migration_id, m.phase
+                FROM   migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE  i.plan_id = %s
+                  AND  i.batch_order = %s
+                  AND  i.status = 'PENDING'
                 ORDER  BY sort_order, item_id
             """, (plan_id, next_batch))
             items = cur.fetchall()
 
             now = datetime.now(timezone.utc).isoformat()
-            for item_id, next_mid in items:
+            for item_id, next_mid, phase in items:
                 next_mid = str(next_mid)
                 cur.execute("""
                     UPDATE migrations
@@ -286,6 +287,14 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
                       AND  phase = 'DRAFT'
                 """, (now, now, next_mid))
                 if cur.rowcount <= 0:
+                    item_status = _plan_item_status_for_phase(phase)
+                    if item_status:
+                        cur.execute("""
+                            UPDATE migration_plan_items
+                            SET    status = %s
+                            WHERE  item_id = %s
+                              AND  status = 'PENDING'
+                        """, (item_status, item_id))
                     continue
 
                 cur.execute("""
@@ -350,6 +359,19 @@ def _update(migration_id: str, fields: dict) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _plan_item_status_for_phase(phase: str | None) -> str | None:
+    phase = str(phase or "").upper()
+    if phase == "COMPLETED":
+        return "DONE"
+    if phase == "CANCELLED":
+        return "CANCELLED"
+    if phase == "FAILED":
+        return "FAILED"
+    if phase and phase != "DRAFT":
+        return "RUNNING"
+    return None
 
 
 def _configs() -> dict:

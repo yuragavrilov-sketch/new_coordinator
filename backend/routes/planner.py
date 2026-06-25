@@ -42,6 +42,19 @@ def _can_start_plan_batch(running_items, pending_items) -> bool:
     return pending_is_cdc and not running_has_non_cdc
 
 
+def _plan_item_status_for_phase(phase: str | None) -> str | None:
+    phase = str(phase or "").upper()
+    if phase == "COMPLETED":
+        return "DONE"
+    if phase == "CANCELLED":
+        return "CANCELLED"
+    if phase == "FAILED":
+        return "FAILED"
+    if phase and phase != "DRAFT":
+        return "RUNNING"
+    return None
+
+
 # ── helpers (reused from target_prep) ────────────────────────────────────────
 
 def _diff_summary(src: dict, tgt: dict) -> dict:
@@ -593,7 +606,7 @@ def start_plan(plan_id):
 
             # Get items for this batch
             cur.execute("""
-                SELECT i.item_id, i.migration_id, i.mode, m.strategy
+                SELECT i.item_id, i.migration_id, i.mode, m.strategy, m.phase
                 FROM migration_plan_items i
                 LEFT JOIN migrations m ON m.migration_id = i.migration_id
                 WHERE i.plan_id = %s AND i.batch_order = %s AND i.status = 'PENDING'
@@ -608,19 +621,25 @@ def start_plan(plan_id):
                 WHERE i.plan_id = %s AND i.status = 'RUNNING'
             """, (plan_id,))
             running_items = cur.fetchall()
-            pending_items = [(mode, strategy) for _, _, mode, strategy in items]
+            pending_items = [(mode, strategy) for _, _, mode, strategy, _ in items]
             if not _can_start_plan_batch(running_items, pending_items):
                 return jsonify({"error": "A plan batch is already running"}), 400
 
             now = datetime.now(timezone.utc).isoformat()
             started_ids = []
-            for item_id, migration_id, _, _ in items:
+            for item_id, migration_id, _, _, phase in items:
                 # Transition migration DRAFT -> NEW
                 cur.execute("""
                     UPDATE migrations SET phase = 'NEW', state_changed_at = %s, updated_at = %s
                     WHERE migration_id = %s AND phase = 'DRAFT'
                 """, (now, now, str(migration_id)))
                 if cur.rowcount <= 0:
+                    item_status = _plan_item_status_for_phase(phase)
+                    if item_status:
+                        cur.execute("""
+                            UPDATE migration_plan_items SET status = %s
+                            WHERE item_id = %s AND status = 'PENDING'
+                        """, (item_status, item_id))
                     continue
 
                 cur.execute("""
