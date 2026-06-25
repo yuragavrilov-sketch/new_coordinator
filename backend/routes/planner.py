@@ -20,6 +20,28 @@ def init(*, get_conn_fn, row_to_dict_fn, load_configs_fn, broadcast_fn):
     _state["broadcast"] = broadcast_fn
 
 
+def _is_cdc_plan_item(mode, strategy):
+    return (
+        str(mode or "").upper().startswith("CDC")
+        or str(strategy or "").upper().startswith("CDC_")
+    )
+
+
+def _can_start_plan_batch(running_items, pending_items) -> bool:
+    """Allow overlapping starts only when both running and pending items are CDC."""
+    if not running_items:
+        return True
+    running_has_non_cdc = any(
+        not _is_cdc_plan_item(mode, strategy)
+        for mode, strategy in running_items
+    )
+    pending_is_cdc = bool(pending_items) and all(
+        _is_cdc_plan_item(mode, strategy)
+        for mode, strategy in pending_items
+    )
+    return pending_is_cdc and not running_has_non_cdc
+
+
 # ── helpers (reused from target_prep) ────────────────────────────────────────
 
 def _diff_summary(src: dict, tgt: dict) -> dict:
@@ -544,12 +566,6 @@ def execute_plan():
 @bp.post("/api/planner/plans/<int:plan_id>/start")
 def start_plan(plan_id):
     """Start first batch: transition DRAFT -> NEW for batch_order = 1."""
-    def _is_cdc_item(mode, strategy):
-        return (
-            str(mode or "").upper().startswith("CDC")
-            or str(strategy or "").upper().startswith("CDC_")
-        )
-
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
@@ -592,17 +608,9 @@ def start_plan(plan_id):
                 WHERE i.plan_id = %s AND i.status = 'RUNNING'
             """, (plan_id,))
             running_items = cur.fetchall()
-            if running_items:
-                running_has_non_cdc = any(
-                    not _is_cdc_item(mode, strategy)
-                    for mode, strategy in running_items
-                )
-                next_batch_is_cdc = all(
-                    _is_cdc_item(mode, strategy)
-                    for _, _, mode, strategy in items
-                )
-                if running_has_non_cdc or not next_batch_is_cdc:
-                    return jsonify({"error": "A plan batch is already running"}), 400
+            pending_items = [(mode, strategy) for _, _, mode, strategy in items]
+            if not _can_start_plan_batch(running_items, pending_items):
+                return jsonify({"error": "A plan batch is already running"}), 400
 
             now = datetime.now(timezone.utc).isoformat()
             started_ids = []
