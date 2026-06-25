@@ -321,19 +321,29 @@ export function Dashboard({
             }
             let startNote = "";
             if (planMode === "cdc" && !response.connector_start_error) {
-              try {
-                const started = await startMigrationPlan(planId);
-                startNote = started.started.length
+              if (response.plan_start_error) {
+                autoStartOk = false;
+                startNote = " · автозапуск не выполнен";
+                setPlanErr(response.plan_start_error);
+              } else if (response.plan_start) {
+                startNote = response.plan_start.started.length
+                  ? ` · старт позиции ${response.plan_start.batch}`
+                  : " · запуск уже обработан";
+              } else {
+                try {
+                  const started = await startMigrationPlan(planId);
+                  startNote = started.started.length
                   ? ` · старт позиции ${started.batch}`
                   : " · запуск уже обработан";
-              } catch (e) {
-                const msg = e instanceof Error ? e.message : String(e);
-                if (/already running/i.test(msg)) {
-                  startNote = " · в очереди за текущей миграцией";
-                } else {
-                  autoStartOk = false;
-                  startNote = " · автозапуск не выполнен";
-                  setPlanErr(msg);
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  if (/already running/i.test(msg)) {
+                    startNote = " · в очереди за текущей миграцией";
+                  } else {
+                    autoStartOk = false;
+                    startNote = " · автозапуск не выполнен";
+                    setPlanErr(msg);
+                  }
                 }
               }
             }

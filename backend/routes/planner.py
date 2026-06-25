@@ -81,6 +81,105 @@ def _plan_item_status_for_phase(phase: str | None) -> str | None:
 
 # ── helpers (reused from target_prep) ────────────────────────────────────────
 
+def _start_next_plan_batch(plan_id: int, *, actor: str = "USER") -> dict:
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM migration_plans WHERE plan_id = %s", (plan_id,))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("Plan not found")
+            plan = _state["row_to_dict"](cur, row)
+
+            if plan["status"] not in ("READY", "RUNNING"):
+                raise ValueError(f"Cannot start plan in status {plan['status']}")
+
+            cur.execute("""
+                SELECT DISTINCT batch_order
+                FROM migration_plan_items
+                WHERE plan_id = %s AND status = 'PENDING'
+                ORDER BY batch_order
+                LIMIT 1
+            """, (plan_id,))
+            batch_row = cur.fetchone()
+            if not batch_row:
+                raise ValueError("No pending batches")
+            next_batch = batch_row[0]
+
+            cur.execute("""
+                SELECT i.item_id, i.migration_id, i.mode, m.strategy, m.phase
+                FROM migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE i.plan_id = %s AND i.batch_order = %s AND i.status = 'PENDING'
+                ORDER BY i.sort_order, i.item_id
+            """, (plan_id, next_batch))
+            items = cur.fetchall()
+
+            cur.execute("""
+                SELECT i.mode, m.strategy
+                FROM migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE i.plan_id = %s AND i.status = 'RUNNING'
+            """, (plan_id,))
+            running_items = cur.fetchall()
+            pending_items = [(mode, strategy) for _, _, mode, strategy, _ in items]
+            if not _can_start_plan_batch(running_items, pending_items):
+                raise ValueError("A plan batch is already running")
+
+            now = datetime.now(timezone.utc).isoformat()
+            started_ids = []
+            for item_id, migration_id, _, _, phase in items:
+                cur.execute("""
+                    UPDATE migrations SET phase = 'NEW', state_changed_at = %s, updated_at = %s
+                    WHERE migration_id = %s AND phase = 'DRAFT'
+                """, (now, now, str(migration_id)))
+                if cur.rowcount <= 0:
+                    item_status = _plan_item_status_for_phase(phase)
+                    if item_status:
+                        cur.execute("""
+                            UPDATE migration_plan_items SET status = %s
+                            WHERE item_id = %s AND status = 'PENDING'
+                        """, (item_status, item_id))
+                    continue
+
+                cur.execute("""
+                    INSERT INTO migration_state_history
+                        (migration_id, from_phase, to_phase, message, actor_type)
+                    VALUES (%s, 'DRAFT', 'NEW', %s, %s)
+                """, (str(migration_id), f"Started by planner (batch {next_batch})", actor))
+
+                cur.execute("""
+                    UPDATE migration_plan_items SET status = 'RUNNING'
+                    WHERE item_id = %s
+                """, (item_id,))
+                started_ids.append(str(migration_id))
+
+            cur.execute("""
+                UPDATE migration_plans SET status = 'RUNNING', started_at = COALESCE(started_at, %s)
+                WHERE plan_id = %s
+            """, (now, plan_id))
+
+        conn.commit()
+
+        broadcast = _state["broadcast"]
+        for mid in started_ids:
+            broadcast({
+                "type": "migration_phase",
+                "migration_id": mid,
+                "phase": "NEW",
+            })
+
+        return {
+            "batch": next_batch,
+            "started": started_ids,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def _diff_summary(src: dict, tgt: dict) -> dict:
     tgt_col = {c["name"] for c in tgt["columns"]}
     src_col_map = {c["name"]: c for c in src["columns"]}
@@ -607,101 +706,9 @@ def execute_plan():
 @bp.post("/api/planner/plans/<int:plan_id>/start")
 def start_plan(plan_id):
     """Start first batch: transition DRAFT -> NEW for batch_order = 1."""
-    conn = _state["get_conn"]()
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM migration_plans WHERE plan_id = %s", (plan_id,))
-            row = cur.fetchone()
-            if not row:
-                return jsonify({"error": "Plan not found"}), 404
-            plan = _state["row_to_dict"](cur, row)
-
-            if plan["status"] not in ("READY", "RUNNING"):
-                return jsonify({"error": f"Cannot start plan in status {plan['status']}"}), 400
-
-            # Find the lowest batch that has PENDING items
-            cur.execute("""
-                SELECT DISTINCT batch_order
-                FROM migration_plan_items
-                WHERE plan_id = %s AND status = 'PENDING'
-                ORDER BY batch_order
-                LIMIT 1
-            """, (plan_id,))
-            batch_row = cur.fetchone()
-            if not batch_row:
-                return jsonify({"error": "No pending batches"}), 400
-            next_batch = batch_row[0]
-
-            # Get items for this batch
-            cur.execute("""
-                SELECT i.item_id, i.migration_id, i.mode, m.strategy, m.phase
-                FROM migration_plan_items i
-                LEFT JOIN migrations m ON m.migration_id = i.migration_id
-                WHERE i.plan_id = %s AND i.batch_order = %s AND i.status = 'PENDING'
-                ORDER BY i.sort_order, i.item_id
-            """, (plan_id, next_batch))
-            items = cur.fetchall()
-
-            cur.execute("""
-                SELECT i.mode, m.strategy
-                FROM migration_plan_items i
-                LEFT JOIN migrations m ON m.migration_id = i.migration_id
-                WHERE i.plan_id = %s AND i.status = 'RUNNING'
-            """, (plan_id,))
-            running_items = cur.fetchall()
-            pending_items = [(mode, strategy) for _, _, mode, strategy, _ in items]
-            if not _can_start_plan_batch(running_items, pending_items):
-                return jsonify({"error": "A plan batch is already running"}), 400
-
-            now = datetime.now(timezone.utc).isoformat()
-            started_ids = []
-            for item_id, migration_id, _, _, phase in items:
-                # Transition migration DRAFT -> NEW
-                cur.execute("""
-                    UPDATE migrations SET phase = 'NEW', state_changed_at = %s, updated_at = %s
-                    WHERE migration_id = %s AND phase = 'DRAFT'
-                """, (now, now, str(migration_id)))
-                if cur.rowcount <= 0:
-                    item_status = _plan_item_status_for_phase(phase)
-                    if item_status:
-                        cur.execute("""
-                            UPDATE migration_plan_items SET status = %s
-                            WHERE item_id = %s AND status = 'PENDING'
-                        """, (item_status, item_id))
-                    continue
-
-                cur.execute("""
-                    INSERT INTO migration_state_history
-                        (migration_id, from_phase, to_phase, message, actor_type)
-                    VALUES (%s, 'DRAFT', 'NEW', %s, 'USER')
-                """, (str(migration_id), f"Started by planner (batch {next_batch})"))
-
-                cur.execute("""
-                    UPDATE migration_plan_items SET status = 'RUNNING'
-                    WHERE item_id = %s
-                """, (item_id,))
-                started_ids.append(str(migration_id))
-
-            # Update plan status
-            cur.execute("""
-                UPDATE migration_plans SET status = 'RUNNING', started_at = COALESCE(started_at, %s)
-                WHERE plan_id = %s
-            """, (now, plan_id))
-
-        conn.commit()
-
-        # Broadcast phase changes
-        broadcast = _state["broadcast"]
-        for mid in started_ids:
-            broadcast({
-                "type": "migration_phase",
-                "migration_id": mid,
-                "phase": "NEW",
-            })
-
-        return jsonify({
-            "batch": next_batch,
-            "started": started_ids,
-        })
-    finally:
-        conn.close()
+        return jsonify(_start_next_plan_batch(plan_id))
+    except ValueError as exc:
+        msg = str(exc)
+        status = 404 if msg == "Plan not found" else 400
+        return jsonify({"error": msg}), status

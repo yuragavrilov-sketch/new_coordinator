@@ -224,6 +224,8 @@ export interface AddPlanItemsResp {
   connector_group_id?: string | null;
   connector_start?: Record<string, unknown> | null;
   connector_start_error?: string | null;
+  plan_start?: StartMigrationPlanResp | null;
+  plan_start_error?: string | null;
 }
 
 export async function addSchemaPlanItems(

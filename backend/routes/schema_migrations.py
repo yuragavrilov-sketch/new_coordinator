@@ -553,6 +553,8 @@ def add_plan_items(sm_id: str):
         conn.commit()
         connector_start = None
         connector_start_error = None
+        plan_start = None
+        plan_start_error = None
         if strategy.has_cdc:
             try:
                 from services.connector_groups import refresh_connector_tables, request_start
@@ -563,6 +565,12 @@ def add_plan_items(sm_id: str):
                     "group_id": connector_group_id,
                     "status": connector_start.get("status"),
                 })
+                try:
+                    from routes.planner import _start_next_plan_batch
+                    plan_start = _start_next_plan_batch(plan_id, actor="SYSTEM")
+                except Exception as start_exc:
+                    plan_start_error = str(start_exc)
+                    print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
             except Exception as exc:
                 connector_start_error = str(exc)
                 print(f"[schema_migrations.add_plan_items] CDC connector autostart warning: {exc}")
@@ -578,6 +586,8 @@ def add_plan_items(sm_id: str):
             "connector_group_id": connector_group_id if strategy.has_cdc else None,
             "connector_start": connector_start,
             "connector_start_error": connector_start_error,
+            "plan_start": plan_start,
+            "plan_start_error": plan_start_error,
         }), 201
     except ValueError as exc:
         conn.rollback()
