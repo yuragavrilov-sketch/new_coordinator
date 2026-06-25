@@ -8,7 +8,6 @@ import {
   type AddPlanItemsPayload,
   type AddPlanItemsResp,
   type MigrationPlanCdcGroup,
-  type MigrationPlanCdcTable,
 } from "./api";
 
 interface BulkTable {
@@ -63,9 +62,7 @@ export function AddToPlanModal({
   const [keyColumns, setKeyColumns] = useState<Record<string, string[]>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [cdcRemoveBusy, setCdcRemoveBusy] = useState("");
   const [replaceCdcPack, setReplaceCdcPack] = useState(false);
-  const [hiddenCdcTableKeys, setHiddenCdcTableKeys] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
@@ -78,7 +75,7 @@ export function AddToPlanModal({
     [tables],
   );
   const rawConnectorTables = cdcGroup?.tables || [];
-  const connectorTables = rawConnectorTables.filter(t => !hiddenCdcTableKeys.has(cdcTableKey(t)));
+  const connectorTables = rawConnectorTables;
   const connectorTableKeys = new Set(connectorTables.map(cdcTableKey));
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
@@ -95,7 +92,7 @@ export function AddToPlanModal({
   const cdcSubmitLabel = projectedConnectorCount > tables.length
     ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
     : `Добавить ${tables.length} в CDC-коннектор`;
-  const submitDisabled = busy || !!cdcRemoveBusy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
+  const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -119,20 +116,6 @@ export function AddToPlanModal({
     setPackMode(initialMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMode]);
-
-  useEffect(() => {
-    setHiddenCdcTableKeys(new Set());
-  }, [cdcGroup?.group_id]);
-
-  useEffect(() => {
-    setHiddenCdcTableKeys(prev => {
-      if (prev.size === 0) return prev;
-      const actualKeys = new Set(rawConnectorTables.map(cdcTableKey));
-      const next = new Set([...prev].filter(key => actualKeys.has(key)));
-      return next.size === prev.size ? prev : next;
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cdcGroup?.group_id, rawConnectorTables.length, rawConnectorTables.map(cdcTableKey).join("|")]);
 
   useEffect(() => {
     if (usesStage && !truncateTarget) setTruncateTarget(true);
@@ -209,34 +192,6 @@ export function AddToPlanModal({
       setStrategy("CDC_DIRECT");
       setWorkers(4);
       setSequential(true);
-    }
-  }
-
-  async function removeExistingCdcTable(table: MigrationPlanCdcTable) {
-    if (!cdcGroup || busy || cdcRemoveBusy) return;
-    const label = cdcTableLabel(table);
-    if (!window.confirm(`Убрать ${label} из CDC-коннектора? Debezium table.include.list будет обновлен.`)) return;
-    setCdcRemoveBusy(label);
-    setErr("");
-    try {
-      const res = await fetch(
-        `/api/connector-groups/${cdcGroup.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-      const body = await res.json().catch(() => ({}));
-      setHiddenCdcTableKeys(prev => new Set(prev).add(label));
-      await onReloadCdcGroup?.();
-      if (body.sync_error) {
-        setErr(`Таблица убрана из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
-      }
-    } catch (e) {
-      setErr(String(e instanceof Error ? e.message : e));
-    } finally {
-      setCdcRemoveBusy("");
     }
   }
 
@@ -475,12 +430,12 @@ export function AddToPlanModal({
                         gap: 8,
                         alignItems: "flex-start",
                         color: t.text.secondary,
-                        cursor: busy || !!cdcRemoveBusy ? "default" : "pointer",
+                        cursor: busy ? "default" : "pointer",
                       }}>
                         <input
                           type="checkbox"
                           checked={replaceCdcPack}
-                          disabled={busy || !!cdcRemoveBusy}
+                          disabled={busy}
                           onChange={e => setReplaceCdcPack(e.target.checked)}
                           style={{ marginTop: 2 }}
                         />
@@ -499,15 +454,8 @@ export function AddToPlanModal({
                     }}>
                       {connectorOtherTables.map(table => {
                         const label = cdcTableLabel(table);
-                        const rowBusy = cdcRemoveBusy === label;
                         return (
                           <div key={table.id || label} style={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(0, 1fr) auto",
-                            gap: 8,
-                            alignItems: "center",
-                          }}>
-                            <span style={{
                               fontFamily: t.font.mono,
                               color: t.text.primary,
                               overflow: "hidden",
@@ -515,20 +463,6 @@ export function AddToPlanModal({
                               whiteSpace: "nowrap",
                             }}>
                               {label}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => removeExistingCdcTable(table)}
-                              disabled={!!cdcRemoveBusy || busy}
-                              style={{
-                                ...secondaryActionStyle(false),
-                                padding: "3px 8px",
-                                fontSize: 11,
-                                opacity: rowBusy ? 0.55 : 1,
-                              }}
-                            >
-                              {rowBusy ? "Убираю..." : "Убрать"}
-                            </button>
                           </div>
                         );
                       })}
