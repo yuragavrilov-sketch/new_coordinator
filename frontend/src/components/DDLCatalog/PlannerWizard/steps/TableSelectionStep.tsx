@@ -1,11 +1,9 @@
 import React, { useState } from "react";
 import { S } from "../../styles";
-import { SearchSelect } from "../../../TargetPrep/SearchSelect";
 import { StrategyPicker } from "../../../StrategyPicker";
 import { TableKeyConfig } from "../TableKeyConfig";
 import type { BatchItem, ConnectorGroup, PlanDefaults, PlanSummary, TableKeyEntry } from "../types";
 import { t } from "../../../../theme";
-import { hasCdc } from "../../../../types/migration";
 
 interface Props {
   selected:        string[];
@@ -28,7 +26,6 @@ interface Props {
 export function TableSelectionStep({
   selected, planMode, onPlanMode, plans, selectedPlanId, onSelectedPlanId, defaults, onDefaults,
   tableSettings, onTableSetting,
-  groups, selectedGroup, onSelectGroup,
   tableKeyEntries, onTableKeyEntry,
 }: Props) {
   const [customTables, setCustomTables] = useState<Set<string>>(new Set());
@@ -75,17 +72,31 @@ export function TableSelectionStep({
             </button>
             <button
               type="button"
-              onClick={() => onPlanMode("cdc")}
+              disabled
               style={{
                 ...S.btnSecondary,
-                borderColor: planMode === "cdc" ? t.blue.base : t.border.base,
-                background: planMode === "cdc" ? t.bg.s3 : t.bg.s2,
-                color: planMode === "cdc" ? t.blue.fg : t.text.secondary,
+                borderColor: t.border.base,
+                background: t.bg.s2,
+                color: t.text.disabled,
                 textAlign: "left",
+                cursor: "not-allowed",
+                opacity: 0.65,
               }}
+              title='CDC добавляется через экран "Эта миграция" в единый CDC-коннектор'
             >
-              CDC пачка
+              CDC-коннектор
             </button>
+          </div>
+          <div style={{
+            padding: "9px 12px",
+            borderRadius: t.radius.md,
+            background: t.blue.bg,
+            border: `1px solid ${t.blue.dim}`,
+            color: t.blue.fg,
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}>
+            CDC-таблицы добавляются через экран "Эта миграция": таблица попадает в единый CDC-коннектор, встаёт в очередь и запускается автоматически.
           </div>
           {planMode === "historical" && (
             <div style={{
@@ -147,39 +158,11 @@ export function TableSelectionStep({
               onChange={(s) => onDefaults({ ...defaults, strategy: s })}
               truncateTarget={defaults.truncate_target}
               onTruncateChange={(b) => onDefaults({ ...defaults, truncate_target: b })}
+              cdcDisabledReason='CDC добавляется через экран "Эта миграция" в единый CDC-коннектор'
             />
           </div>
         </div>
       </div>
-
-      {/* CDC pack */}
-      {(planMode === "cdc" || hasCdc(defaults.strategy)) && (
-      <div style={S.card}>
-        <div style={S.cardHeader}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: t.text.primary }}>CDC-пачка</span>
-        </div>
-        <div style={S.cardBody}>
-          <div style={S.field}>
-            <label style={S.label}>Выберите CDC-пачку</label>
-            <SearchSelect
-              value={selectedGroup}
-              onChange={onSelectGroup}
-              options={groups.map(g => g.group_name)}
-              placeholder="Выберите CDC-пачку..."
-            />
-          </div>
-          {selectedGroup && (
-            <div style={{ fontSize: 11, color: t.text.muted }}>
-              CDC-пачка: <span style={{ color: t.blue.fg }}>{selectedGroup}</span>
-              {(() => {
-                const g = groups.find(gg => gg.group_name === selectedGroup);
-                return g ? <> | Статус: <span style={{ color: g.status === "RUNNING" ? t.green.base : t.amber.base }}>{g.status}</span></> : null;
-              })()}
-            </div>
-          )}
-        </div>
-      </div>
-      )}
 
       {/* Per-table settings */}
       <div style={S.card}>
@@ -244,6 +227,7 @@ export function TableSelectionStep({
                             onChange={(s) => onTableSetting(table, { strategy: s })}
                             truncateTarget={ts.truncate_target}
                             onTruncateChange={(b) => onTableSetting(table, { truncate_target: b })}
+                            cdcDisabledReason='CDC добавляется через экран "Эта миграция" в единый CDC-коннектор'
                           />
                         ) : (
                           <span style={{ fontSize: 11, color: t.text.secondary }}>{ts.strategy}</span>

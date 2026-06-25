@@ -205,6 +205,10 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
 
   // Execute plan
   const doExecute = useCallback(() => {
+    if (planMode === "cdc") {
+      setExecuteError('CDC добавляется через экран "Эта миграция" в единый CDC-коннектор.');
+      return;
+    }
     setExecuting(true); setExecuteError(null);
     const group = groups.find(g => g.group_name === selectedGroup);
     const hasCdcTables = batches.some(b => b.items.some(it => hasCdc(it.strategy)));
