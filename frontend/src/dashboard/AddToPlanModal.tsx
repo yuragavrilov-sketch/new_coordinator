@@ -89,9 +89,11 @@ export function AddToPlanModal({
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
-  const cdcSubmitLabel = projectedConnectorCount > tables.length
-    ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
-    : `Добавить ${tables.length} в CDC-коннектор`;
+  const cdcSubmitLabel = replaceCdcPack && connectorOtherTables.length > 0
+    ? `Заменить CDC-пачку и добавить ${tables.length} в очередь`
+    : projectedConnectorCount > tables.length
+      ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
+      : `Добавить ${tables.length} в CDC-коннектор`;
   const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
@@ -423,7 +425,9 @@ export function AddToPlanModal({
                   {connectorOtherTables.length > 0 && (
                     <div style={{ display: "grid", gap: 7 }}>
                       <div style={{ color: t.amber.fg }}>
-                        Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                        {replaceCdcPack
+                          ? `При добавлении из CDC-коннектора будут убраны: ${connectorOtherTables.map(cdcTableLabel).join(", ")}`
+                          : `Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: ${connectorOtherTables.map(cdcTableLabel).join(", ")}`}
                       </div>
                       <label style={{
                         display: "flex",
