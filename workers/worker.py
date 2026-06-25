@@ -668,7 +668,14 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                 last_checkin_ts = time.time()
 
     except Exception as exc:
-        print(f"[cdc:{tag}] fatal: {exc}")
+        detail = f"{type(exc).__name__}: {exc}"
+        print(f"[cdc:{tag}] fatal: {detail}")
+        try:
+            if pg is None:
+                pg = db.get_pg_conn()
+            db.fail_cdc_migration(pg, migration_id, "CDC_WORKER_FATAL", detail)
+        except Exception as fail_exc:
+            print(f"[cdc:{tag}] mark-FAILED error: {fail_exc}")
     finally:
         print(f"[cdc:{tag}] thread stopping")
         for obj in (oracle_conn, consumer):

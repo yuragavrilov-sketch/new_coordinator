@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 
 WORKERS_DIR = Path(__file__).resolve().parents[2] / "workers"
@@ -216,3 +217,73 @@ def test_cdc_thread_uses_heartbeat_only_until_lag_partitions_exist(monkeypatch):
     assert ("checkin",) not in calls
     assert ("consumer-close",) in calls
     assert ("oracle-close",) in calls
+
+
+def test_cdc_thread_marks_failed_on_runtime_fatal_error(monkeypatch):
+    calls = []
+
+    class PgConn:
+        def close(self):
+            calls.append(("pg-close",))
+
+    class OracleConn:
+        def commit(self):
+            raise RuntimeError("target commit down")
+
+        def close(self):
+            calls.append(("oracle-close",))
+
+    class KafkaConsumer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def poll(self, timeout_ms=None):
+            calls.append(("poll", timeout_ms))
+            return {
+                "tp0": [
+                    SimpleNamespace(
+                        value=b"{}",
+                        topic="cdc.run1.TCBPAY.ALLORDERS",
+                        partition=0,
+                        offset=12,
+                    )
+                ]
+            }
+
+        def commit(self):
+            calls.append(("consumer-commit",))
+
+        def close(self):
+            calls.append(("consumer-close",))
+
+    class StopEvent:
+        def is_set(self):
+            return False
+
+    import kafka
+
+    monkeypatch.setattr(kafka, "KafkaConsumer", KafkaConsumer)
+    monkeypatch.setattr(worker.db, "get_pg_conn", lambda: PgConn())
+    monkeypatch.setattr(worker.db, "load_configs", lambda _pg: {"kafka": {"bootstrap_servers": "broker:9092"}})
+    monkeypatch.setattr(worker.db, "open_oracle", lambda *_args: OracleConn())
+    monkeypatch.setattr(worker, "_parse_debezium", lambda _value: {"op": "u", "after": {"ID": 7}})
+    monkeypatch.setattr(worker, "_apply_event", lambda *_args: calls.append(("apply",)))
+    monkeypatch.setattr(
+        worker.db,
+        "fail_cdc_migration",
+        lambda pg, mid, code, detail: calls.append(("fail", mid, code, detail)),
+    )
+
+    worker.cdc_thread(_migration(), stop_event=StopEvent())
+
+    assert ("apply",) in calls
+    assert ("consumer-commit",) not in calls
+    assert (
+        "fail",
+        "mid-1",
+        "CDC_WORKER_FATAL",
+        "RuntimeError: target commit down",
+    ) in calls
+    assert ("consumer-close",) in calls
+    assert ("oracle-close",) in calls
+    assert ("pg-close",) in calls
