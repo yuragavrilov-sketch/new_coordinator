@@ -132,6 +132,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     } else {
       setStrategy("CDC_DIRECT");
       setWorkers(4);
+      setSequential(true);
     }
   }
 
@@ -174,7 +175,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
             : undefined,
         })),
         strategy,
-        sequential,
+        sequential: mode === "cdc" ? true : sequential,
         truncate_target: truncateTarget,
         chunk_size: chunkSize,
         max_parallel_workers: workers,
@@ -417,7 +418,12 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
 
           <Section title="Порядок и нагрузка">
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
-              <input type="checkbox" checked={sequential} onChange={e => setSequential(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={mode === "cdc" ? true : sequential}
+                disabled={mode === "cdc"}
+                onChange={e => setSequential(e.target.checked)}
+              />
               <span>Каждую таблицу отдельной позицией очереди</span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>

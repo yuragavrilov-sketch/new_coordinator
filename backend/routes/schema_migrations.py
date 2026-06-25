@@ -255,7 +255,7 @@ def add_plan_items(sm_id: str):
         return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
     connector_group_id = payload.get("connector_group_id") or None
 
-    sequential = bool(payload.get("sequential", True))
+    sequential = True if strategy.has_cdc else bool(payload.get("sequential", True))
     chunk_size = int(payload.get("chunk_size") or 1_000_000)
     max_workers = int(payload.get("max_parallel_workers") or 1)
     baseline_pd = int(payload.get("baseline_parallel_degree") or 4)
