@@ -100,6 +100,24 @@ def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list
     return missing
 
 
+def _normalize_manual_cdc_key_columns(raw_key_columns) -> list[str]:
+    if isinstance(raw_key_columns, str):
+        values = raw_key_columns.split(",")
+    elif isinstance(raw_key_columns, list):
+        values = raw_key_columns
+    else:
+        values = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        col = str(value).strip().upper()
+        if not col or col in seen:
+            continue
+        seen.add(col)
+        out.append(col)
+    return out
+
+
 def _effective_cdc_key_info(
     info: dict,
     manual_key_columns: list[str],
@@ -444,18 +462,7 @@ def add_plan_items(sm_id: str):
                     table_name = (table.get("source_table") or table.get("table") or "").strip().upper()
                     target_table = (table.get("target_table") or table_name).strip().upper()
                     raw_manual_key_columns = table.get("effective_key_columns") or table.get("key_columns") or []
-                    if isinstance(raw_manual_key_columns, str):
-                        manual_key_columns = [
-                            c.strip().upper()
-                            for c in raw_manual_key_columns.split(",")
-                            if c.strip()
-                        ]
-                    elif isinstance(raw_manual_key_columns, list):
-                        manual_key_columns = [
-                            str(c).strip().upper()
-                            for c in raw_manual_key_columns
-                            if str(c).strip()
-                        ]
+                    manual_key_columns = _normalize_manual_cdc_key_columns(raw_manual_key_columns)
                 else:
                     table_name = str(table).strip().upper()
                     target_table = table_name

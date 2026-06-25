@@ -161,6 +161,18 @@ def test_schema_migration_manual_cdc_key_for_no_key_table_is_user_defined():
     ) == ("USER_DEFINED", "USER", ["ID", "MERCHANT_ID"], False, False)
 
 
+def test_schema_migration_normalizes_manual_cdc_key_columns_from_csv():
+    assert schema_migrations._normalize_manual_cdc_key_columns(
+        " id, ID, merchant_id, "
+    ) == ["ID", "MERCHANT_ID"]
+
+
+def test_schema_migration_normalizes_manual_cdc_key_columns_from_list():
+    assert schema_migrations._normalize_manual_cdc_key_columns(
+        ["id", " ", "ID", "date_id"]
+    ) == ["ID", "DATE_ID"]
+
+
 def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
