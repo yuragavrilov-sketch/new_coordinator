@@ -544,6 +544,12 @@ def execute_plan():
 @bp.post("/api/planner/plans/<int:plan_id>/start")
 def start_plan(plan_id):
     """Start first batch: transition DRAFT -> NEW for batch_order = 1."""
+    def _is_cdc_item(mode, strategy):
+        return (
+            str(mode or "").upper().startswith("CDC")
+            or str(strategy or "").upper().startswith("CDC_")
+        )
+
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
@@ -555,15 +561,6 @@ def start_plan(plan_id):
 
             if plan["status"] not in ("READY", "RUNNING"):
                 return jsonify({"error": f"Cannot start plan in status {plan['status']}"}), 400
-
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM   migration_plan_items
-                WHERE  plan_id = %s
-                  AND  status = 'RUNNING'
-            """, (plan_id,))
-            if (cur.fetchone()[0] or 0) > 0:
-                return jsonify({"error": "A plan batch is already running"}), 400
 
             # Find the lowest batch that has PENDING items
             cur.execute("""
@@ -580,20 +577,43 @@ def start_plan(plan_id):
 
             # Get items for this batch
             cur.execute("""
-                SELECT item_id, migration_id
-                FROM migration_plan_items
-                WHERE plan_id = %s AND batch_order = %s AND status = 'PENDING'
+                SELECT i.item_id, i.migration_id, i.mode, m.strategy
+                FROM migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE i.plan_id = %s AND i.batch_order = %s AND i.status = 'PENDING'
+                ORDER BY i.sort_order, i.item_id
             """, (plan_id, next_batch))
             items = cur.fetchall()
 
+            cur.execute("""
+                SELECT i.mode, m.strategy
+                FROM migration_plan_items i
+                LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                WHERE i.plan_id = %s AND i.status = 'RUNNING'
+            """, (plan_id,))
+            running_items = cur.fetchall()
+            if running_items:
+                running_has_non_cdc = any(
+                    not _is_cdc_item(mode, strategy)
+                    for mode, strategy in running_items
+                )
+                next_batch_is_cdc = all(
+                    _is_cdc_item(mode, strategy)
+                    for _, _, mode, strategy in items
+                )
+                if running_has_non_cdc or not next_batch_is_cdc:
+                    return jsonify({"error": "A plan batch is already running"}), 400
+
             now = datetime.now(timezone.utc).isoformat()
             started_ids = []
-            for item_id, migration_id in items:
+            for item_id, migration_id, _, _ in items:
                 # Transition migration DRAFT -> NEW
                 cur.execute("""
                     UPDATE migrations SET phase = 'NEW', state_changed_at = %s, updated_at = %s
                     WHERE migration_id = %s AND phase = 'DRAFT'
                 """, (now, now, str(migration_id)))
+                if cur.rowcount <= 0:
+                    continue
 
                 cur.execute("""
                     INSERT INTO migration_state_history
