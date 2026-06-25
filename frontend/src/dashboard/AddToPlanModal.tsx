@@ -282,6 +282,7 @@ export function AddToPlanModal({
             ? keyColumns[rowKey(t)] ?? []
             : undefined,
         })),
+        connector_group_id: mode === "cdc" ? cdcGroup?.group_id : undefined,
         strategy,
         sequential: mode === "cdc" ? true : sequential,
         truncate_target: truncateTarget,
