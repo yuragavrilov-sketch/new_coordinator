@@ -1458,6 +1458,28 @@ def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
     assert result["topic_prefix"] == "sm.tcbpay.pay.r123ab"
 
 
+def test_orchestrator_creates_manual_trigger_job_when_cdc_catches_up(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        orchestrator,
+        "_ensure_trigger_job",
+        lambda mid: calls.append(("trigger-job", mid)),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_transition",
+        lambda mid, target, **kwargs: calls.append(
+            ("transition", mid, target, kwargs.get("message"))
+        ),
+    )
+
+    orchestrator._handle_cdc_caught_up("mid-cdc", {"migration_id": "mid-cdc"})
+
+    assert calls[0] == ("trigger-job", "mid-cdc")
+    assert calls[1][:3] == ("transition", "mid-cdc", "STEADY_STATE")
+    assert calls[1][3]
+
+
 def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     calls = []
 

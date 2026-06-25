@@ -934,7 +934,8 @@ def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -
 def disable_triggers(conn, schema: str, table: str) -> list[str]:
     """Disable all ENABLED triggers on *table* so they don't fire during bulk
     INSERT.  Returns the list of trigger names that were disabled.
-    Re-enable them afterwards with enable_all_disabled_objects().
+    Re-enable them separately with enable_triggers(), normally from a manual
+    target-trigger job after CDC apply has caught up.
     """
     info = get_full_ddl_info(conn, schema, table)
     s = schema.upper()

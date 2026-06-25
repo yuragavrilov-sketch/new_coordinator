@@ -1282,6 +1282,7 @@ def _handle_cdc_catching_up(mid: str, m: dict) -> None:
 
 
 def _handle_cdc_caught_up(mid: str, m: dict) -> None:
+    _ensure_trigger_job(mid)
     _transition(mid, "STEADY_STATE",
                 message="Миграция догнала источник")
 

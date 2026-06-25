@@ -78,6 +78,7 @@ def test_enable_all_disabled_objects_enables_fk_novalidate(monkeypatch):
                 {"name": "CHK_CHILD", "type_code": "C", "status": "DISABLED"},
                 {"name": "FK_CHILD_PARENT", "type_code": "R", "status": "DISABLED"},
             ],
+            "triggers": [{"name": "TRG_CHILD", "status": "DISABLED"}],
         },
     )
     conn = ConnStub()
@@ -90,4 +91,5 @@ def test_enable_all_disabled_objects_enables_fk_novalidate(monkeypatch):
     assert result["enabled"]["constraints"] == ["CHK_CHILD"]
     assert result["enabled"]["fk_novalidate"] == ["FK_CHILD_PARENT"]
     assert result["errors"] == {"indexes": [], "constraints": []}
+    assert not any("ALTER TRIGGER" in sql for sql in conn.executed)
     assert conn.committed
