@@ -89,13 +89,10 @@ export function AddToPlanModal({
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
-  const cdcNoNewTables = mode === "cdc" && !!cdcGroup && connectorNewTables.length === 0;
-  const cdcSubmitLabel = cdcNoNewTables
-    ? "Новых CDC-таблиц нет"
-    : projectedConnectorCount > connectorNewTables.length
-      ? `Добавить ${connectorNewTables.length}, синхронизировать ${projectedConnectorCount} в Debezium`
-      : `Добавить ${connectorNewTables.length} в CDC-коннектор`;
-  const submitDisabled = busy || !!cdcRemoveBusy || cdcNoNewTables || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
+  const cdcSubmitLabel = projectedConnectorCount > tables.length
+    ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
+    : `Добавить ${tables.length} в CDC-коннектор`;
+  const submitDisabled = busy || !!cdcRemoveBusy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -253,11 +250,7 @@ export function AddToPlanModal({
           setErr("Дождитесь загрузки ключей таблиц.");
           return;
         }
-        if (cdcNoNewTables) {
-          setErr("Все выбранные таблицы уже есть в CDC-коннекторе. Новых строк для очереди нет.");
-          return;
-        }
-        for (const table of connectorNewTables) {
+        for (const table of tables) {
           const key = rowKey(table);
           const info = tableInfos[key];
           if (!info) {
@@ -279,9 +272,8 @@ export function AddToPlanModal({
         }
       }
 
-      const submitTables = mode === "cdc" ? connectorNewTables : tables;
       const payload: AddPlanItemsPayload = {
-        tables: submitTables.map(t => ({
+        tables: tables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
           key_columns: mode === "cdc"
@@ -458,7 +450,7 @@ export function AddToPlanModal({
                   </div>
                   {connectorSelectedTables.length > 0 && (
                     <div style={{ color: t.amber.fg }}>
-                      Уже в коннекторе из выбранных: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
+                      Уже есть в Debezium, но строка очереди будет создана: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
