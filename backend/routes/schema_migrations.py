@@ -572,6 +572,7 @@ def add_plan_items(sm_id: str):
                         plan_id,
                         actor="SYSTEM",
                         batch_order=first_created_batch,
+                        allow_cdc_queue_when_blocked=True,
                     )
                 except Exception as start_exc:
                     plan_start_error = str(start_exc)

@@ -66,6 +66,14 @@ def _can_start_plan_batch(running_items, pending_items) -> bool:
     return pending_is_cdc and not running_has_non_cdc
 
 
+def _can_force_queue_cdc_batch(batch_order, pending_items) -> bool:
+    """Allow explicit CDC batches to enter NEW; orchestrator still enforces load slots."""
+    return batch_order is not None and bool(pending_items) and all(
+        _is_cdc_plan_item(mode, strategy)
+        for mode, strategy in pending_items
+    )
+
+
 def _plan_item_status_for_phase(phase: str | None) -> str | None:
     phase = str(phase or "").upper()
     if phase == "COMPLETED":
@@ -86,6 +94,7 @@ def _start_next_plan_batch(
     *,
     actor: str = "USER",
     batch_order: int | None = None,
+    allow_cdc_queue_when_blocked: bool = False,
 ) -> dict:
     conn = _state["get_conn"]()
     try:
@@ -133,7 +142,10 @@ def _start_next_plan_batch(
             """, (plan_id,))
             running_items = cur.fetchall()
             pending_items = [(mode, strategy) for _, _, mode, strategy, _ in items]
-            if not _can_start_plan_batch(running_items, pending_items):
+            if (
+                not _can_start_plan_batch(running_items, pending_items)
+                and not (allow_cdc_queue_when_blocked and _can_force_queue_cdc_batch(batch_order, pending_items))
+            ):
                 raise ValueError("A plan batch is already running")
 
             now = datetime.now(timezone.utc).isoformat()

@@ -31,6 +31,24 @@ def test_running_cdc_does_not_allow_pending_bulk_batch():
     )
 
 
+def test_can_force_queue_explicit_cdc_batch():
+    assert planner._can_force_queue_cdc_batch(
+        batch_order=7,
+        pending_items=[("CDC", "CDC_DIRECT")],
+    )
+
+
+def test_cannot_force_queue_implicit_or_bulk_batch():
+    assert not planner._can_force_queue_cdc_batch(
+        batch_order=None,
+        pending_items=[("CDC", "CDC_DIRECT")],
+    )
+    assert not planner._can_force_queue_cdc_batch(
+        batch_order=7,
+        pending_items=[("BULK", "BULK_DIRECT")],
+    )
+
+
 def test_legacy_payload_detects_cdc_mode():
     assert planner._legacy_payload_has_cdc(
         batches=[{"tables": [{"table": "T1", "mode": "CDC", "overrides": {}}]}],
