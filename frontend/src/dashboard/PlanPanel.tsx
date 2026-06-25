@@ -449,7 +449,9 @@ export function PlanPanel({
                     display: "flex", justifyContent: "space-between", alignItems: "center",
                     padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
                   }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Позиция {batch}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>
+                      {pack.key === "cdc" ? `Строка очереди ${batch}` : `Позиция ${batch}`}
+                    </span>
                     <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
                   </div>
                   {items.map(item => (
@@ -555,6 +557,7 @@ function PlanOverview({
   const batchDone = batchItems.filter(isDoneItem).length;
   const batchRunning = batchItems.filter(isActiveWorkItem).length;
   const batchFailed = batchItems.filter(isFailedItem).length;
+  const currentIsCdc = batchItems.length > 0 && batchItems.every(isCdcItem);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -600,10 +603,14 @@ function PlanOverview({
           background: t.bg.s2,
           minWidth: 0,
         }}>
-          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Текущая позиция запуска</div>
+          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>
+            {currentIsCdc ? "Текущая строка CDC-очереди" : "Текущая позиция запуска"}
+          </div>
           {batchNo ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>Позиция {batchNo}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>
+                {currentIsCdc ? `Строка очереди ${batchNo}` : `Позиция ${batchNo}`}
+              </span>
               <span style={{ fontSize: 12, color: t.text.muted }}>
                 {batchDone}/{batchItems.length} готово · {batchRunning} в работе · {batchFailed} ошибок
               </span>
