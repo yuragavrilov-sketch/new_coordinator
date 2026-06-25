@@ -57,6 +57,19 @@ interface CdcConnectorActionResp {
   cdc_queue_kicked?: boolean;
 }
 
+interface DebeziumSyncStatus {
+  connector_name: string;
+  exists: boolean;
+  in_sync: boolean;
+  desired_table_include_list: string;
+  actual_table_include_list: string | null;
+  desired_message_key_columns: string;
+  actual_message_key_columns: string | null;
+  missing_tables: string[];
+  extra_tables: string[];
+  key_columns_match: boolean;
+}
+
 interface TargetTriggerJob {
   job_id: string;
   state: "PENDING" | "RUNNING" | "DONE" | "FAILED";
@@ -85,9 +98,40 @@ export function PlanPanel({
     }
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
   }, [plan]);
+  const effectiveCdcGroup = plan?.cdc_group || cdcGroupProp || null;
   const [cdcActionBusy, setCdcActionBusy] = React.useState("");
   const [cdcActionErr, setCdcActionErr] = React.useState("");
   const [cdcActionInfo, setCdcActionInfo] = React.useState("");
+  const [cdcSyncStatus, setCdcSyncStatus] = React.useState<DebeziumSyncStatus | null>(null);
+  const [cdcSyncStatusErr, setCdcSyncStatusErr] = React.useState("");
+  const [cdcSyncStatusLoading, setCdcSyncStatusLoading] = React.useState(false);
+
+  const loadDebeziumSyncStatus = React.useCallback((groupId: string | null | undefined) => {
+    if (!groupId) {
+      setCdcSyncStatus(null);
+      setCdcSyncStatusErr("");
+      setCdcSyncStatusLoading(false);
+      return;
+    }
+    setCdcSyncStatusErr("");
+    setCdcSyncStatusLoading(true);
+    fetch(`/api/connector-groups/${groupId}/debezium-sync-status`)
+      .then(async r => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error || `HTTP ${r.status}`);
+        return body as DebeziumSyncStatus;
+      })
+      .then(setCdcSyncStatus)
+      .catch(e => {
+        setCdcSyncStatus(null);
+        setCdcSyncStatusErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => setCdcSyncStatusLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    loadDebeziumSyncStatus(effectiveCdcGroup?.group_id);
+  }, [effectiveCdcGroup?.group_id, loadDebeziumSyncStatus]);
 
   async function syncCdcGroup(group: MigrationPlanCdcGroup) {
     setCdcActionBusy("sync");
@@ -100,6 +144,7 @@ export function PlanPanel({
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       onReload();
+      loadDebeziumSyncStatus(group.group_id);
       const status = String(body.status || group.status || "").toUpperCase();
       const syncText = status && status !== "RUNNING"
         ? `CDC-коннектор ${status}; Debezium синхронизируется после запуска`
@@ -135,6 +180,7 @@ export function PlanPanel({
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       onReload();
+      loadDebeziumSyncStatus(group.group_id);
       const connectorStatus = String(body.status || "").toUpperCase();
       const connectorText = connectorStatus === "RUNNING"
         ? "CDC-коннектор RUNNING"
@@ -181,6 +227,7 @@ export function PlanPanel({
       }
       const body = await res.json().catch(() => ({}));
       onReload();
+      loadDebeziumSyncStatus(group.group_id);
       if (body.sync_error) {
         setCdcActionErr(`Таблица убрана из CDC-коннектора, но Debezium не синхронизирован: ${body.sync_error}`);
       } else {
@@ -192,8 +239,6 @@ export function PlanPanel({
       setCdcActionBusy("");
     }
   }
-
-  const effectiveCdcGroup = plan?.cdc_group || cdcGroupProp || null;
 
   if (!plan && loading) {
     return <Shell><Muted>Загрузка пачки...</Muted></Shell>;
@@ -217,6 +262,9 @@ export function PlanPanel({
               group={effectiveCdcGroup}
               planItems={[]}
               busyAction={cdcActionBusy}
+              syncStatus={cdcSyncStatus}
+              syncStatusLoading={cdcSyncStatusLoading}
+              syncStatusErr={cdcSyncStatusErr}
               onSync={syncCdcGroup}
               onStart={startCdcGroup}
               showExtraTables={false}
@@ -358,6 +406,9 @@ export function PlanPanel({
           planSourceSchema={plan.src_schema}
           cdcGroup={effectiveCdcGroup}
           cdcActionBusy={cdcActionBusy}
+          cdcSyncStatus={cdcSyncStatus}
+          cdcSyncStatusLoading={cdcSyncStatusLoading}
+          cdcSyncStatusErr={cdcSyncStatusErr}
           onSyncCdcGroup={syncCdcGroup}
           onStartCdcGroup={startCdcGroup}
           canStart={canStart}
@@ -412,6 +463,9 @@ export function PlanPanel({
                     planItems={pack.items}
                     planSourceSchema={plan.src_schema}
                     busyAction={cdcActionBusy}
+                    syncStatus={cdcSyncStatus}
+                    syncStatusLoading={cdcSyncStatusLoading}
+                    syncStatusErr={cdcSyncStatusErr}
                     onSync={syncCdcGroup}
                     onStart={startCdcGroup}
                   />
@@ -465,6 +519,9 @@ function PlanOverview({
   planSourceSchema,
   cdcGroup,
   cdcActionBusy,
+  cdcSyncStatus,
+  cdcSyncStatusLoading,
+  cdcSyncStatusErr,
   onSyncCdcGroup,
   onStartCdcGroup,
   canStart,
@@ -480,6 +537,9 @@ function PlanOverview({
   planSourceSchema: string;
   cdcGroup: MigrationPlanCdcGroup | null;
   cdcActionBusy: string;
+  cdcSyncStatus: DebeziumSyncStatus | null;
+  cdcSyncStatusLoading: boolean;
+  cdcSyncStatusErr: string;
   onSyncCdcGroup: (group: MigrationPlanCdcGroup) => void;
   onStartCdcGroup: (group: MigrationPlanCdcGroup) => void;
   canStart: boolean;
@@ -513,6 +573,9 @@ function PlanOverview({
           planItems={items.filter(isCdcItem)}
           planSourceSchema={planSourceSchema}
           busyAction={cdcActionBusy}
+          syncStatus={cdcSyncStatus}
+          syncStatusLoading={cdcSyncStatusLoading}
+          syncStatusErr={cdcSyncStatusErr}
           onSync={onSyncCdcGroup}
           onStart={onStartCdcGroup}
         />
@@ -558,6 +621,9 @@ function CdcConnectorCard({
   planItems,
   planSourceSchema = "",
   busyAction,
+  syncStatus,
+  syncStatusLoading,
+  syncStatusErr,
   onSync,
   onStart,
   showExtraTables = true,
@@ -566,6 +632,9 @@ function CdcConnectorCard({
   planItems: MigrationPlanItem[];
   planSourceSchema?: string;
   busyAction: string;
+  syncStatus: DebeziumSyncStatus | null;
+  syncStatusLoading: boolean;
+  syncStatusErr: string;
   onSync: (group: MigrationPlanCdcGroup) => void;
   onStart: (group: MigrationPlanCdcGroup) => void;
   showExtraTables?: boolean;
@@ -606,6 +675,10 @@ function CdcConnectorCard({
   const canStartConnector = !["RUNNING", "TOPICS_CREATING", "CONNECTOR_STARTING", "STOPPING"].includes(status);
   const syncBusy = busyAction === "sync";
   const startBusy = busyAction === "start";
+  const syncProblem = Boolean(
+    syncStatusErr
+    || (syncStatus && (!syncStatus.exists || !syncStatus.in_sync)),
+  );
 
   return (
     <div style={{
@@ -677,6 +750,62 @@ function CdcConnectorCard({
       {extraTables.length > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
           В Debezium уже есть таблицы без активной строки в очереди: {extraTables.map(tableLabel).join(", ")}
+        </div>
+      )}
+      {(syncStatusLoading || syncStatusErr || syncStatus) && (
+        <div style={{
+          marginTop: 7,
+          padding: "6px 8px",
+          borderRadius: t.radius.sm,
+          border: `1px solid ${
+            syncStatusErr
+              ? t.red.border
+              : syncProblem
+                ? t.amber.dim
+                : t.green.dim
+          }`,
+          background: syncStatusErr
+            ? `${t.red.border}22`
+            : syncProblem
+              ? t.amber.bg
+              : t.green.bg,
+          color: syncStatusErr
+            ? t.red.fg
+            : syncProblem
+              ? t.amber.fg
+              : t.green.fg,
+          fontSize: 12,
+          lineHeight: 1.4,
+          overflowWrap: "anywhere",
+        }}>
+          {syncStatusLoading && <div>Проверяю фактический config Kafka Connect...</div>}
+          {syncStatusErr && <div>Kafka Connect config не прочитан: {syncStatusErr}</div>}
+          {syncStatus && (
+            <>
+              <div>
+                Kafka Connect config: <strong>{syncStatus.exists ? (syncStatus.in_sync ? "совпадает" : "есть расхождение") : "коннектор не найден"}</strong>
+                {" "}({syncStatus.connector_name})
+              </div>
+              {syncStatus.missing_tables.length > 0 && (
+                <div style={{ marginTop: 3 }}>
+                  Нет в Kafka Connect: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{syncStatus.missing_tables.join(", ")}</span>
+                </div>
+              )}
+              {syncStatus.extra_tables.length > 0 && (
+                <div style={{ marginTop: 3 }}>
+                  Лишние в Kafka Connect: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{syncStatus.extra_tables.join(", ")}</span>
+                </div>
+              )}
+              {!syncStatus.key_columns_match && (
+                <div style={{ marginTop: 3 }}>Расходятся CDC key columns.</div>
+              )}
+              {syncStatus.actual_table_include_list && (
+                <div style={{ marginTop: 3, fontFamily: t.font.mono, color: t.text.primary }}>
+                  actual table.include.list: {syncStatus.actual_table_include_list}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
       {group.error_text && (
