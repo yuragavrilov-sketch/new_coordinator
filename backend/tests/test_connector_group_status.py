@@ -113,6 +113,106 @@ def test_active_migration_for_group_table_allows_terminal_phase_absent():
     ) is None
 
 
+def test_prune_tables_removes_only_tables_not_in_keep_list(monkeypatch):
+    calls = []
+
+    class Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchall(self):
+            return [
+                {"source_schema": "TCBPAY", "source_table": "ALLORDERS"},
+                {"source_schema": "TCBPAY", "source_table": "OLDORDERS"},
+            ]
+
+        def fetchone(self):
+            return None
+
+    class Conn:
+        def cursor(self):
+            return Cur()
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(connector_groups, "_conn", lambda: Conn())
+    monkeypatch.setattr(connector_groups, "_r2d", lambda _cur, row: row)
+
+    removed = connector_groups.prune_tables(
+        "gid-1",
+        [{"source_schema": "tcbpay", "source_table": "allorders"}],
+    )
+
+    assert removed == [{"source_schema": "TCBPAY", "source_table": "OLDORDERS"}]
+    executed_sql = [call[1] for call in calls if call[0] == "execute"]
+    assert any("DELETE FROM group_tables" in sql for sql in executed_sql)
+    assert ("commit",) in calls
+    assert ("rollback",) not in calls
+    assert ("close",) in calls
+
+
+def test_prune_tables_rolls_back_when_removed_table_has_active_migration(monkeypatch):
+    calls = []
+
+    class Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchall(self):
+            return [{"source_schema": "TCBPAY", "source_table": "OLDORDERS"}]
+
+        def fetchone(self):
+            return ("mid-1", "CDC_APPLYING")
+
+    class Conn:
+        def cursor(self):
+            return Cur()
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(connector_groups, "_conn", lambda: Conn())
+    monkeypatch.setattr(connector_groups, "_r2d", lambda _cur, row: row)
+
+    with pytest.raises(ValueError) as exc:
+        connector_groups.prune_tables(
+            "gid-1",
+            [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}],
+        )
+
+    assert "active migration mid-1 is in phase CDC_APPLYING" in str(exc.value)
+    executed_sql = [call[1] for call in calls if call[0] == "execute"]
+    assert not any("DELETE FROM group_tables" in sql for sql in executed_sql)
+    assert ("commit",) not in calls
+    assert ("rollback",) in calls
+    assert ("close",) in calls
+
+
 def test_delete_group_treats_draft_cdc_migration_as_active(monkeypatch):
     calls = []
 
