@@ -758,7 +758,7 @@ function CdcConnectorCard({
         </div>
       </div>
       <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
-        <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+        <span>Таблиц в CDC-пачке: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
         <span>Строк CDC в пачке: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
         <span>Не запущены: <strong style={{ color: pendingDraftCdc ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{pendingDraftCdc}</strong></span>
         <span>Ждут коннектор: <strong style={{ color: waitingConnector ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{waitingConnector}</strong></span>
@@ -771,16 +771,16 @@ function CdcConnectorCard({
       <div style={{ marginTop: 7, fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
         {connectorPreview.length > 0 ? (
           <>
-            Debezium читает весь состав CDC-коннектора: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{connectorPreview.join(", ")}</span>
+            table.include.list строится из всего состава CDC-пачки: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{connectorPreview.join(", ")}</span>
             {connectorRest > 0 && <span style={{ color: t.text.muted }}> +{connectorRest} еще</span>}
           </>
         ) : (
-          <span style={{ color: t.text.muted }}>В Debezium пока нет таблиц.</span>
+          <span style={{ color: t.text.muted }}>В CDC-пачке пока нет таблиц.</span>
         )}
       </div>
       {extraTables.length > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
-          В Debezium уже есть таблицы без активной строки в очереди: {extraTables.map(tableLabel).join(", ")}
+          В CDC-пачке уже есть таблицы без активной строки в очереди: {extraTables.map(tableLabel).join(", ")}
         </div>
       )}
       {(syncStatusLoading || syncStatusErr || syncStatus) && (

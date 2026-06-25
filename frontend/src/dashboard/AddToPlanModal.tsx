@@ -400,7 +400,7 @@ export function AddToPlanModal({
                 }}>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>Статус: <strong style={{ color: t.text.primary }}>{cdcGroup.status}</strong></span>
-                    <span>Сейчас в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+                    <span>Сейчас в CDC-пачке: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
                     <span>Добавится новых: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorNewTables.length}</strong></span>
                     <span>Будет в table.include.list: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{projectedConnectorCount}</strong></span>
                   </div>
@@ -412,7 +412,7 @@ export function AddToPlanModal({
                     color: connectorOtherTables.length ? t.amber.fg : t.blue.fg,
                     lineHeight: 1.45,
                   }}>
-                    Debezium-коннектор один на всю CDC-пачку. После сохранения в Kafka Connect уйдет полный список,
+                    CDC-пачка и есть Debezium-коннектор. После сохранения в Kafka Connect уйдет полный список пачки,
                     не только выбранные сейчас таблицы.
                     <div style={{ marginTop: 4, fontFamily: t.font.mono, color: t.text.primary, overflowWrap: "anywhere" }}>
                       {projectedPreview.length > 0 ? projectedPreview.join(", ") : "пока нет таблиц"}
@@ -421,13 +421,13 @@ export function AddToPlanModal({
                   </div>
                   {connectorSelectedTables.length > 0 && (
                     <div style={{ color: t.amber.fg }}>
-                      Уже есть в Debezium, но строка очереди будет создана: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
+                      Уже есть в CDC-пачке, но строка очереди будет создана: {connectorSelectedTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && !shouldPruneCdcPack && (
                     <div style={{ color: t.amber.fg }}>
                       Это уже существующая CDC-пачка: выбранные таблицы добавятся к текущему составу,
-                      а остальные таблицы останутся в Debezium: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                      а остальные таблицы останутся в table.include.list: {connectorOtherTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && shouldPruneCdcPack && (

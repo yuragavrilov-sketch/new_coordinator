@@ -493,7 +493,7 @@ export function Dashboard({
                 }
               }
               if (connectorCount !== undefined) {
-                startNote += ` · Debezium tables: ${connectorCount}`;
+                startNote += ` · CDC-пачка: ${connectorCount}`;
               }
               const prunedCount = response.cdc_pruned_tables?.length || 0;
               if (prunedCount > 0) {
