@@ -927,6 +927,16 @@ def test_schema_migration_add_first_cdc_item_creates_group_plan_and_autostarts(m
     assert body["connector_group_id"] == "gid-new"
     assert body["connector_start"] == {"group_id": "gid-new", "status": "TOPICS_CREATING"}
     assert body["plan_starts"] == [{"batch": 1, "started": ["mid-new"]}]
+    assert body["item_states"] == [{
+        "item_id": 7,
+        "table": "ALLORDERS",
+        "migration_id": "mid-new",
+        "batch_order": 1,
+        "status": "RUNNING",
+        "phase": "NEW",
+        "queue_position": None,
+        "error_text": None,
+    }]
     assert ("autostart", "gid-new", "PENDING", 42, [{
         "item_id": 7,
         "table": "ALLORDERS",
