@@ -192,12 +192,18 @@ export async function getMigrationPlan(planId: number): Promise<MigrationPlanDet
   return r.json();
 }
 
-export async function startMigrationPlan(planId: number): Promise<void> {
+export interface StartMigrationPlanResp {
+  batch: number;
+  started: string[];
+}
+
+export async function startMigrationPlan(planId: number): Promise<StartMigrationPlanResp> {
   const r = await fetch(`/api/planner/plans/${planId}/start`, { method: "POST" });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
     throw new Error(d.error || `HTTP ${r.status}`);
   }
+  return r.json();
 }
 
 export interface AddPlanItemsPayload {

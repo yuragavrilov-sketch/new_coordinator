@@ -317,14 +317,18 @@ export function Dashboard({
             if (response.connector_start_error) {
               setPlanErr(`CDC-коннектор не стартовал: ${response.connector_start_error}`);
             }
-            let autoStarted = false;
-            if (planMode === "cdc") {
+            let startNote = "";
+            if (planMode === "cdc" && !response.connector_start_error) {
               try {
-                await startMigrationPlan(planId);
-                autoStarted = true;
+                const started = await startMigrationPlan(planId);
+                startNote = started.started.length
+                  ? ` · старт batch ${started.batch}`
+                  : " · запуск уже обработан";
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
-                if (!/already running/i.test(msg)) {
+                if (/already running/i.test(msg)) {
+                  startNote = " · в очереди за текущей миграцией";
+                } else {
                   setPlanErr(msg);
                 }
               }
@@ -333,7 +337,7 @@ export function Dashboard({
             setSelectedIds(new Set());
             setActivePlanId(planId);
             onPlanChanged(planId);
-            setToast(`Добавлено в ${target}: ${count}${autoStarted ? " · старт отправлен" : ""}`);
+            setToast(`Добавлено в ${target}: ${count}${startNote}`);
             objectsApi.reload();
             eventsApi.reload();
             planApi.reload();
