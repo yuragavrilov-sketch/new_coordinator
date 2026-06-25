@@ -671,6 +671,8 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                     if by_partition:
                         db.cdc_checkin(pg, migration_id, total_lag, rows_applied,
                                        lag_by_partition=by_partition)
+                        if total_lag == 0:
+                            db.trigger_lag_zero(pg, migration_id)
                         print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied} parts={len(by_partition)}")
                     else:
                         db.cdc_heartbeat(pg, migration_id)

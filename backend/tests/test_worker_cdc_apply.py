@@ -293,6 +293,68 @@ def test_cdc_thread_uses_heartbeat_only_until_lag_partitions_exist(monkeypatch):
     assert ("oracle-close",) in calls
 
 
+def test_cdc_thread_triggers_caught_up_when_measured_lag_is_zero(monkeypatch):
+    calls = []
+
+    class PgConn:
+        def close(self):
+            calls.append(("pg-close",))
+
+    class OracleConn:
+        def close(self):
+            calls.append(("oracle-close",))
+
+    class KafkaConsumer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def poll(self, timeout_ms=None):
+            calls.append(("poll", timeout_ms))
+            return {}
+
+        def close(self):
+            calls.append(("consumer-close",))
+
+    class StopEvent:
+        def __init__(self):
+            self.calls = 0
+
+        def is_set(self):
+            self.calls += 1
+            return self.calls > 1
+
+    import kafka
+
+    monkeypatch.setattr(kafka, "KafkaConsumer", KafkaConsumer)
+    monkeypatch.setattr(worker, "CDC_CHECKIN_SEC", 0)
+    monkeypatch.setattr(worker.db, "get_pg_conn", lambda: PgConn())
+    monkeypatch.setattr(worker.db, "load_configs", lambda _pg: {"kafka": {"bootstrap_servers": "broker:9092"}})
+    monkeypatch.setattr(worker.db, "open_oracle", lambda *_args: OracleConn())
+    monkeypatch.setattr(worker, "_calc_lag", lambda *_args: (0, {"topic-0": 0}))
+    monkeypatch.setattr(
+        worker.db,
+        "cdc_checkin",
+        lambda _pg, mid, lag, rows, **kwargs: calls.append(("checkin", mid, lag, rows, kwargs)),
+    )
+    monkeypatch.setattr(worker.db, "trigger_lag_zero", lambda _pg, mid: calls.append(("lag-zero", mid)))
+    monkeypatch.setattr(worker.db, "cdc_heartbeat", lambda _pg, mid: calls.append(("heartbeat", mid)))
+    monkeypatch.setattr(time, "sleep", lambda *_args: None)
+
+    worker.cdc_thread(_migration(), stop_event=StopEvent())
+
+    assert (
+        "checkin",
+        "mid-1",
+        0,
+        0,
+        {"lag_by_partition": {"topic-0": 0}},
+    ) in calls
+    assert ("lag-zero", "mid-1") in calls
+    assert ("heartbeat", "mid-1") not in calls
+    assert ("consumer-close",) in calls
+    assert ("oracle-close",) in calls
+
+
 def test_cdc_thread_marks_failed_after_repeated_poll_errors(monkeypatch):
     calls = []
 
