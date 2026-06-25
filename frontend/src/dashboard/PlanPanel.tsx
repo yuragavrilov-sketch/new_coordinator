@@ -57,6 +57,23 @@ export function PlanPanel({
     }
   }
 
+  async function startCdcGroup(group: MigrationPlanCdcGroup) {
+    setCdcActionBusy("start");
+    setCdcActionErr("");
+    try {
+      const res = await fetch(`/api/connector-groups/${group.group_id}/start`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      onReload();
+    } catch (e) {
+      setCdcActionErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCdcActionBusy("");
+    }
+  }
+
   async function removeCdcGroupTable(group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) {
     const label = tableLabel(table);
     if (!window.confirm(`Убрать ${label} из CDC-коннектора? Debezium table.include.list будет обновлен.`)) return;
@@ -190,6 +207,7 @@ export function PlanPanel({
           cdcGroup={plan.cdc_group || null}
           cdcActionBusy={cdcActionBusy}
           onSyncCdcGroup={syncCdcGroup}
+          onStartCdcGroup={startCdcGroup}
           canStart={canStart}
         />
       )}
@@ -234,12 +252,21 @@ export function PlanPanel({
                 </div>
               ))}
               {pack.key === "cdc" && plan.cdc_group && (
-                <CdcConnectorDetails
-                  group={plan.cdc_group}
-                  planItems={pack.items}
-                  busyKey={cdcActionBusy}
-                  onRemoveExtra={removeCdcGroupTable}
-                />
+                <>
+                  <CdcConnectorCard
+                    group={plan.cdc_group}
+                    planItems={pack.items}
+                    busyAction={cdcActionBusy}
+                    onSync={syncCdcGroup}
+                    onStart={startCdcGroup}
+                  />
+                  <CdcConnectorDetails
+                    group={plan.cdc_group}
+                    planItems={pack.items}
+                    busyKey={cdcActionBusy}
+                    onRemoveExtra={removeCdcGroupTable}
+                  />
+                </>
               )}
             </div>
           ))}
@@ -282,6 +309,7 @@ function PlanOverview({
   cdcGroup,
   cdcActionBusy,
   onSyncCdcGroup,
+  onStartCdcGroup,
   canStart,
 }: {
   batchCount: number;
@@ -295,6 +323,7 @@ function PlanOverview({
   cdcGroup: MigrationPlanCdcGroup | null;
   cdcActionBusy: string;
   onSyncCdcGroup: (group: MigrationPlanCdcGroup) => void;
+  onStartCdcGroup: (group: MigrationPlanCdcGroup) => void;
   canStart: boolean;
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
@@ -324,8 +353,9 @@ function PlanOverview({
         <CdcConnectorCard
           group={cdcGroup}
           planItems={items.filter(isCdcItem)}
-          busy={cdcActionBusy === "sync"}
+          busyAction={cdcActionBusy}
           onSync={onSyncCdcGroup}
+          onStart={onStartCdcGroup}
         />
       )}
 
@@ -367,13 +397,15 @@ function PlanOverview({
 function CdcConnectorCard({
   group,
   planItems,
-  busy,
+  busyAction,
   onSync,
+  onStart,
 }: {
   group: MigrationPlanCdcGroup;
   planItems: MigrationPlanItem[];
-  busy: boolean;
+  busyAction: string;
   onSync: (group: MigrationPlanCdcGroup) => void;
+  onStart: (group: MigrationPlanCdcGroup) => void;
 }) {
   const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
   const connectorTables = group.tables || [];
@@ -392,6 +424,10 @@ function CdcConnectorCard({
     || group.topic_prefix
     || group.message_key_columns,
   );
+  const status = String(group.status || "").toUpperCase();
+  const canStartConnector = !["RUNNING", "TOPICS_CREATING", "CONNECTOR_STARTING", "STOPPING"].includes(status);
+  const syncBusy = busyAction === "sync";
+  const startBusy = busyAction === "start";
 
   return (
     <div style={{
@@ -412,17 +448,31 @@ function CdcConnectorCard({
           <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
             {group.active_connector_name || group.connector_name}
           </span>
+          {canStartConnector && (
+            <button
+              onClick={() => onStart(group)}
+              disabled={!!busyAction}
+              style={{
+                ...primaryActionStyle(!!busyAction),
+                padding: "3px 8px",
+                fontSize: 11,
+                opacity: startBusy ? 0.55 : 1,
+              }}
+            >
+              {startBusy ? "Запуск..." : "Запустить"}
+            </button>
+          )}
           <button
             onClick={() => onSync(group)}
-            disabled={busy}
+            disabled={!!busyAction}
             style={{
               ...secondaryActionStyle(false),
               padding: "3px 8px",
               fontSize: 11,
-              opacity: busy ? 0.55 : 1,
+              opacity: syncBusy ? 0.55 : 1,
             }}
           >
-            {busy ? "Синхронизация..." : "Синхронизировать"}
+            {syncBusy ? "Синхронизация..." : "Синхронизировать"}
           </button>
         </div>
       </div>
