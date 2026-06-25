@@ -693,7 +693,7 @@ def add_plan_items(sm_id: str):
     if strategy.uses_stage and not truncate_target:
         return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
     connector_group_id = payload.get("connector_group_id") or None
-    prune_cdc_pack = bool(payload.get("prune_cdc_pack", False)) and strategy.has_cdc
+    prune_cdc_pack = payload.get("prune_cdc_pack") is True and strategy.has_cdc
 
     sequential = True if strategy.has_cdc else bool(payload.get("sequential", True))
     chunk_size = int(payload.get("chunk_size") or 1_000_000)

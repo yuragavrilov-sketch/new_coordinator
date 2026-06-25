@@ -719,6 +719,103 @@ def test_schema_migration_add_items_prune_failure_aborts_before_new_cdc_row(monk
     assert ("close",) in calls
 
 
+def test_schema_migration_prune_cdc_pack_requires_boolean_true(monkeypatch):
+    calls = []
+
+    class Cursor:
+        def __init__(self):
+            self.fetchone_results = [
+                ("sm-1", "TCBPAY->TCBPAY", "TCBPAY", "TCBPAY", 42, "gid-1", "gid-1"),
+                ("RUNNING", "topic.prefix", None),
+                (0,),
+                None,
+                None,
+                (7,),
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchone(self):
+            return self.fetchone_results.pop(0)
+
+    class Conn:
+        def __init__(self):
+            self.cur = Cursor()
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    class OracleConn:
+        def close(self):
+            calls.append(("oracle-close",))
+
+    monkeypatch.setitem(schema_migrations._state, "db_available", {"value": True})
+    monkeypatch.setitem(schema_migrations._state, "get_conn", lambda: Conn())
+    monkeypatch.setitem(schema_migrations._state, "broadcast", lambda event: calls.append(("broadcast", event["type"])))
+    monkeypatch.setattr(schema_migrations, "_source_oracle_conn", lambda: OracleConn())
+    monkeypatch.setattr(
+        schema_migrations,
+        "_prune_cdc_group_tables_tx",
+        lambda *_args: calls.append(("prune",)),
+    )
+    monkeypatch.setattr(
+        oracle_browser,
+        "get_table_info",
+        lambda _conn, _schema, _table: {
+            "pk_columns": ["ID"],
+            "uk_constraints": [],
+            "columns": [{"name": "ID"}],
+            "supplemental_log_data_all": "YES",
+        },
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_autostart_created_cdc_items",
+        lambda group_id, status, plan_id, created: {
+            "connector_start": {"group_id": group_id, "status": "RUNNING"},
+            "connector_start_error": None,
+            "plan_start": {"batch": 1, "started": [created[0]["migration_id"]]},
+            "plan_starts": [{"batch": 1, "started": [created[0]["migration_id"]]}],
+            "plan_start_error": None,
+        },
+    )
+    monkeypatch.setattr(schema_migrations, "_load_created_plan_item_states", lambda _conn, created: [])
+    monkeypatch.setattr(schema_migrations, "_load_cdc_connector_summary", lambda group_id: {"group_id": group_id})
+
+    app = Flask(__name__)
+    app.register_blueprint(schema_migrations.bp)
+
+    res = app.test_client().post(
+        "/api/schema-migrations/sm-1/plan/items",
+        json={
+            "strategy": "CDC_DIRECT",
+            "prune_cdc_pack": "false",
+            "tables": [{"source_table": "ALLORDERS"}],
+        },
+    )
+
+    assert res.status_code == 201
+    assert "prune" not in [call[0] for call in calls]
+    assert ("commit",) in calls
+    assert ("rollback",) not in calls
+
+
 def test_schema_migration_add_first_cdc_item_creates_group_plan_and_autostarts(monkeypatch):
     calls = []
     ids = iter(["gid-new", "mid-new", "gt-new"])
