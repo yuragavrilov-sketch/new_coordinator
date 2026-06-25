@@ -70,6 +70,29 @@ export function ConnectorGroupsPanel() {
   const stopGroup   = (gid: string) => fetch(`/api/connector-groups/${gid}/stop`,   { method: "POST" }).then(load).catch(() => {});
   const createTopics = (gid: string) => fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" }).then(() => loadTopicCounts(gid)).catch(() => {});
 
+  const removeTable = async (gid: string, table: GroupTable) => {
+    const label = `${table.source_schema}.${table.source_table}`;
+    if (!confirm(`Удалить ${label} из CDC-коннектора? Debezium table.include.list будет обновлён.`)) return;
+    try {
+      const r = await fetch(
+        `/api/connector-groups/${gid}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
+        { method: "DELETE" },
+      );
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        alert(body?.error || `HTTP ${r.status}`);
+        return;
+      }
+      const d = await fetch(`/api/connector-groups/${gid}`)
+        .then(resp => resp.ok ? resp.json() : Promise.reject());
+      setDetail(d);
+      loadTopicCounts(gid);
+      load();
+    } catch (e) {
+      alert(`Сеть: ${String(e)}`);
+    }
+  };
+
   const deleteGroup = async (gid: string) => {
     if (!confirm("Удалить CDC-коннектор?")) return;
     try {
@@ -244,6 +267,7 @@ export function ConnectorGroupsPanel() {
                   topicCounts={topicCounts}
                   tableMigrationMap={tableMigrationMap}
                   onMigrate={(table) => setMigrateModal({ groupId: g.group_id, table })}
+                  onRemove={(table) => removeTable(g.group_id, table)}
                 />
 
                 {/* Migrations linked to this group */}

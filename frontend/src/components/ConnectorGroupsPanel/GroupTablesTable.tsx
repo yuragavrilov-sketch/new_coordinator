@@ -8,6 +8,7 @@ interface Props {
   topicCounts:      Map<string, TopicCount>;
   tableMigrationMap: Map<string, MigrationSummary>;
   onMigrate:        (table: GroupTable) => void;
+  onRemove:         (table: GroupTable) => void;
 }
 
 const KEY_BG: Record<string, string> = {
@@ -22,7 +23,7 @@ const KEY_FG: Record<string, string> = {
 };
 
 export function GroupTablesTable({
-  tables, topicCounts, tableMigrationMap, onMigrate,
+  tables, topicCounts, tableMigrationMap, onMigrate, onRemove,
 }: Props) {
   if (tables.length === 0) {
     return <div style={{ color: t.text.disabled, fontSize: t.size.sm }}>Нет таблиц в CDC-коннекторе</div>;
@@ -38,6 +39,7 @@ export function GroupTablesTable({
           <th style={{ padding: "4px 8px" }}>Топик</th>
           <th style={{ padding: "4px 8px", textAlign: "right" }}>Сообщений</th>
           <th style={{ padding: "4px 8px", textAlign: "center" }}>Миграция</th>
+          <th style={{ padding: "4px 8px", textAlign: "right" }}></th>
         </tr>
       </thead>
       <tbody>
@@ -111,6 +113,26 @@ export function GroupTablesTable({
                     Migrate
                   </button>
                 )}
+              </td>
+              <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                <button
+                  onClick={() => onRemove(tbl)}
+                  disabled={!!hasActive}
+                  title={hasActive ? "Нельзя удалить таблицу с активной миграцией" : "Удалить из CDC-коннектора"}
+                  style={{
+                    background: t.red.bg,
+                    border: `1px solid ${t.red.dim}`,
+                    borderRadius: t.radius.sm,
+                    color: t.red.fg,
+                    padding: "1px 7px",
+                    fontSize: t.size.xs,
+                    cursor: hasActive ? "default" : "pointer",
+                    opacity: hasActive ? 0.4 : 1,
+                    fontWeight: 600,
+                  }}
+                >
+                  Remove
+                </button>
               </td>
             </tr>
           );
