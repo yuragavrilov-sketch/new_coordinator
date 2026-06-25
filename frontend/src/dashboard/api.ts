@@ -201,7 +201,7 @@ export async function startMigrationPlan(planId: number): Promise<void> {
 }
 
 export interface AddPlanItemsPayload {
-  tables: Array<{ source_table: string; target_table?: string }>;
+  tables: Array<{ source_table: string; target_table?: string; key_columns?: string[] }>;
   strategy: "BULK_DIRECT" | "BULK_STAGE" | "CDC_DIRECT" | "CDC_STAGE";
   connector_group_id?: string;
   sequential: boolean;

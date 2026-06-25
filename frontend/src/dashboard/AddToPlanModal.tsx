@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { t } from "../theme";
 import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
@@ -10,6 +10,13 @@ interface BulkTable {
   source_table:  string;
   target_schema: string;
   target_table?: string;
+}
+
+interface TableInfo {
+  columns:        Array<{ name: string; type: string; nullable: boolean }>;
+  pk_columns:     string[];
+  uk_constraints: Array<{ name: string; columns: string[] }>;
+  error?:         string;
 }
 
 interface Props {
@@ -31,10 +38,21 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
   const [workers, setWorkers] = useState(1);
   const [baselinePd, setBaselinePd] = useState(4);
   const [stageTablespace, setStageTablespace] = useState("PAYSTAGE");
+  const [tableInfos, setTableInfos] = useState<Record<string, TableInfo>>({});
+  const [keyColumns, setKeyColumns] = useState<Record<string, string[]>>({});
+  const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
+  const tablesKey = useMemo(
+    () => tables.map(x => `${x.source_schema}.${x.source_table}`).join("|"),
+    [tables],
+  );
+
+  function rowKey(x: BulkTable) {
+    return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
+  }
 
   useEffect(() => {
     setPackMode(initialMode);
@@ -44,6 +62,66 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
   useEffect(() => {
     if (usesStage && !truncateTarget) setTruncateTarget(true);
   }, [usesStage, truncateTarget]);
+
+  useEffect(() => {
+    if (mode !== "cdc") {
+      setTableInfos({});
+      setKeyColumns({});
+      setInfoLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInfoLoading(true);
+    setErr("");
+
+    Promise.all(tables.map(async table => {
+      const key = rowKey(table);
+      const p = new URLSearchParams({
+        schema: table.source_schema,
+        table:  table.source_table,
+      });
+      try {
+        const r = await fetch(`/api/db/source/table-info?${p.toString()}`);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.error) {
+          return [key, {
+            columns: [],
+            pk_columns: [],
+            uk_constraints: [],
+            error: d.error || `HTTP ${r.status}`,
+          } as TableInfo] as const;
+        }
+        return [key, d as TableInfo] as const;
+      } catch (e) {
+        return [key, {
+          columns: [],
+          pk_columns: [],
+          uk_constraints: [],
+          error: e instanceof Error ? e.message : String(e),
+        } as TableInfo] as const;
+      }
+    })).then(entries => {
+      if (cancelled) return;
+      const nextInfos = Object.fromEntries(entries);
+      setTableInfos(nextInfos);
+      setKeyColumns(prev => {
+        const next: Record<string, string[]> = {};
+        for (const table of tables) {
+          const key = rowKey(table);
+          const info = nextInfos[key];
+          if (!info || info.pk_columns.length > 0) continue;
+          next[key] = prev[key] ?? info.uk_constraints[0]?.columns ?? [];
+        }
+        return next;
+      });
+    }).finally(() => {
+      if (!cancelled) setInfoLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, tablesKey]);
 
   function setPackMode(next: "historical" | "cdc") {
     setMode(next);
@@ -62,10 +140,36 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     setBusy(true);
     setErr("");
     try {
+      if (mode === "cdc") {
+        if (infoLoading) {
+          setErr("Дождитесь загрузки ключей таблиц.");
+          return;
+        }
+        for (const table of tables) {
+          const key = rowKey(table);
+          const info = tableInfos[key];
+          if (!info) {
+            setErr(`Не удалось получить ключи для ${key}.`);
+            return;
+          }
+          if (info.error) {
+            setErr(`${key}: ${info.error}`);
+            return;
+          }
+          if (info.pk_columns.length === 0 && (keyColumns[key] ?? []).length === 0) {
+            setErr(`Для ${key} без PK нужно выбрать колонки CDC-ключа.`);
+            return;
+          }
+        }
+      }
+
       const payload: AddPlanItemsPayload = {
         tables: tables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
+          key_columns: mode === "cdc" && (tableInfos[rowKey(t)]?.pk_columns.length ?? 0) === 0
+            ? keyColumns[rowKey(t)] ?? []
+            : undefined,
         })),
         strategy,
         sequential,
@@ -176,6 +280,143 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
             )}
           </Section>
 
+          {mode === "cdc" && (
+            <Section title="Ключи CDC">
+              <div style={{ display: "grid", gap: 8 }}>
+                {infoLoading && (
+                  <div style={{ fontSize: 12, color: t.text.muted }}>
+                    Загружаю PK/UK и колонки выбранных таблиц...
+                  </div>
+                )}
+                {!infoLoading && tables.map(table => {
+                  const key = rowKey(table);
+                  const info = tableInfos[key];
+                  const selected = keyColumns[key] ?? [];
+                  if (!info) {
+                    return (
+                      <div key={key} style={{ fontSize: 12, color: t.text.muted }}>
+                        {key}: metadata не загружена
+                      </div>
+                    );
+                  }
+                  if (info.error) {
+                    return (
+                      <div key={key} style={{
+                        padding: "8px 10px",
+                        borderRadius: t.radius.sm,
+                        border: `1px solid ${t.red.border}`,
+                        background: `${t.red.border}22`,
+                        color: t.red.fg,
+                        fontSize: 12,
+                      }}>
+                        {key}: {info.error}
+                      </div>
+                    );
+                  }
+                  if (info.pk_columns.length > 0) {
+                    return (
+                      <div key={key} style={{
+                        padding: "8px 10px",
+                        borderRadius: t.radius.sm,
+                        border: `1px solid ${t.green.dim}`,
+                        background: t.green.bg,
+                        color: t.green.fg,
+                        fontSize: 12,
+                      }}>
+                        <strong style={{ fontFamily: t.font.mono }}>{key}</strong>
+                        <span style={{ marginLeft: 8 }}>PK: {info.pk_columns.join(", ")}</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={key} style={{
+                      border: `1px solid ${selected.length ? t.blue.dim : t.red.border}`,
+                      borderRadius: t.radius.sm,
+                      background: t.bg.s1,
+                      padding: 10,
+                    }}>
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 8,
+                        color: t.text.primary,
+                        fontSize: 12,
+                      }}>
+                        <strong style={{ fontFamily: t.font.mono }}>{key}</strong>
+                        <span style={{ color: selected.length ? t.blue.fg : t.red.fg }}>
+                          PK нет, выберите CDC-ключ
+                        </span>
+                      </div>
+
+                      {info.uk_constraints.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                          {info.uk_constraints.map(uk => (
+                            <button
+                              key={uk.name}
+                              type="button"
+                              onClick={() => setKeyColumns(prev => ({ ...prev, [key]: uk.columns }))}
+                              style={{
+                                ...secondaryActionStyle(false),
+                                padding: "4px 7px",
+                                fontSize: 11,
+                                minHeight: 0,
+                              }}
+                            >
+                              {uk.name}: {uk.columns.join(", ")}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                        gap: 6,
+                      }}>
+                        {info.columns.map(col => {
+                          const checked = selected.includes(col.name);
+                          return (
+                            <label key={col.name} style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "5px 7px",
+                              borderRadius: t.radius.sm,
+                              border: `1px solid ${checked ? t.blue.dim : t.border.subtle}`,
+                              background: checked ? t.blue.bg : t.bg.s2,
+                              color: checked ? t.blue.fg : t.text.secondary,
+                              fontSize: 11.5,
+                              fontFamily: t.font.mono,
+                              minWidth: 0,
+                            }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={e => {
+                                  setKeyColumns(prev => {
+                                    const cur = prev[key] ?? [];
+                                    const next = e.target.checked
+                                      ? [...cur, col.name]
+                                      : cur.filter(x => x !== col.name);
+                                    return { ...prev, [key]: next };
+                                  });
+                                }}
+                              />
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {col.name}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
+
           <Section title="Порядок и нагрузка">
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
               <input type="checkbox" checked={sequential} onChange={e => setSequential(e.target.checked)} />
@@ -224,7 +465,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
 
         <div style={S.footer}>
           <button onClick={onClose} disabled={busy} style={secondaryActionStyle(busy)}>Отмена</button>
-          <button onClick={submit} disabled={busy} style={primaryActionStyle(busy)}>
+          <button onClick={submit} disabled={busy || (mode === "cdc" && infoLoading)} style={primaryActionStyle(busy || (mode === "cdc" && infoLoading))}>
             {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-пачку" : "Добавить в обычную пачку"}
           </button>
         </div>
