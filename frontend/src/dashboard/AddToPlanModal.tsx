@@ -16,6 +16,7 @@ interface TableInfo {
   columns:        Array<{ name: string; type: string; nullable: boolean }>;
   pk_columns:     string[];
   uk_constraints: Array<{ name: string; columns: string[] }>;
+  supplemental_log_data_all?: string | null;
   error?:         string;
 }
 
@@ -52,6 +53,12 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
+  }
+
+  function hasSuppLog(info?: TableInfo) {
+    const raw = String(info?.supplemental_log_data_all ?? "").trim().toUpperCase();
+    if (!raw) return null;
+    return raw === "YES" || raw === "TRUE" || raw === "1";
   }
 
   useEffect(() => {
@@ -155,6 +162,10 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
           }
           if (info.error) {
             setErr(`${key}: ${info.error}`);
+            return;
+          }
+          if (hasSuppLog(info) === false) {
+            setErr(`${key}: для CDC нужен supplemental logging ALL COLUMNS.`);
             return;
           }
           if (info.pk_columns.length === 0 && info.uk_constraints.length === 0 && (keyColumns[key] ?? []).length === 0) {
@@ -295,6 +306,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                   const key = rowKey(table);
                   const info = tableInfos[key];
                   const selected = keyColumns[key] ?? [];
+                  const supp = hasSuppLog(info);
                   if (!info) {
                     return (
                       <div key={key} style={{ fontSize: 12, color: t.text.muted }}>
@@ -328,6 +340,9 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                       }}>
                         <strong style={{ fontFamily: t.font.mono }}>{key}</strong>
                         <span style={{ marginLeft: 8 }}>PK: {info.pk_columns.join(", ")}</span>
+                        <span style={{ marginLeft: 8, color: supp === false ? t.red.fg : t.green.fg }}>
+                          {supp === false ? "NO SUPP" : supp === true ? "SUPP" : ""}
+                        </span>
                       </div>
                     );
                   }
@@ -344,6 +359,9 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                       }}>
                         <strong style={{ fontFamily: t.font.mono }}>{key}</strong>
                         <span style={{ marginLeft: 8 }}>UK: {uk.name} ({uk.columns.join(", ")})</span>
+                        <span style={{ marginLeft: 8, color: supp === false ? t.red.fg : t.green.fg }}>
+                          {supp === false ? "NO SUPP" : supp === true ? "SUPP" : ""}
+                        </span>
                       </div>
                     );
                   }
@@ -366,6 +384,11 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                         <span style={{ color: selected.length ? t.blue.fg : t.red.fg }}>
                           PK нет, выберите CDC-ключ
                         </span>
+                        {supp !== null && (
+                          <span style={{ color: supp ? t.green.fg : t.red.fg }}>
+                            {supp ? "SUPP" : "NO SUPP"}
+                          </span>
+                        )}
                       </div>
 
                       <div style={{
