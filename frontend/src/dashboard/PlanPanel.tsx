@@ -55,12 +55,13 @@ export function PlanPanel({
   }
 
   const total = plan.items.length;
-  const done = plan.items.filter(i => DONE.has(i.status)).length;
-  const failed = plan.items.filter(i => BAD.has(i.status)).length;
-  const running = plan.items.filter(i => i.status === "RUNNING").length;
-  const pending = plan.items.filter(i => i.status === "PENDING").length;
+  const done = plan.items.filter(isDoneItem).length;
+  const failed = plan.items.filter(isFailedItem).length;
+  const running = plan.items.filter(isRunningItem).length;
+  const pending = plan.items.filter(isQueuedItem).length;
+  const actualPending = plan.items.filter(i => i.status === "PENDING").length;
   const progress = total ? done / total * 100 : 0;
-  const hasPending = pending > 0;
+  const hasPending = actualPending > 0;
   const nextPendingBatch = batches.find(([, items]) => items.some(i => i.status === "PENDING"));
   const nextPendingItems = nextPendingBatch?.[1].filter(i => i.status === "PENDING") || [];
   const runningItems = plan.items.filter(i => i.status === "RUNNING");
@@ -224,9 +225,9 @@ function PlanOverview({
   canStart: boolean;
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
-  const batchDone = batchItems.filter(i => DONE.has(i.status)).length;
-  const batchRunning = batchItems.filter(i => i.status === "RUNNING").length;
-  const batchFailed = batchItems.filter(i => BAD.has(i.status)).length;
+  const batchDone = batchItems.filter(isDoneItem).length;
+  const batchRunning = batchItems.filter(isRunningItem).length;
+  const batchFailed = batchItems.filter(isFailedItem).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -282,9 +283,9 @@ function PlanOverview({
 }
 
 function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] }) {
-  const done = items.filter(i => DONE.has(i.status)).length;
-  const running = items.filter(i => i.status === "RUNNING").length;
-  const failed = items.filter(i => BAD.has(i.status)).length;
+  const done = items.filter(isDoneItem).length;
+  const running = items.filter(isRunningItem).length;
+  const failed = items.filter(isFailedItem).length;
   const steps = new Set(items.map(i => i.batch_order || 1)).size;
   return (
     <div style={{
@@ -331,6 +332,7 @@ function PlanRow({ item }: { item: MigrationPlanItem }) {
   const totalRows = item.total_rows || 0;
   const progress = totalRows ? rowsLoaded / totalRows * 100 : undefined;
   const status = item.phase || item.status;
+  const visual = itemVisualState(item);
   return (
     <div style={{
       display: "grid",
@@ -351,7 +353,7 @@ function PlanRow({ item }: { item: MigrationPlanItem }) {
           </div>
         )}
       </div>
-      <Badge tone={item.status === "DONE" ? "ok" : item.status === "RUNNING" ? "run" : BAD.has(item.status) ? "bad" : "idle"}>
+      <Badge tone={visual === "done" ? "ok" : visual === "running" ? "run" : visual === "failed" ? "bad" : "idle"}>
         {status}
       </Badge>
       <div style={{ fontFamily: t.font.mono, color: t.text.muted, textAlign: "right" }}>
@@ -359,6 +361,32 @@ function PlanRow({ item }: { item: MigrationPlanItem }) {
       </div>
     </div>
   );
+}
+
+function itemVisualState(item: MigrationPlanItem): "done" | "failed" | "queued" | "running" | "idle" {
+  const phase = String(item.phase || "").toUpperCase();
+  const status = String(item.status || "").toUpperCase();
+  if (status === "DONE" || phase === "COMPLETED") return "done";
+  if (BAD.has(status) || phase === "FAILED" || phase === "CANCELLED") return "failed";
+  if (status === "PENDING" || phase === "DRAFT" || phase === "NEW") return "queued";
+  if (status === "RUNNING") return "running";
+  return "idle";
+}
+
+function isDoneItem(item: MigrationPlanItem) {
+  return itemVisualState(item) === "done";
+}
+
+function isFailedItem(item: MigrationPlanItem) {
+  return itemVisualState(item) === "failed";
+}
+
+function isQueuedItem(item: MigrationPlanItem) {
+  return itemVisualState(item) === "queued";
+}
+
+function isRunningItem(item: MigrationPlanItem) {
+  return itemVisualState(item) === "running";
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
