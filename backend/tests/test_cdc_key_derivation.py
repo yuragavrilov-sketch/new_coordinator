@@ -32,6 +32,11 @@ def test_schema_migration_cdc_autostart_recovers_missing_running_connector(monke
     )
     monkeypatch.setattr(
         connector_groups,
+        "get_connector_status",
+        lambda group_id: calls.append(("status", group_id)) or "STOPPED",
+    )
+    monkeypatch.setattr(
+        connector_groups,
         "refresh_connector_tables",
         lambda group_id: calls.append(("refresh", group_id)) or (
             (_ for _ in ()).throw(
@@ -52,6 +57,44 @@ def test_schema_migration_cdc_autostart_recovers_missing_running_connector(monke
 
     assert result == {"group_id": "gid-1", "status": "TOPICS_CREATING"}
     assert calls == [
+        ("status", "gid-1"),
+        ("start", "gid-1"),
+    ]
+
+
+def test_schema_migration_cdc_autostart_refreshes_running_connector_after_topics(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_ensure_cdc_group_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [],
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "get_connector_status",
+        lambda group_id: calls.append(("status", group_id)) or "RUNNING",
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "request_start",
+        lambda group_id: calls.append(("start", group_id)) or {
+            "group_id": group_id,
+            "status": "RUNNING",
+            "already_started": True,
+        },
+    )
+
+    result = schema_migrations._sync_and_request_cdc_connector_start("gid-1", "RUNNING")
+
+    assert result == {"group_id": "gid-1", "status": "RUNNING", "already_started": True}
+    assert calls == [
+        ("status", "gid-1"),
         ("topics", "gid-1"),
         ("refresh", "gid-1"),
         ("start", "gid-1"),

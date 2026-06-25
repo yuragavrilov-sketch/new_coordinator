@@ -112,9 +112,11 @@ def _sync_and_request_cdc_connector_start(
     says RUNNING. In that case refresh marks the group STOPPED and raises; the
     add-table flow should recover by requesting a fresh start.
     """
-    from services.connector_groups import refresh_connector_tables, request_start
+    from services.connector_groups import get_connector_status, refresh_connector_tables, request_start
 
     if connector_group_status == "RUNNING":
+        if get_connector_status(connector_group_id) == "STOPPED":
+            return request_start(connector_group_id)
         _ensure_cdc_group_topics(connector_group_id)
     try:
         refresh_connector_tables(connector_group_id)
