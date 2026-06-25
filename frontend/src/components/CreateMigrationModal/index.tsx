@@ -35,7 +35,7 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
   const [connGroups, setConnGroups] = useState<ConnectorGroup[]>([]);
   const nameTouched = useRef(false);
 
-  // Load CDC packs
+  // Load CDC connectors
   useEffect(() => {
     fetch("/api/connector-groups")
       .then(r => r.ok ? r.json() : [])
@@ -171,11 +171,8 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
     if (!form.source_table)            e.source_table   = "Выберите таблицу";
     if (!form.target_schema)           e.target_schema  = "Выберите схему";
     if (!form.target_table)            e.target_table   = "Выберите таблицу";
-    if (hasCdc(form.strategy) && !form.group_id) {
-      if (!form.connector_name.trim()) e.connector_name = "Обязательное поле";
-      if (!form.topic_prefix.trim())   e.topic_prefix   = "Обязательное поле";
-      if (!form.consumer_group.trim()) e.consumer_group = "Обязательное поле";
-    }
+    if (hasCdc(form.strategy) && !form.group_id)
+      e.group_id = "Выберите CDC-коннектор";
     if (usesStage(form.strategy) && !form.stage_table_name.trim())
       e.stage_table_name = "Обязательное поле";
     if (form.chunk_size <= 0)          e.chunk_size = "Должно быть > 0";
@@ -206,9 +203,9 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
       stage_table_name:           usesStage(form.strategy) ? form.stage_table_name.trim() : "",
       stage_tablespace:           usesStage(form.strategy) ? form.stage_tablespace.trim() : "",
       group_id:                   form.group_id || undefined,
-      connector_name:             hasCdc(form.strategy) && !form.group_id ? form.connector_name.trim() : "",
-      topic_prefix:               hasCdc(form.strategy) && !form.group_id ? form.topic_prefix.trim() : "",
-      consumer_group:             hasCdc(form.strategy) && !form.group_id ? form.consumer_group.trim() : "",
+      connector_name:             "",
+      topic_prefix:               "",
+      consumer_group:             "",
       chunk_size:                 form.chunk_size,
       max_parallel_workers:       form.max_parallel_workers,
       baseline_parallel_degree:   form.baseline_parallel_degree,
@@ -361,41 +358,29 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
           <Section title="Параметры миграции">
             {hasCdc(form.strategy) && (
               <>
-                <Field label="CDC-пачка" hint="Выберите пачку для общего Debezium-коннектора или оставьте пустым для отдельного">
+                <Field label="CDC-коннектор" required error={fieldErrs.group_id}
+                  hint="Выберите общий Debezium-коннектор. Для новых таблиц используйте экран &quot;Эта миграция&quot; и добавление в CDC-коннектор.">
                   <select
                     value={form.group_id}
                     onChange={e => setF({ group_id: e.target.value })}
                     style={{ ...S.input, cursor: "pointer", appearance: "auto" }}
                   >
-                    <option value="">-- Без CDC-пачки (отдельный коннектор) --</option>
+                    <option value="">-- Выберите CDC-коннектор --</option>
                     {connGroups.map(g => (
-                      <option key={g.group_id} value={g.group_id}>
+                      <option key={g.group_id} value={g.group_id} disabled={g.status !== "RUNNING"}>
                         {g.group_name} ({g.status}) — {g.connector_name}
                       </option>
                     ))}
                   </select>
                 </Field>
-                {!form.group_id && (
-                  <>
-                    <div style={S.row2}>
-                      <Field label="Connector name" required error={fieldErrs.connector_name}>
-                        <TextInput value={form.connector_name} hasError={!!fieldErrs.connector_name}
-                          onChange={v => setF({ connector_name: v })} />
-                      </Field>
-                      <Field label="Topic prefix" required error={fieldErrs.topic_prefix}>
-                        <TextInput value={form.topic_prefix} hasError={!!fieldErrs.topic_prefix}
-                          onChange={v => setF({ topic_prefix: v })} />
-                      </Field>
-                    </div>
-                    <Field label="Consumer group" required error={fieldErrs.consumer_group}>
-                      <TextInput value={form.consumer_group} hasError={!!fieldErrs.consumer_group}
-                        onChange={v => setF({ consumer_group: v })} />
-                    </Field>
-                  </>
+                {!connGroups.some(g => g.status === "RUNNING") && (
+                  <div style={{ fontSize: t.size.xs, color: t.amber.fg, padding: "4px 0" }}>
+                    Нет запущенного CDC-коннектора. Добавьте таблицу через экран "Эта миграция" или запустите CDC-коннектор.
+                  </div>
                 )}
                 {form.group_id && (
                   <div style={{ fontSize: t.size.xs, color: t.green.fg, padding: "4px 0" }}>
-                    Connector, topic prefix и consumer group будут унаследованы от CDC-пачки
+                    Connector, topic prefix и consumer group будут унаследованы от CDC-коннектора
                   </div>
                 )}
               </>
