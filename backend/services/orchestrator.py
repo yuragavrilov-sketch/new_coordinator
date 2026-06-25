@@ -1820,6 +1820,7 @@ def _handle_group_connector_starting(group_id: str) -> None:
             connector_groups_svc.transition_group(
                 group_id, "RUNNING",
                 f"Коннектор запущен: {result.get('name', '?')}")
+            _update_queue_positions()
             _broadcast({
                 "type": "connector_group_status",
                 "group_id": group_id, "status": "RUNNING",

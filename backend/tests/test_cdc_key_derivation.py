@@ -229,3 +229,48 @@ def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
         "consumer_group": "sm.tcbpay.pay_TCBPAY_ALLORDERS",
     }
     assert result["topic_prefix"] == "sm.tcbpay.pay.r123ab"
+
+
+def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
+    calls = []
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "do_start_connector",
+        lambda group_id: calls.append(("start", group_id)) or {"name": "cdc-1"},
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "transition_group",
+        lambda group_id, status, message=None: calls.append(("transition", group_id, status)),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_update_queue_positions",
+        lambda: calls.append(("queue",)),
+    )
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event["status"])))
+    orchestrator._group_in_progress.clear()
+
+    orchestrator._handle_group_connector_starting("gid-1")
+
+    assert calls == [
+        ("start", "gid-1"),
+        ("refresh", "gid-1"),
+        ("transition", "gid-1", "RUNNING"),
+        ("queue",),
+        ("broadcast", "RUNNING"),
+    ]
