@@ -140,12 +140,16 @@ def get_group(group_id: str):
         get_group as svc_get,
         get_group_tables,
         get_group_migrations,
+        _build_key_columns,
+        _build_table_include_list,
     )
     group = svc_get(group_id)
     if not group:
         return jsonify({"error": "Группа не найдена"}), 404
     group["tables"] = get_group_tables(group_id)
     group["migrations"] = get_group_migrations(group_id)
+    group["table_include_list"] = _build_table_include_list(group_id)
+    group["message_key_columns"] = _build_key_columns(group_id)
     return jsonify(group)
 
 

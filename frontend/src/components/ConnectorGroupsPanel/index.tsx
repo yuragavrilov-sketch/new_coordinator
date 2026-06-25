@@ -375,6 +375,33 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
                     }}
                   >{configLoading ? "..." : "Debezium Config"}</button>
                 </div>
+                {(detail.table_include_list || detail.message_key_columns) && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: "7px 9px",
+                    border: `1px solid ${t.blue.dim}`,
+                    borderRadius: t.radius.sm,
+                    background: t.blue.bg,
+                    color: t.blue.fg,
+                    fontSize: t.size.sm,
+                    lineHeight: 1.45,
+                    overflowWrap: "anywhere",
+                  }}>
+                    <div>
+                      Kafka Connect синхронизируется из полного состава этой CDC-пачки, не из последнего добавления.
+                    </div>
+                    {detail.table_include_list && (
+                      <div style={{ marginTop: 4, fontFamily: t.font.mono, color: t.text.primary }}>
+                        table.include.list: {detail.table_include_list}
+                      </div>
+                    )}
+                    {detail.message_key_columns && (
+                      <div style={{ marginTop: 3, fontFamily: t.font.mono, color: t.text.primary }}>
+                        message.key.columns: {detail.message_key_columns}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Pack tables */}
                 <h4 style={{ color: t.text.muted, fontSize: t.size.base, margin: "12px 0 6px" }}>

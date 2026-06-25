@@ -99,6 +99,8 @@ export interface ConnectorGroup {
   consumer_group_prefix: string;
   status: GroupStatus;
   error_text: string | null;
+  table_include_list?: string;
+  message_key_columns?: string;
   created_at: string;
   updated_at: string;
   migrations?: MigrationSummary[];

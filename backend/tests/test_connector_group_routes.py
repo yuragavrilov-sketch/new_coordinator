@@ -113,6 +113,53 @@ def test_add_group_tables_rejects_direct_membership_edits(monkeypatch):
     assert calls == []
 
 
+def test_get_connector_group_includes_persisted_debezium_lists(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "group_name": "CDC",
+            "source_connection_id": "oracle_source",
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.main",
+            "consumer_group_prefix": "cdc.main",
+            "status": "RUNNING",
+            "error_text": None,
+        },
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "get_group_tables",
+        lambda group_id: [
+            {"source_schema": "TCBPAY", "source_table": "ALLORDERS"},
+            {"source_schema": "TCBPAY", "source_table": "MERCHANTS#ORDERS"},
+        ],
+    )
+    monkeypatch.setattr(connector_groups_svc, "get_group_migrations", lambda group_id: [])
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "_build_table_include_list",
+        lambda group_id: "TCBPAY.ALLORDERS,TCBPAY.MERCHANTS#ORDERS",
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "_build_key_columns",
+        lambda group_id: "TCBPAY.ALLORDERS:ID",
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().get("/api/connector-groups/gid-1")
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["table_include_list"] == "TCBPAY.ALLORDERS,TCBPAY.MERCHANTS#ORDERS"
+    assert body["message_key_columns"] == "TCBPAY.ALLORDERS:ID"
+    assert [t["source_table"] for t in body["tables"]] == ["ALLORDERS", "MERCHANTS#ORDERS"]
+
+
 def test_connector_group_wizard_rejects_direct_membership_edits():
     app = Flask(__name__)
     app.register_blueprint(connector_groups.bp)
