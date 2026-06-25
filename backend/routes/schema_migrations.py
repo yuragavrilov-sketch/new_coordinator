@@ -415,15 +415,21 @@ def add_plan_items(sm_id: str):
                 source_pk_exists = False
                 source_uk_exists = False
                 if strategy.has_cdc:
+                    if src_oconn is None:
+                        src_oconn = _source_oracle_conn()
+                    from db.oracle_browser import get_table_info
+                    info = get_table_info(src_oconn, src_schema, table_name)
+                    supp_log = str(info.get("supplemental_log_data_all") or "").upper()
+                    if supp_log == "NO":
+                        raise ValueError(
+                            f"CDC table {src_schema}.{table_name} does not have "
+                            "ALL COLUMNS supplemental logging."
+                        )
                     if manual_key_columns:
                         effective_key_type = "USER_DEFINED"
                         effective_key_source = "USER"
                         effective_key_columns = manual_key_columns
                     else:
-                        if src_oconn is None:
-                            src_oconn = _source_oracle_conn()
-                        from db.oracle_browser import get_table_info
-                        info = get_table_info(src_oconn, src_schema, table_name)
                         (effective_key_type,
                          effective_key_source,
                          effective_key_columns,

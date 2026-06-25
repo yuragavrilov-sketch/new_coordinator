@@ -29,6 +29,44 @@ class ConnStub:
         self.committed = True
 
 
+class TableInfoCursorStub:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def execute(self, sql: str, *_args, **_kwargs):
+        self.sql = sql.lower()
+
+    def fetchall(self):
+        if "all_tab_columns" in self.sql:
+            return [("ID", "NUMBER", "N")]
+        if "constraint_type = 'p'" in self.sql:
+            return [("ID",)]
+        return []
+
+    def fetchone(self):
+        if "v$database" in self.sql:
+            return ("NO",)
+        if "all_log_groups" in self.sql:
+            return (1,)
+        return None
+
+
+class TableInfoConnStub:
+    def cursor(self):
+        return TableInfoCursorStub()
+
+
+def test_get_table_info_reports_table_supplemental_logging():
+    info = oracle_browser.get_table_info(TableInfoConnStub(), "SRC", "T")
+
+    assert info["columns"] == [{"name": "ID", "type": "NUMBER", "nullable": False}]
+    assert info["pk_columns"] == ["ID"]
+    assert info["supplemental_log_data_all"] == "YES"
+
+
 def test_enable_all_disabled_objects_enables_fk_novalidate(monkeypatch):
     monkeypatch.setattr(oracle_browser, "is_temporary_table", lambda *_args: False)
     monkeypatch.setattr(

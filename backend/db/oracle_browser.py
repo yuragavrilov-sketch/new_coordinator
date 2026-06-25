@@ -499,6 +499,7 @@ def get_synonym_info(conn, schema: str, name: str) -> dict:
 
 
 def get_table_info(conn, schema: str, table: str) -> dict:
+    supp_log = None
     with conn.cursor() as cur:
         # Columns
         cur.execute("""
@@ -574,10 +575,32 @@ def get_table_info(conn, schema: str, table: str) -> dict:
 
         uk_constraints = [{"name": k, "columns": v} for k, v in uk_map.items()]
 
+        try:
+            cur.execute("SELECT supplemental_log_data_all FROM v$database")
+            row = cur.fetchone()
+            db_level = (row[0] or "").upper() if row else None
+        except Exception:
+            db_level = None
+
+        if db_level == "YES":
+            supp_log = "YES"
+        else:
+            try:
+                cur.execute("""
+                    SELECT COUNT(*) FROM all_log_groups
+                    WHERE  owner = :s AND table_name = :t
+                      AND  log_group_type = 'ALL COLUMN LOGGING'
+                """, {"s": schema, "t": table})
+                row = cur.fetchone()
+                supp_log = "YES" if row and (row[0] or 0) > 0 else "NO"
+            except Exception:
+                supp_log = None
+
     return {
         "columns":        columns,
         "pk_columns":     pk_columns,
         "uk_constraints": uk_constraints,
+        "supplemental_log_data_all": supp_log,
     }
 
 
