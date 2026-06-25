@@ -312,13 +312,25 @@ export function Dashboard({
           tables={selectedTables}
           initialMode={planMode}
           onClose={() => setPlanMode(null)}
-          onDone={(planId, count) => {
+          onDone={async (planId, count) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
+            let autoStarted = false;
+            if (planMode === "cdc") {
+              try {
+                await startMigrationPlan(planId);
+                autoStarted = true;
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (!/already running/i.test(msg)) {
+                  setPlanErr(msg);
+                }
+              }
+            }
             setPlanMode(null);
             setSelectedIds(new Set());
             setActivePlanId(planId);
             onPlanChanged(planId);
-            setToast(`Добавлено в ${target}: ${count}`);
+            setToast(`Добавлено в ${target}: ${count}${autoStarted ? " · старт отправлен" : ""}`);
             objectsApi.reload();
             eventsApi.reload();
             planApi.reload();

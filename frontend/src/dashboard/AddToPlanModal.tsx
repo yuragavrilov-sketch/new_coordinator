@@ -24,7 +24,7 @@ interface Props {
   tables: BulkTable[];
   initialMode?: "historical" | "cdc";
   onClose: () => void;
-  onDone: (planId: number, count: number) => void;
+  onDone: (planId: number, count: number) => void | Promise<void>;
 }
 
 export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", onClose, onDone }: Props) {
@@ -180,7 +180,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
         stage_tablespace: usesStage ? stageTablespace.trim().toUpperCase() : undefined,
       };
       const res = await addSchemaPlanItems(schemaMigrationId, payload);
-      onDone(res.plan_id, res.items.length);
+      await onDone(res.plan_id, res.items.length);
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
     } finally {
