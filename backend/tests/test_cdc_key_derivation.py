@@ -331,6 +331,60 @@ def test_schema_migration_add_items_rejects_payload_without_table_names(monkeypa
     assert res.get_json()["error"] == "at least one table name is required"
 
 
+def test_schema_migration_add_items_rejects_conflicting_payload_cdc_group(monkeypatch):
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split())[:80], params))
+
+        def fetchone(self):
+            return ("sm-1", "TCBPAY->PAY", "TCBPAY", "PAY", 42, "gid-schema", "gid-schema")
+
+    class Conn:
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(schema_migrations._state, "db_available", {"value": True})
+    monkeypatch.setitem(schema_migrations._state, "get_conn", lambda: Conn())
+    monkeypatch.setattr(
+        schema_migrations,
+        "_source_oracle_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("Oracle should not be opened")),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(schema_migrations.bp)
+
+    res = app.test_client().post(
+        "/api/schema-migrations/sm-1/plan/items",
+        json={
+            "strategy": "CDC_DIRECT",
+            "connector_group_id": "gid-other",
+            "tables": [{"source_table": "ALLORDERS"}],
+        },
+    )
+
+    assert res.status_code == 400
+    assert "only one CDC connector pack" in res.get_json()["error"]
+    assert [call[0] for call in calls] == ["execute", "rollback", "close"]
+
+
 def test_schema_migration_add_items_route_returns_created_item_states(monkeypatch):
     calls = []
 
