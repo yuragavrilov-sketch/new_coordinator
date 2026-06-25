@@ -509,13 +509,29 @@ def _parse_debezium(msg_value: bytes) -> Optional[dict]:
 
 def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
     """Long-running thread: apply Debezium events for one migration."""
+    migration_id = migration["migration_id"]
+    tag = migration_id[:8]
+    pg = None
+    consumer = None
+    oracle_conn = None
+
     try:
         from kafka import KafkaConsumer
-    except ImportError:
-        print("[cdc] kafka-python not installed")
+    except ImportError as exc:
+        detail = f"kafka-python not installed: {exc}"
+        print(f"[cdc:{tag}] {detail}")
+        try:
+            pg = db.get_pg_conn()
+            db.fail_cdc_migration(pg, migration_id, "CDC_WORKER_START_FAILED", detail)
+        except Exception as fail_exc:
+            print(f"[cdc:{tag}] mark-FAILED error: {fail_exc}")
+        finally:
+            try:
+                pg.close()
+            except Exception:
+                pass
         return
 
-    migration_id   = migration["migration_id"]
     target_schema  = migration["target_schema"]
     target_table   = migration["target_table"]
     source_schema  = migration["source_schema"]
@@ -528,24 +544,41 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
 
     print(f"[cdc:{tag}] thread started  topic={topic}  group={consumer_group}")
 
-    pg      = db.get_pg_conn()
-    configs = db.load_configs(pg)
-    kafka_cfg   = configs.get("kafka") or {}
-    bootstrap   = [s.strip() for s in (kafka_cfg.get("bootstrap_servers") or "localhost:9092").split(",")]
+    try:
+        pg      = db.get_pg_conn()
+        configs = db.load_configs(pg)
+        kafka_cfg   = configs.get("kafka") or {}
+        bootstrap   = [s.strip() for s in (kafka_cfg.get("bootstrap_servers") or "localhost:9092").split(",")]
 
-    consumer = KafkaConsumer(
-        topic,
-        bootstrap_servers=bootstrap,
-        group_id=consumer_group,
-        auto_offset_reset="earliest",
-        enable_auto_commit=False,
-        value_deserializer=None,
-        consumer_timeout_ms=CDC_POLL_MS,
-        max_poll_records=CDC_BATCH_SIZE,
-    )
-    oracle_conn     = db.open_oracle(migration["target_connection_id"], configs)
-    last_checkin_ts = time.time()
-    rows_applied    = 0
+        consumer = KafkaConsumer(
+            topic,
+            bootstrap_servers=bootstrap,
+            group_id=consumer_group,
+            auto_offset_reset="earliest",
+            enable_auto_commit=False,
+            value_deserializer=None,
+            consumer_timeout_ms=CDC_POLL_MS,
+            max_poll_records=CDC_BATCH_SIZE,
+        )
+        oracle_conn     = db.open_oracle(migration["target_connection_id"], configs)
+        last_checkin_ts = time.time()
+        rows_applied    = 0
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        print(f"[cdc:{tag}] startup fatal: {detail}")
+        try:
+            if pg is None:
+                pg = db.get_pg_conn()
+            db.fail_cdc_migration(pg, migration_id, "CDC_WORKER_START_FAILED", detail)
+        except Exception as fail_exc:
+            print(f"[cdc:{tag}] mark-FAILED error: {fail_exc}")
+        finally:
+            for obj in (oracle_conn, consumer, pg):
+                try:
+                    obj.close()
+                except Exception:
+                    pass
+        return
 
     # Защита от бесконечного reclaim-цикла на «ядовитом» событии: если один и
     # тот же offset падает >=POISON_THRESHOLD раз, миграция помечается FAILED.
