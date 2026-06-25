@@ -494,27 +494,65 @@ def _unmark_in_prog(migration_id: str) -> None:
 
 
 def _update_queue_positions() -> None:
-    """Recalculate queue_position for all migrations waiting in NEW."""
+    """Recalculate queue_position for runnable migrations waiting in NEW.
+
+    CDC migrations whose connector is not RUNNING are not in the load queue
+    yet. They wait for the connector lifecycle and must not block other NEW
+    migrations.
+    """
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
             cur.execute("""
+                WITH active_slot AS (
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM   migrations
+                        WHERE  phase = ANY(%s)
+                    ) AS busy
+                ),
+                candidates AS (
+                    SELECT m.migration_id,
+                           ROW_NUMBER() OVER (ORDER BY m.state_changed_at ASC) AS pos
+                    FROM   migrations m
+                    LEFT JOIN connector_groups cg ON cg.group_id = m.group_id
+                    WHERE  m.phase = 'NEW'
+                      AND  (
+                            LEFT(COALESCE(m.strategy, ''), 4) <> 'CDC_'
+                            OR cg.status = 'RUNNING'
+                      )
+                ),
+                desired AS (
+                    SELECT c.migration_id,
+                           CASE
+                             WHEN a.busy THEN c.pos
+                             WHEN c.pos = 1 THEN NULL
+                             ELSE c.pos - 1
+                           END AS queue_position
+                    FROM candidates c
+                    CROSS JOIN active_slot a
+                )
                 UPDATE migrations m
-                SET    queue_position = sub.pos
-                FROM (
-                    SELECT migration_id,
-                           ROW_NUMBER() OVER (ORDER BY state_changed_at ASC) AS pos
-                    FROM   migrations
-                    WHERE  phase = 'NEW'
-                ) sub
-                WHERE m.migration_id = sub.migration_id
-                  AND  m.phase = 'NEW'
-            """)
-            # Clear stale queue_position on non-NEW migrations
+                SET    queue_position = desired.queue_position
+                FROM   desired
+                WHERE  m.migration_id = desired.migration_id
+                  AND  m.queue_position IS DISTINCT FROM desired.queue_position
+            """, (list(_HEAVY_PHASES),))
+
+            # Clear stale queue_position on non-NEW or non-runnable NEW migrations.
             cur.execute("""
-                UPDATE migrations
+                UPDATE migrations m
                 SET    queue_position = NULL
-                WHERE  phase != 'NEW'
+                WHERE  (
+                         m.phase != 'NEW'
+                         OR NOT EXISTS (
+                             SELECT 1
+                             FROM   connector_groups cg
+                             WHERE  cg.group_id = m.group_id
+                               AND  cg.status = 'RUNNING'
+                         )
+                            AND LEFT(COALESCE(m.strategy, ''), 4) = 'CDC_'
+                       )
                   AND  queue_position IS NOT NULL
             """)
         conn.commit()
@@ -1206,6 +1244,17 @@ def _handle_new(mid: str, m: dict) -> None:
               "NO_KEY_COLUMNS")
         return
 
+    # CDC migrations are queue candidates only after their CDC connector is RUNNING.
+    if strategy.has_cdc:
+        group = connector_groups_svc.get_group(m["group_id"])
+        if not group:
+            _fail(mid, "Р“СЂСѓРїРїР° РєРѕРЅРЅРµРєС‚РѕСЂР° РЅРµ РЅР°Р№РґРµРЅР°", "GROUP_NOT_FOUND")
+            return
+        if group["status"] != "RUNNING":
+            _update(mid, {"queue_position": None})
+            _update_queue_positions()
+            return
+
     # Queue gate (same as legacy)
     conn = _state["get_conn"]()
     try:
@@ -1230,9 +1279,15 @@ def _handle_new(mid: str, m: dict) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT migration_id FROM migrations
-                WHERE  phase = 'NEW'
-                ORDER BY state_changed_at ASC
+                SELECT m.migration_id
+                FROM   migrations m
+                LEFT JOIN connector_groups cg ON cg.group_id = m.group_id
+                WHERE  m.phase = 'NEW'
+                  AND  (
+                        LEFT(COALESCE(m.strategy, ''), 4) <> 'CDC_'
+                        OR cg.status = 'RUNNING'
+                  )
+                ORDER BY m.state_changed_at ASC
                 LIMIT 1
             """)
             first = cur.fetchone()
