@@ -1,8 +1,5 @@
 """Connector Groups — CRUD + lifecycle + tables API."""
 
-import json
-import uuid
-
 from flask import Blueprint, jsonify, request
 
 bp = Blueprint("connector_groups", __name__)
@@ -35,6 +32,16 @@ def _legacy_cdc_migration_error() -> dict:
             "Legacy connector-group migration flow is disabled. "
             "Add CDC tables through the schema migration screen so the table is "
             "registered in the single CDC connector pack, queued and autostarted."
+        )
+    }
+
+
+def _legacy_cdc_membership_error() -> dict:
+    return {
+        "error": (
+            "Direct connector-group table edits are disabled. "
+            "Add CDC tables through the schema migration screen so each table gets "
+            "a migration row, enters the queue and is autostarted."
         )
     }
 
@@ -136,76 +143,7 @@ def create_group_wizard():
     tables = body.get("tables")
     if not tables or not isinstance(tables, list) or len(tables) == 0:
         return jsonify({"error": "Нужно выбрать хотя бы одну таблицу"}), 400
-    if body.get("create_migrations"):
-        return jsonify(_legacy_cdc_migration_error()), 400
-
-    source_conn_id = body.get("source_connection_id", "oracle_source")
-    topic_prefix = body["topic_prefix"]
-    consumer_prefix = body.get("consumer_group_prefix") or topic_prefix
-
-    gid = str(uuid.uuid4())
-    get_conn = _state["get_conn"]
-    r2d = _state["row_to_dict"]
-
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            # ── create group ───────────────────────────────────────────────
-            cur.execute("""
-                INSERT INTO connector_groups
-                    (group_id, group_name, source_connection_id,
-                     connector_name, topic_prefix, consumer_group_prefix)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING *
-            """, (gid, body["group_name"], source_conn_id,
-                  body["connector_name"], topic_prefix, consumer_prefix))
-            group_row = r2d(cur, cur.fetchone())
-
-            # ── add tables to group_tables ─────────────────────────────────
-            table_rows = []
-            for t in tables:
-                tid = str(uuid.uuid4())
-                src_schema = t.get("source_schema", "")
-                src_table = t.get("source_table", "")
-                tgt_schema = t.get("target_schema", src_schema)
-                tgt_table = t.get("target_table", src_table)
-                ekt = t.get("effective_key_type", "NONE")
-                ekc = json.dumps(t.get("effective_key_columns", []))
-                pk = t.get("source_pk_exists", False)
-                uk = t.get("source_uk_exists", False)
-                topic = f"{topic_prefix}.{src_schema.upper()}.{src_table.upper()}".replace("#", "_")
-
-                cur.execute("""
-                    INSERT INTO group_tables
-                        (id, group_id, source_schema, source_table,
-                         target_schema, target_table,
-                         effective_key_type, effective_key_columns_json,
-                         source_pk_exists, source_uk_exists, topic_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING *
-                """, (tid, gid, src_schema, src_table,
-                      tgt_schema, tgt_table,
-                      ekt, ekc, pk, uk, topic))
-                table_rows.append(r2d(cur, cur.fetchone()))
-
-        conn.commit()
-    except Exception as exc:
-        conn.rollback()
-        return jsonify({"error": str(exc)}), 500
-    finally:
-        conn.close()
-
-    _state["broadcast"]({
-        "type": "connector_group_status",
-        "group_id": gid,
-        "status": "PENDING",
-    })
-
-    return jsonify({
-        "group":      group_row,
-        "tables":     table_rows,
-        "migrations": [],
-    }), 201
+    return jsonify(_legacy_cdc_membership_error()), 400
 
 
 @bp.delete("/api/connector-groups/<group_id>")
@@ -233,45 +171,7 @@ def add_group_tables(group_id: str):
     tables = body.get("tables", [])
     if not tables:
         return jsonify({"error": "Нужно указать хотя бы одну таблицу"}), 400
-    if body.get("create_migrations"):
-        return jsonify(_legacy_cdc_migration_error()), 400
-    from services.connector_groups import (
-        add_tables, refresh_connector_tables,
-    )
-    try:
-        rows = add_tables(group_id, tables)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    requested_count = len(tables)
-    added_count = len(rows)
-    already_present_count = max(0, requested_count - added_count)
-    if not rows:
-        return jsonify({
-            "tables":                [],
-            "migrations":            [],
-            "migrations_error":      None,
-            "sync_error":            None,
-            "requested_count":       requested_count,
-            "added_count":           0,
-            "already_present_count": already_present_count,
-            "message":               "Tables are already in CDC connector group",
-        }), 200
-    # If the connector is already running, push table.include.list / key cols update
-    sync_error = None
-    try:
-        refresh_connector_tables(group_id)
-    except Exception as exc:
-        sync_error = f"CDC connector config sync failed: {exc}"
-
-    return jsonify({
-        "tables":           rows,
-        "migrations":       [],
-        "migrations_error": None,
-        "sync_error":       sync_error,
-        "requested_count":       requested_count,
-        "added_count":           added_count,
-        "already_present_count": already_present_count,
-    }), 201
+    return jsonify(_legacy_cdc_membership_error()), 400
 
 
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
