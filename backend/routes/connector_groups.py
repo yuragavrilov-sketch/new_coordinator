@@ -31,6 +31,16 @@ def _r2d(cur, row):
     return _state["row_to_dict"](cur, row)
 
 
+def _legacy_cdc_migration_error() -> dict:
+    return {
+        "error": (
+            "Legacy connector-group migration flow is disabled. "
+            "Add CDC tables through the schema migration screen so the table is "
+            "registered in the single CDC connector pack, queued and autostarted."
+        )
+    }
+
+
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 @bp.get("/api/connector-groups")
@@ -91,6 +101,8 @@ def create_group_wizard():
     tables = body.get("tables")
     if not tables or not isinstance(tables, list) or len(tables) == 0:
         return jsonify({"error": "Нужно выбрать хотя бы одну таблицу"}), 400
+    if body.get("create_migrations"):
+        return jsonify(_legacy_cdc_migration_error()), 400
 
     source_conn_id = body.get("source_connection_id", "oracle_source")
     topic_prefix = body["topic_prefix"]
@@ -217,6 +229,8 @@ def add_group_tables(group_id: str):
     tables = body.get("tables", [])
     if not tables:
         return jsonify({"error": "Нужно указать хотя бы одну таблицу"}), 400
+    if body.get("create_migrations"):
+        return jsonify(_legacy_cdc_migration_error()), 400
     from services.connector_groups import (
         add_tables, refresh_connector_tables,
         create_migrations_for_group_tables,
@@ -406,6 +420,8 @@ def refresh_tables(group_id: str):
 @bp.post("/api/connector-groups/<group_id>/create-migration")
 def create_migration_from_table(group_id: str):
     """Create a migration for a specific table in the group and start it."""
+    return jsonify(_legacy_cdc_migration_error()), 400
+
     from services.connector_groups import (
         get_group as svc_get,
         get_group_tables,
