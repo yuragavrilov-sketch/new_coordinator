@@ -71,6 +71,27 @@ export default function App() {
   const rightRailEvents  = eventsApi.data  || [];
   const rightRailMetrics = metricsApi.data || initialMetrics;
 
+  useEffect(() => {
+    const event = sseEvents[0];
+    if (!event) return;
+
+    if (event.type === "schema_migration.plan_items_added") {
+      listApi.reload();
+      if (event.id === selectedId) eventsApi.reload();
+      return;
+    }
+
+    if (event.type === "connector_group_status") {
+      listApi.reload();
+      return;
+    }
+
+    if (event.type === "migration_phase") {
+      listApi.reload();
+      if (selectedId) eventsApi.reload();
+    }
+  }, [sseEvents, selectedId, listApi.reload, eventsApi.reload]);
+
   const onNavChange = (key: NavKey) => {
     if (key === "settings") { setShowSettings(true); return; }
     setNav(key);
