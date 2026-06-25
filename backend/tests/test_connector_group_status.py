@@ -102,6 +102,56 @@ def test_active_migration_for_group_table_allows_terminal_phase_absent():
     ) is None
 
 
+def test_delete_group_treats_draft_cdc_migration_as_active(monkeypatch):
+    calls = []
+
+    class Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchall(self):
+            return [("mid-draft", "DRAFT")]
+
+    class Conn:
+        def cursor(self):
+            return Cur()
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.main",
+        },
+    )
+    monkeypatch.setattr(connector_groups, "_conn", lambda: Conn())
+
+    try:
+        connector_groups.delete_group("gid-1", force=False)
+    except ValueError as exc:
+        assert "активных миграций" in str(exc)
+    else:
+        raise AssertionError("expected active migration rejection")
+
+    sql = calls[0][1]
+    assert "COALESCE(phase, '') NOT IN ('COMPLETED', 'CANCELLED', 'FAILED')" in sql
+    assert ("commit",) not in calls
+    assert ("close",) in calls
+
+
 def test_topic_count_consumer_uses_supported_timeout_configs(monkeypatch):
     captured = {}
 

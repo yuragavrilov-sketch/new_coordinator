@@ -134,7 +134,7 @@ def delete_group(group_id: str, force: bool = False) -> None:
             cur.execute("""
                 SELECT migration_id, phase FROM migrations
                 WHERE  group_id = %s
-                  AND  phase NOT IN ('DRAFT', 'COMPLETED', 'CANCELLED', 'FAILED')
+                  AND  COALESCE(phase, '') NOT IN ('COMPLETED', 'CANCELLED', 'FAILED')
             """, (group_id,))
             active = cur.fetchall()
             if active and not force:
