@@ -85,6 +85,33 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     }
   }, [sseEvents, expanded, load, loadHistory, loadTopicCounts]);
 
+  const reloadGroupDetail = (gid: string) => {
+    load();
+    if (expanded !== gid) return;
+    fetch(`/api/connector-groups/${gid}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(setDetail)
+      .catch(() => setDetail(null));
+    loadTopicCounts(gid);
+    loadHistory(gid);
+  };
+
+  const continuationMessage = (body: any, prefix: string, runningVerb: string, waitingVerb: string) => {
+    const startedCount = (body.plan_starts || []).reduce(
+      (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
+      0,
+    );
+    const status = String(body.status || "").toUpperCase();
+    const rowText = status === "RUNNING" ? runningVerb : waitingVerb;
+    if (body.plan_start_error) {
+      return { tone: "bad" as const, text: `${prefix}, но очередь не продолжена: ${body.plan_start_error}` };
+    }
+    return {
+      tone: "ok" as const,
+      text: startedCount ? `${prefix}, ${rowText}: ${startedCount}` : prefix,
+    };
+  };
+
   const startGroup = async (gid: string) => {
     setActionMsg(null);
     try {
@@ -94,28 +121,39 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
         setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
         return;
       }
-      const startedCount = (body.plan_starts || []).reduce(
-        (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
-        0,
-      );
       const status = String(body.status || "").toUpperCase();
       const prefix = status === "RUNNING"
         ? "CDC-коннектор RUNNING"
         : status
           ? `Запуск CDC-коннектора: ${status}`
           : "Запуск CDC-коннектора запрошен";
-      if (body.plan_start_error) {
-        setActionMsg({ tone: "bad", text: `${prefix}, но очередь не продолжена: ${body.plan_start_error}` });
-      } else {
-        const rowText = status === "RUNNING"
-          ? "запущено CDC строк"
-          : "CDC строк переведено в ожидание коннектора";
-        setActionMsg({
-          tone: "ok",
-          text: startedCount ? `${prefix}, ${rowText}: ${startedCount}` : prefix,
-        });
+      setActionMsg(continuationMessage(
+        body,
+        prefix,
+        "запущено CDC строк",
+        "CDC строк переведено в ожидание коннектора",
+      ));
+      reloadGroupDetail(gid);
+    } catch (e) {
+      setActionMsg({ tone: "bad", text: `Сеть: ${String(e)}` });
+    }
+  };
+  const syncGroup = async (gid: string) => {
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/connector-groups/${gid}/refresh-tables`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
+        return;
       }
-      load();
+      setActionMsg(continuationMessage(
+        body,
+        "Debezium синхронизирован",
+        "запущено CDC строк",
+        "CDC строк переведено в ожидание коннектора",
+      ));
+      reloadGroupDetail(gid);
     } catch (e) {
       setActionMsg({ tone: "bad", text: `Сеть: ${String(e)}` });
     }
@@ -290,6 +328,14 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
                 }}>
                   <span>Source: {detail.source_connection_id} | Prefix: {detail.consumer_group_prefix || detail.topic_prefix}</span>
                   <span style={{ flex: 1 }} />
+                  <button
+                    onClick={() => syncGroup(g.group_id)}
+                    style={{
+                      background: t.bg.s2, border: `1px solid ${t.border.base}`,
+                      borderRadius: t.radius.sm, color: t.text.secondary,
+                      padding: "2px 10px", fontSize: t.size.xs, cursor: "pointer", fontWeight: 600,
+                    }}
+                  >Sync Debezium</button>
                   <button
                     onClick={() => createTopics(g.group_id)}
                     style={{
