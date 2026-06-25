@@ -89,10 +89,13 @@ export function AddToPlanModal({
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
-  const cdcSubmitLabel = projectedConnectorCount > tables.length
-    ? `Добавить ${tables.length}, синхронизировать ${projectedConnectorCount} в Debezium`
-    : `Добавить ${tables.length} в CDC-коннектор`;
-  const submitDisabled = busy || !!cdcRemoveBusy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
+  const cdcNoNewTables = mode === "cdc" && !!cdcGroup && connectorNewTables.length === 0;
+  const cdcSubmitLabel = cdcNoNewTables
+    ? "Новых CDC-таблиц нет"
+    : projectedConnectorCount > connectorNewTables.length
+      ? `Добавить ${connectorNewTables.length}, синхронизировать ${projectedConnectorCount} в Debezium`
+      : `Добавить ${connectorNewTables.length} в CDC-коннектор`;
+  const submitDisabled = busy || !!cdcRemoveBusy || cdcNoNewTables || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -250,7 +253,11 @@ export function AddToPlanModal({
           setErr("Дождитесь загрузки ключей таблиц.");
           return;
         }
-        for (const table of tables) {
+        if (cdcNoNewTables) {
+          setErr("Все выбранные таблицы уже есть в CDC-коннекторе. Новых строк для очереди нет.");
+          return;
+        }
+        for (const table of connectorNewTables) {
           const key = rowKey(table);
           const info = tableInfos[key];
           if (!info) {
@@ -272,8 +279,9 @@ export function AddToPlanModal({
         }
       }
 
+      const submitTables = mode === "cdc" ? connectorNewTables : tables;
       const payload: AddPlanItemsPayload = {
-        tables: tables.map(t => ({
+        tables: submitTables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
           key_columns: mode === "cdc"
