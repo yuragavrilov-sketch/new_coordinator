@@ -66,7 +66,7 @@ services:
       CDC_BATCH_SIZE:     "500"
       CDC_CHECKIN_SEC:    "30"
       CDC_POLL_MS:        "1000"
-      CDC_SCAN_INTERVAL:  "15"
+      CDC_SCAN_INTERVAL:  "3"
     # Scale workers horizontally:  docker compose up --scale worker=4
 
 volumes:

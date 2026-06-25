@@ -15,7 +15,7 @@ Environment variables (see .env.example):
     CDC_BATCH_SIZE     Kafka records per cycle  (default: 500)
     CDC_CHECKIN_SEC    Seconds between checkins (default: 30)
     CDC_POLL_MS        Kafka poll timeout ms    (default: 1000)
-    CDC_SCAN_INTERVAL  Seconds between CDC scans (default: 15)
+    CDC_SCAN_INTERVAL  Seconds between CDC scans (default: 3)
 """
 
 import json
@@ -68,7 +68,7 @@ CDC_BATCH_SIZE     = int(os.environ.get("CDC_BATCH_SIZE",     500))
 CDC_CHECKIN_SEC    = int(os.environ.get("CDC_CHECKIN_SEC",    30))
 CDC_POLL_MS        = int(os.environ.get("CDC_POLL_MS",        1_000))
 CDC_POLL_ERROR_THRESHOLD = max(1, int(os.environ.get("CDC_POLL_ERROR_THRESHOLD", 3)))
-CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  15))
+CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  3))
 CMP_POLL_INTERVAL  = int(os.environ.get("CMP_POLL_INTERVAL",  5))
 
 
