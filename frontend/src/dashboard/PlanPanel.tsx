@@ -55,6 +55,13 @@ interface CdcConnectorActionResp {
   cdc_queue_kicked?: boolean;
 }
 
+interface TargetTriggerJob {
+  job_id: string;
+  state: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+  enabled_count: number;
+  error_text: string | null;
+}
+
 export function PlanPanel({
   plan,
   loading,
@@ -385,6 +392,7 @@ export function PlanPanel({
                       key={item.item_id}
                       item={item}
                       cdcGroupStatus={pack.key === "cdc" ? effectiveCdcGroup?.status : undefined}
+                      onReload={onReload}
                     />
                   ))}
                 </div>
@@ -857,17 +865,26 @@ function isNewPhase(item: MigrationPlanItem) {
   return String(item.phase || "").toUpperCase() === "NEW";
 }
 
-function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupStatus?: string }) {
+function PlanRow({
+  item,
+  cdcGroupStatus,
+  onReload,
+}: {
+  item: MigrationPlanItem;
+  cdcGroupStatus?: string;
+  onReload: () => void;
+}) {
   const rowsLoaded = item.rows_loaded || 0;
   const totalRows = item.total_rows || 0;
   const progress = totalRows ? rowsLoaded / totalRows * 100 : undefined;
   const status = itemStatusLabel(item, cdcGroupStatus);
   const progressText = itemProgressText(item, progress, cdcGroupStatus);
   const visual = itemVisualState(item);
+  const showTriggerJob = shouldShowTriggerJob(item);
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "minmax(160px, 1fr) minmax(145px, auto) minmax(150px, 180px)",
+      gridTemplateColumns: "minmax(160px, 1fr) minmax(145px, auto) minmax(150px, 180px) minmax(120px, auto)",
       gap: 10,
       alignItems: "center",
       padding: "7px 10px",
@@ -897,8 +914,138 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
       }}>
         {progressText}
       </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+        {showTriggerJob ? (
+          <TriggerJobInlineAction migrationId={item.migration_id!} onDone={onReload} />
+        ) : (
+          <span style={{ color: t.text.disabled, fontSize: 11 }}>-</span>
+        )}
+      </div>
     </div>
   );
+}
+
+function TriggerJobInlineAction({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+  const [jobs, setJobs] = React.useState<TargetTriggerJob[]>([]);
+  const [busy, setBusy] = React.useState("");
+  const [err, setErr] = React.useState("");
+  const latest = jobs[0];
+
+  const loadJobs = React.useCallback(async () => {
+    const res = await fetch(`/api/migrations/${migrationId}/trigger-jobs`);
+    if (res.ok) {
+      setJobs(await res.json());
+    }
+  }, [migrationId]);
+
+  React.useEffect(() => {
+    let alive = true;
+    async function tick() {
+      const res = await fetch(`/api/migrations/${migrationId}/trigger-jobs`);
+      if (alive && res.ok) setJobs(await res.json());
+    }
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [migrationId]);
+
+  async function createJob() {
+    setBusy("create");
+    setErr("");
+    try {
+      const res = await fetch(`/api/migrations/${migrationId}/trigger-jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requested_by: "ui" }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      await loadJobs();
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runJob(jobId: string) {
+    setBusy("run");
+    setErr("");
+    try {
+      const res = await fetch(`/api/migrations/${migrationId}/trigger-jobs/${jobId}/run`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      await loadJobs();
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  if (latest?.state === "DONE") {
+    return (
+      <span style={{ fontSize: 11, color: t.green.fg, fontWeight: 700, whiteSpace: "nowrap" }}>
+        triggers on: {latest.enabled_count}
+      </span>
+    );
+  }
+
+  const failed = latest?.state === "FAILED";
+  const running = latest?.state === "RUNNING";
+  const pending = latest?.state === "PENDING";
+  const label = busy
+    ? "..."
+    : running
+      ? "job running"
+      : pending
+        ? "Запустить триггеры"
+        : "Создать job";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3, minWidth: 0 }}>
+      <button
+        onClick={pending ? () => runJob(latest.job_id) : createJob}
+        disabled={!!busy || running}
+        style={{
+          ...secondaryActionStyle(false),
+          padding: "3px 8px",
+          fontSize: 11,
+          opacity: busy || running ? 0.55 : 1,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </button>
+      {(failed && latest?.error_text) || err ? (
+        <span style={{
+          color: t.red.fg,
+          fontSize: 10.5,
+          maxWidth: 180,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}>
+          {err || latest?.error_text}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function shouldShowTriggerJob(item: MigrationPlanItem) {
+  if (!item.migration_id) return false;
+  const phase = String(item.phase || "").toUpperCase();
+  if (isCdcItem(item)) {
+    return ["CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"].includes(phase);
+  }
+  return phase === "COMPLETED";
 }
 
 function itemProgressText(item: MigrationPlanItem, progress: number | undefined, cdcGroupStatus?: string) {
