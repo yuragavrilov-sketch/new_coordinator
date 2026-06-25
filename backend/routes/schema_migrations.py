@@ -416,7 +416,7 @@ def add_plan_items(sm_id: str):
                 source_uk_exists = False
                 if strategy.has_cdc:
                     if manual_key_columns:
-                        effective_key_type = "CUSTOM"
+                        effective_key_type = "USER_DEFINED"
                         effective_key_source = "USER"
                         effective_key_columns = manual_key_columns
                     else:

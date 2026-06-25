@@ -156,7 +156,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
             setErr(`${key}: ${info.error}`);
             return;
           }
-          if (info.pk_columns.length === 0 && (keyColumns[key] ?? []).length === 0) {
+          if (info.pk_columns.length === 0 && info.uk_constraints.length === 0 && (keyColumns[key] ?? []).length === 0) {
             setErr(`Для ${key} без PK нужно выбрать колонки CDC-ключа.`);
             return;
           }
@@ -167,7 +167,9 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
         tables: tables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
-          key_columns: mode === "cdc" && (tableInfos[rowKey(t)]?.pk_columns.length ?? 0) === 0
+          key_columns: mode === "cdc"
+            && (tableInfos[rowKey(t)]?.pk_columns.length ?? 0) === 0
+            && (tableInfos[rowKey(t)]?.uk_constraints.length ?? 0) === 0
             ? keyColumns[rowKey(t)] ?? []
             : undefined,
         })),
@@ -328,6 +330,22 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                       </div>
                     );
                   }
+                  if (info.uk_constraints.length > 0) {
+                    const uk = info.uk_constraints[0];
+                    return (
+                      <div key={key} style={{
+                        padding: "8px 10px",
+                        borderRadius: t.radius.sm,
+                        border: `1px solid ${t.purple.base}`,
+                        background: t.purple.bg,
+                        color: t.purple.fg,
+                        fontSize: 12,
+                      }}>
+                        <strong style={{ fontFamily: t.font.mono }}>{key}</strong>
+                        <span style={{ marginLeft: 8 }}>UK: {uk.name} ({uk.columns.join(", ")})</span>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={key} style={{
                       border: `1px solid ${selected.length ? t.blue.dim : t.red.border}`,
@@ -348,26 +366,6 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                           PK нет, выберите CDC-ключ
                         </span>
                       </div>
-
-                      {info.uk_constraints.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                          {info.uk_constraints.map(uk => (
-                            <button
-                              key={uk.name}
-                              type="button"
-                              onClick={() => setKeyColumns(prev => ({ ...prev, [key]: uk.columns }))}
-                              style={{
-                                ...secondaryActionStyle(false),
-                                padding: "4px 7px",
-                                fontSize: 11,
-                                minHeight: 0,
-                              }}
-                            >
-                              {uk.name}: {uk.columns.join(", ")}
-                            </button>
-                          ))}
-                        </div>
-                      )}
 
                       <div style={{
                         display: "grid",
