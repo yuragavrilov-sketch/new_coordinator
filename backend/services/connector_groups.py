@@ -814,6 +814,17 @@ def request_start(group_id: str) -> dict:
     if not group:
         raise ValueError(f"Группа {group_id} не найдена")
 
+    status = group.get("status")
+    if status in ("RUNNING", "TOPICS_CREATING", "CONNECTOR_STARTING"):
+        return {
+            "group_id": group_id,
+            "status": status,
+            "run_id": group.get("run_id"),
+            "already_started": True,
+        }
+    if status == "STOPPING":
+        raise ValueError("CDC-коннектор сейчас останавливается - повторите запуск после STOPPED")
+
     table_list = _build_table_include_list(group_id)
     if not table_list:
         raise ValueError("В группе нет таблиц — добавьте таблицы перед запуском")

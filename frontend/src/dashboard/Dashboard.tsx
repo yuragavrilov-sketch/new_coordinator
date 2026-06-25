@@ -312,8 +312,11 @@ export function Dashboard({
           tables={selectedTables}
           initialMode={planMode}
           onClose={() => setPlanMode(null)}
-          onDone={async (planId, count) => {
+          onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
+            if (response.connector_start_error) {
+              setPlanErr(`CDC-коннектор не стартовал: ${response.connector_start_error}`);
+            }
             let autoStarted = false;
             if (planMode === "cdc") {
               try {

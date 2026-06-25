@@ -528,19 +528,34 @@ def add_plan_items(sm_id: str):
             """, (plan_id,))
 
         conn.commit()
+        connector_start = None
+        connector_start_error = None
         if strategy.has_cdc:
             try:
-                from services.connector_groups import refresh_connector_tables
+                from services.connector_groups import refresh_connector_tables, request_start
                 refresh_connector_tables(connector_group_id)
+                connector_start = request_start(connector_group_id)
+                _state["broadcast"]({
+                    "type": "connector_group_status",
+                    "group_id": connector_group_id,
+                    "status": connector_start.get("status"),
+                })
             except Exception as exc:
-                print(f"[schema_migrations.add_plan_items] refresh_connector_tables warning: {exc}")
+                connector_start_error = str(exc)
+                print(f"[schema_migrations.add_plan_items] CDC connector autostart warning: {exc}")
         _state["broadcast"]({
             "type": "schema_migration.plan_items_added",
             "id": sm_id,
             "plan_id": plan_id,
             "count": len(created),
         })
-        return jsonify({"plan_id": plan_id, "items": created}), 201
+        return jsonify({
+            "plan_id": plan_id,
+            "items": created,
+            "connector_group_id": connector_group_id if strategy.has_cdc else None,
+            "connector_start": connector_start,
+            "connector_start_error": connector_start_error,
+        }), 201
     except ValueError as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 400

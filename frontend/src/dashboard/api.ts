@@ -215,6 +215,9 @@ export interface AddPlanItemsPayload {
 export interface AddPlanItemsResp {
   plan_id: number;
   items: Array<{ item_id: number; table: string; migration_id: string; batch_order: number }>;
+  connector_group_id?: string | null;
+  connector_start?: Record<string, unknown> | null;
+  connector_start_error?: string | null;
 }
 
 export async function addSchemaPlanItems(

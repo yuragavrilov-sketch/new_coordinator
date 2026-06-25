@@ -3,7 +3,7 @@ import { t } from "../theme";
 import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
-import { addSchemaPlanItems, type AddPlanItemsPayload } from "./api";
+import { addSchemaPlanItems, type AddPlanItemsPayload, type AddPlanItemsResp } from "./api";
 
 interface BulkTable {
   source_schema: string;
@@ -24,7 +24,7 @@ interface Props {
   tables: BulkTable[];
   initialMode?: "historical" | "cdc";
   onClose: () => void;
-  onDone: (planId: number, count: number) => void | Promise<void>;
+  onDone: (planId: number, count: number, response: AddPlanItemsResp) => void | Promise<void>;
 }
 
 export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", onClose, onDone }: Props) {
@@ -180,7 +180,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
         stage_tablespace: usesStage ? stageTablespace.trim().toUpperCase() : undefined,
       };
       const res = await addSchemaPlanItems(schemaMigrationId, payload);
-      await onDone(res.plan_id, res.items.length);
+      await onDone(res.plan_id, res.items.length, res);
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
     } finally {
