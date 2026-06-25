@@ -313,7 +313,7 @@ export function Dashboard({
           initialMode={planMode}
           onClose={() => setPlanMode(null)}
           onDone={(planId, count) => {
-            const target = planMode === "cdc" ? "CDC-пачку" : "обычную пачку";
+            const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
             setPlanMode(null);
             setSelectedIds(new Set());
             setActivePlanId(planId);
@@ -411,7 +411,7 @@ function BulkSelectionBar({ count, onClear, onCdcPack, onBulkPack }: {
       </span>
       <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
       <button onClick={onCdcPack} style={secondaryActionStyle()}>
-        В CDC-пачку ({count})
+        В CDC-коннектор ({count})
       </button>
       <button onClick={onBulkPack} style={secondaryActionStyle()}>
         В обычную пачку ({count})

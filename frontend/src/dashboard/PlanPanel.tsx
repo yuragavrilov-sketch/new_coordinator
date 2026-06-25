@@ -47,7 +47,7 @@ export function PlanPanel({
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
           <div>
             <Title>Пачка таблиц</Title>
-            <Muted>Пока нет plan для этой миграции. Выделите таблицы и добавьте их в историческую или CDC-пачку.</Muted>
+            <Muted>Пока нет plan для этой миграции. Выделите таблицы и добавьте их в обычную пачку или CDC-коннектор.</Muted>
           </div>
         </div>
       </Shell>
@@ -190,7 +190,7 @@ function isCdcItem(item: MigrationPlanItem) {
 function packGroups(items: MigrationPlanItem[]) {
   return [
     { key: "bulk", title: "Обычная пачка", items: items.filter(i => !isCdcItem(i)) },
-    { key: "cdc", title: "CDC-пачка", items: items.filter(isCdcItem) },
+    { key: "cdc", title: "CDC-коннектор", items: items.filter(isCdcItem) },
   ];
 }
 

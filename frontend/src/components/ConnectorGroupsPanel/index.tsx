@@ -71,7 +71,7 @@ export function ConnectorGroupsPanel() {
   const createTopics = (gid: string) => fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" }).then(() => loadTopicCounts(gid)).catch(() => {});
 
   const deleteGroup = async (gid: string) => {
-    if (!confirm("Удалить CDC-пачку?")) return;
+    if (!confirm("Удалить CDC-коннектор?")) return;
     try {
       const r = await fetch(`/api/connector-groups/${gid}`, { method: "DELETE" });
       if (r.ok) {
@@ -83,7 +83,7 @@ export function ConnectorGroupsPanel() {
       const msg  = body?.error || `HTTP ${r.status}`;
       // Backend отказался — обычно из-за активных миграций. Предлагаем force.
       if (r.status === 400 && /активных миграций/i.test(msg)) {
-        if (!confirm(`${msg}.\n\nПеревести их в CANCELLED и удалить CDC-пачку?`)) return;
+        if (!confirm(`${msg}.\n\nПеревести их в CANCELLED и удалить CDC-коннектор?`)) return;
         const r2 = await fetch(`/api/connector-groups/${gid}?force=true`, { method: "DELETE" });
         if (r2.ok) {
           load();
@@ -138,13 +138,13 @@ export function ConnectorGroupsPanel() {
     <div>
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.text.secondary }}>
-          CDC-пачки
+          CDC-коннекторы
         </h2>
       </div>
 
       {groups.length === 0 && (
         <div style={{ color: t.text.disabled, padding: 24, textAlign: "center" }}>
-          Нет CDC-пачек. Добавьте таблицы в CDC-пачку на экране "Эта миграция".
+          Нет CDC-коннектора. Добавьте таблицы в CDC-коннектор на экране "Эта миграция".
         </div>
       )}
 

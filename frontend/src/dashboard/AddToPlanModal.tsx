@@ -193,7 +193,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
       <div style={{ ...S.modal, maxWidth: 640 }}>
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: t.text.primary }}>
-            {mode === "cdc" ? "Добавить в CDC-пачку" : "Добавить в обычную пачку"}
+            {mode === "cdc" ? "Добавить в CDC-коннектор" : "Добавить в обычную пачку"}
           </span>
           <span style={{ fontSize: 12, color: t.text.muted, fontFamily: t.font.mono }}>
             {tables.length} таблиц
@@ -242,7 +242,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                   color: mode === "cdc" ? t.blue.fg : t.text.primary,
                 }}
               >
-                CDC-пачка
+                CDC-коннектор
               </button>
             </div>
             <div style={{
@@ -255,7 +255,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
               lineHeight: 1.45,
             }}>
               {mode === "cdc"
-                ? "Таблицы попадут в единственную CDC-пачку этой миграции. Если её ещё нет, coordinator создаст её автоматически. Запуск коннектора выполняется отдельно на экране CDC-пачки."
+                ? "Таблицы попадут в единственный CDC-коннектор этой миграции. Если его ещё нет, coordinator создаст его автоматически. Запуск выполняется отдельно на экране CDC-коннектора."
                 : "SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source. Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса."}
             </div>
             <Field label="Стратегия">
@@ -466,7 +466,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
         <div style={S.footer}>
           <button onClick={onClose} disabled={busy} style={secondaryActionStyle(busy)}>Отмена</button>
           <button onClick={submit} disabled={busy || (mode === "cdc" && infoLoading)} style={primaryActionStyle(busy || (mode === "cdc" && infoLoading))}>
-            {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-пачку" : "Добавить в обычную пачку"}
+            {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-коннектор" : "Добавить в обычную пачку"}
           </button>
         </div>
       </div>
