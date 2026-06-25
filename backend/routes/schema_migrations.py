@@ -90,6 +90,16 @@ def _resolve_cdc_connector_group_id(
     return values[0] if values else None
 
 
+def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list[str]:
+    available = {
+        str(col.get("name") or "").strip().upper()
+        for col in info.get("columns") or []
+        if isinstance(col, dict)
+    }
+    missing = [col for col in key_columns if col not in available]
+    return missing
+
+
 @bp.get("/api/schema-migrations")
 def list_schema_migrations():
     if not _db_ok():
@@ -467,6 +477,12 @@ def add_plan_items(sm_id: str):
                             "ALL COLUMNS supplemental logging."
                         )
                     if manual_key_columns:
+                        missing_key_columns = _validate_manual_cdc_key_columns(info, manual_key_columns)
+                        if missing_key_columns:
+                            raise ValueError(
+                                f"CDC key columns not found in {src_schema}.{table_name}: "
+                                f"{', '.join(missing_key_columns)}"
+                            )
                         effective_key_type = "USER_DEFINED"
                         effective_key_source = "USER"
                         effective_key_columns = manual_key_columns

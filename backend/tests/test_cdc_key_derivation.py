@@ -116,6 +116,20 @@ def test_schema_migration_rejects_conflicting_cdc_groups():
         raise AssertionError("expected CDC connector group conflict")
 
 
+def test_schema_migration_accepts_existing_manual_cdc_key_columns():
+    assert schema_migrations._validate_manual_cdc_key_columns(
+        {"columns": [{"name": "ID"}, {"name": "DATE_ID"}]},
+        ["ID", "DATE_ID"],
+    ) == []
+
+
+def test_schema_migration_rejects_missing_manual_cdc_key_columns():
+    assert schema_migrations._validate_manual_cdc_key_columns(
+        {"columns": [{"name": "ID"}]},
+        ["ID", "MISSING_COL"],
+    ) == ["MISSING_COL"]
+
+
 def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
