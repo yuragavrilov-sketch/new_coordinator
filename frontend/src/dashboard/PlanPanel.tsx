@@ -463,7 +463,9 @@ function CdcConnectorCard({
   const connectorRest = Math.max(0, connectorTables.length - connectorPreview.length);
   const status = String(group.status || "").toUpperCase();
   const waitingConnector = planItems.filter(item => isNewPhase(item) && status !== "RUNNING").length;
-  const queuedCdc = planItems.filter(item => isNewPhase(item) && status === "RUNNING").length;
+  const runnableNewCdc = planItems.filter(item => isNewPhase(item) && status === "RUNNING");
+  const queuedCdc = runnableNewCdc.filter(item => item.queue_position != null).length;
+  const readyCdc = runnableNewCdc.length - queuedCdc;
   const applyingCdc = planItems.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
     return phase === "CDC_APPLYING" || phase === "CDC_CATCHING_UP";
@@ -529,6 +531,7 @@ function CdcConnectorCard({
         <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
         <span>Строк CDC в пачке: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
         <span>Ждут коннектор: <strong style={{ color: waitingConnector ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{waitingConnector}</strong></span>
+        <span>Готовы к старту: <strong style={{ color: readyCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{readyCdc}</strong></span>
         <span>В очереди: <strong style={{ color: queuedCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{queuedCdc}</strong></span>
         <span>Применяются: <strong style={{ color: applyingCdc ? t.green.fg : t.text.primary, fontFamily: t.font.mono }}>{applyingCdc}</strong></span>
         <span>Ручных ключей: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
@@ -795,14 +798,13 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
 function itemProgressText(item: MigrationPlanItem, progress: number | undefined, cdcGroupStatus?: string) {
   const phase = String(item.phase || "").toUpperCase();
   const groupStatus = String(cdcGroupStatus || "").toUpperCase();
-  if (isCdcItem(item) && phase === "NEW" && groupStatus && groupStatus !== "RUNNING") {
-    return `ждет ${groupStatus}`;
+  if (isCdcItem(item) && phase === "NEW") {
+    if (groupStatus && groupStatus !== "RUNNING") return `ждет ${groupStatus}`;
+    if (item.queue_position != null) return `очередь #${item.queue_position}`;
+    return "готова к старту";
   }
   if (phase === "NEW" && item.queue_position != null) {
     return `очередь #${item.queue_position}`;
-  }
-  if (isCdcItem(item) && phase === "NEW") {
-    return "следующая";
   }
   if (isCdcItem(item) && ["CDC_APPLYING", "CDC_CATCHING_UP", "STEADY_STATE"].includes(phase)) {
     const rows = item.cdc_rows_applied ?? null;
