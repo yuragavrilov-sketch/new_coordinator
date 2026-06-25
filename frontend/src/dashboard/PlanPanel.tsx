@@ -446,7 +446,12 @@ function CdcConnectorDetails({
   busyKey: string;
   onRemoveExtra: (group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) => void;
 }) {
-  const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
+  const planItemsByTable = new Map<string, MigrationPlanItem[]>();
+  for (const item of planItems) {
+    const key = item.table_name.toUpperCase();
+    if (!planItemsByTable.has(key)) planItemsByTable.set(key, []);
+    planItemsByTable.get(key)!.push(item);
+  }
   const rows = group.tables || [];
   if (rows.length === 0) return null;
   return (
@@ -467,7 +472,10 @@ function CdcConnectorDetails({
         <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} tables</span>
       </div>
       {rows.map(tbl => {
-        const inPlan = planKeys.has(tbl.source_table.toUpperCase());
+        const tablePlanItems = planItemsByTable.get(tbl.source_table.toUpperCase()) || [];
+        const inPlan = tablePlanItems.length > 0;
+        const hasActivePlanItem = tablePlanItems.some(isActiveCdcPlanItem);
+        const canRemove = !hasActivePlanItem;
         return (
           <div key={tbl.id} style={{
             display: "grid",
@@ -486,7 +494,7 @@ function CdcConnectorDetails({
               {tbl.topic_name || "-"}
             </div>
             <div style={{ textAlign: "right" }}>
-              {!inPlan && (
+              {canRemove && (
                 <button
                   onClick={() => onRemoveExtra(group, tbl)}
                   disabled={busyKey === tableLabel(tbl)}
@@ -633,6 +641,14 @@ function isQueuedItem(item: MigrationPlanItem) {
 
 function isRunningItem(item: MigrationPlanItem) {
   return itemVisualState(item) === "running";
+}
+
+function isActiveCdcPlanItem(item: MigrationPlanItem) {
+  const phase = String(item.phase || "").toUpperCase();
+  const status = String(item.status || "").toUpperCase();
+  if (phase === "FAILED" || phase === "CANCELLED" || phase === "COMPLETED") return false;
+  if (status === "FAILED" || status === "CANCELLED") return false;
+  return true;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
