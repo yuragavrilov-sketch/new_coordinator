@@ -95,6 +95,18 @@ def _start_pending_cdc_plan_batches_for_group(group_id: str) -> list[dict]:
     return starts
 
 
+def _kick_existing_new_cdc_for_running_group(group_id: str) -> None:
+    """Resume CDC rows already in NEW when the connector is RUNNING."""
+    from services import orchestrator
+    from services.connector_groups import get_group as svc_get
+
+    group = svc_get(group_id)
+    if not group or str(group.get("status") or "").upper() != "RUNNING":
+        return
+    orchestrator._update_queue_positions()
+    orchestrator._kick_new_migrations_for_group(group_id)
+
+
 @bp.get("/api/connector-groups")
 def list_groups():
     from services.connector_groups import list_groups as svc_list
@@ -274,6 +286,8 @@ def start_group(group_id: str):
     plan_start_error = None
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+        if not plan_starts and str(result.get("status") or "").upper() == "RUNNING":
+            _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
         plan_start_error = str(exc)
     result["plan_starts"] = plan_starts
@@ -325,6 +339,8 @@ def refresh_tables(group_id: str):
     plan_start_error = None
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+        if not plan_starts:
+            _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
         plan_start_error = str(exc)
     return jsonify({
