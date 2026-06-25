@@ -296,12 +296,40 @@ def _calc_lag(consumer, consumer_group: str, bootstrap: list) -> tuple[int, dict
     total_lag = 0
     by_partition: dict = {}
     try:
-        admin = KafkaAdminClient(bootstrap_servers=bootstrap, request_timeout_ms=5_000)
+        admin = KafkaAdminClient(
+            bootstrap_servers=bootstrap,
+            request_timeout_ms=5_000,
+            connections_max_idle_ms=8_000,
+        )
         try:
             offsets   = admin.list_consumer_group_offsets(consumer_group)
             committed = {tp: om.offset for tp, om in offsets.items() if om.offset >= 0}
-            end       = consumer.end_offsets(list(committed.keys()))
-            for tp, off in committed.items():
+            partitions = set(committed.keys())
+            try:
+                partitions.update(consumer.assignment() or [])
+            except Exception:
+                pass
+
+            if not partitions:
+                return 0, {}
+
+            end = consumer.end_offsets(list(partitions))
+            missing_position = [tp for tp in partitions if tp not in committed]
+            try:
+                beginning = consumer.beginning_offsets(missing_position) if missing_position else {}
+            except Exception:
+                beginning = {}
+
+            for tp in partitions:
+                if tp in committed:
+                    off = committed[tp]
+                else:
+                    try:
+                        off = consumer.position(tp)
+                    except Exception:
+                        off = None
+                    if off is None or off < 0:
+                        off = beginning.get(tp, end.get(tp, 0))
                 lag = max(0, end.get(tp, off) - off)
                 total_lag += lag
                 by_partition[f"{tp.topic}-{tp.partition}"] = lag
