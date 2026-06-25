@@ -126,6 +126,7 @@ export default function App() {
             schema={selectedSchema}
             planId={selectedPlanId}
             onBack={() => setNav("dashboard")}
+            sseEvents={sseEvents}
           />
         )}
         {nav === "history"   && <MigrationList sseEvents={sseEvents}/>}

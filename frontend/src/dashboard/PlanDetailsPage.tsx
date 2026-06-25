@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useApi } from "../hooks/useApi";
+import type { SSEEvent } from "../hooks/useSSE";
 import { t } from "../theme";
 import { secondaryActionStyle } from "./buttonStyles";
 import { PlanPanel } from "./PlanPanel";
@@ -9,9 +10,10 @@ interface Props {
   schema: SchemaMigrationListItem | null;
   planId: number | null;
   onBack: () => void;
+  sseEvents: SSEEvent[];
 }
 
-export function PlanDetailsPage({ schema, planId, onBack }: Props) {
+export function PlanDetailsPage({ schema, planId, onBack, sseEvents }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const planApi = useApi<MigrationPlanDetail>(
@@ -32,6 +34,18 @@ export function PlanDetailsPage({ schema, planId, onBack }: Props) {
       setBusy(false);
     }
   }, [planId, planApi]);
+
+  useEffect(() => {
+    const event = sseEvents[0];
+    if (!event || !planId) return;
+    if (
+      event.type === "migration_phase"
+      || event.type === "connector_group_status"
+      || (event.type === "schema_migration.plan_items_added" && event.plan_id === planId)
+    ) {
+      planApi.reload();
+    }
+  }, [sseEvents, planId, planApi.reload]);
 
   return (
     <div>
