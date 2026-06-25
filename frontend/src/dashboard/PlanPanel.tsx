@@ -172,7 +172,7 @@ export function PlanPanel({
               {plan.status}
             </Badge>
             <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 12 }}>
-              #{plan.plan_id} · {done}/{total} done · {running} running
+              #{plan.plan_id} · {done}/{total} готово · {running} в работе
             </span>
           </div>
         </div>
@@ -367,9 +367,9 @@ function PlanOverview({
       }}>
         <Stat label="Позиций" value={batchCount}/>
         <Stat label="Таблиц" value={total}/>
-        <Stat label="Done" value={done}/>
-        <Stat label="Running" value={running}/>
-        <Stat label="Failed" value={failed}/>
+        <Stat label="Готово" value={done}/>
+        <Stat label="В работе" value={running}/>
+        <Stat label="Ошибки" value={failed}/>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -403,7 +403,7 @@ function PlanOverview({
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>Позиция {batchNo}</span>
               <span style={{ fontSize: 12, color: t.text.muted }}>
-                {batchDone}/{batchItems.length} done · {batchRunning} running · {batchFailed} failed
+                {batchDone}/{batchItems.length} готово · {batchRunning} в работе · {batchFailed} ошибок
               </span>
             </div>
           ) : (
@@ -679,8 +679,8 @@ function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] 
       <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
         <span>Таблиц: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{items.length}</strong></span>
         <span>Позиций: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{steps}</strong></span>
-        <span>Running: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{running}</strong></span>
-        <span>Failed: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{failed}</strong></span>
+        <span>В работе: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{running}</strong></span>
+        <span>Ошибки: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{failed}</strong></span>
       </div>
     </div>
   );
