@@ -326,6 +326,11 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(
         orchestrator.connector_groups_svc,
+        "do_create_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [{"topic_name": "t1", "status": "ok"}],
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
         "do_start_connector",
         lambda group_id: calls.append(("start", group_id)) or {"name": "cdc-1"},
     )
@@ -355,12 +360,53 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     orchestrator._handle_group_connector_starting("gid-1")
 
     assert calls == [
+        ("topics", "gid-1"),
         ("start", "gid-1"),
         ("refresh", "gid-1"),
         ("transition", "gid-1", "RUNNING"),
         ("queue",),
         ("kick", "gid-1"),
         ("broadcast", "RUNNING"),
+    ]
+
+
+def test_orchestrator_does_not_start_connector_when_topic_refresh_fails(monkeypatch):
+    calls = []
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "do_create_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [
+            {"topic_name": "t1", "status": "error", "error": "boom"}
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "do_start_connector",
+        lambda group_id: calls.append(("start", group_id)) or {"name": "cdc-1"},
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "transition_group",
+        lambda group_id, status, message=None: calls.append(("transition", group_id, status)),
+    )
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event["status"])))
+    orchestrator._group_in_progress.clear()
+
+    orchestrator._handle_group_connector_starting("gid-1")
+
+    assert calls == [
+        ("topics", "gid-1"),
+        ("transition", "gid-1", "FAILED"),
+        ("broadcast", "FAILED"),
     ]
 
 
