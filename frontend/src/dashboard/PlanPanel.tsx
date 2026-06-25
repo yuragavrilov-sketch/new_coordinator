@@ -590,7 +590,7 @@ function CdcConnectorCard({
       <div style={{ marginTop: 7, fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
         {connectorPreview.length > 0 ? (
           <>
-            Debezium читает: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{connectorPreview.join(", ")}</span>
+            Debezium читает весь состав CDC-коннектора: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{connectorPreview.join(", ")}</span>
             {connectorRest > 0 && <span style={{ color: t.text.muted }}> +{connectorRest} еще</span>}
           </>
         ) : (
@@ -599,7 +599,7 @@ function CdcConnectorCard({
       </div>
       {extraTables.length > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
-          В коннекторе, но не в этой пачке: {extraTables.map(tableLabel).join(", ")}
+          В Debezium уже есть таблицы без активной строки в очереди: {extraTables.map(tableLabel).join(", ")}
         </div>
       )}
       {group.error_text && (
@@ -677,8 +677,8 @@ function CdcConnectorDetails({
         padding: "7px 10px",
         borderBottom: `1px solid ${t.border.subtle}`,
       }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Фактический состав Debezium-коннектора</span>
-        <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} таблиц</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Фактический состав единственного CDC-коннектора</span>
+        <span style={{ fontSize: 11, color: t.text.muted }}>table.include.list: {rows.length} таблиц</span>
       </div>
       {rows.map(tbl => {
         const tablePlanItems = planItemsByTable.get(cdcTableKey(tbl)) || [];

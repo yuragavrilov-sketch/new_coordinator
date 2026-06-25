@@ -88,6 +88,10 @@ export function AddToPlanModal({
   ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
+  const projectedConnectorCount = projectedConnectorLabels.length;
+  const cdcSubmitLabel = projectedConnectorCount > tables.length
+    ? `Добавить ${tables.length}, синхронизировать ${projectedConnectorCount} в Debezium`
+    : `Добавить ${tables.length} в CDC-коннектор`;
   const submitDisabled = busy || !!cdcRemoveBusy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
@@ -424,15 +428,24 @@ export function AddToPlanModal({
                 }}>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>Статус: <strong style={{ color: t.text.primary }}>{cdcGroup.status}</strong></span>
-                    <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
-                    <span>Новых после сохранения: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorNewTables.length}</strong></span>
+                    <span>Сейчас в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+                    <span>Добавится новых: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorNewTables.length}</strong></span>
+                    <span>Будет в table.include.list: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{projectedConnectorCount}</strong></span>
                   </div>
-                  <div style={{ color: t.text.secondary }}>
-                    После сохранения Debezium будет читать весь состав CDC-пачки:{" "}
-                    <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>
+                  <div style={{
+                    padding: "7px 8px",
+                    borderRadius: t.radius.sm,
+                    border: `1px solid ${connectorOtherTables.length ? t.amber.dim : t.blue.dim}`,
+                    background: connectorOtherTables.length ? t.amber.bg : t.blue.bg,
+                    color: connectorOtherTables.length ? t.amber.fg : t.blue.fg,
+                    lineHeight: 1.45,
+                  }}>
+                    Debezium-коннектор один на всю CDC-пачку. После сохранения в Kafka Connect уйдет полный список,
+                    не только выбранные сейчас таблицы.
+                    <div style={{ marginTop: 4, fontFamily: t.font.mono, color: t.text.primary, overflowWrap: "anywhere" }}>
                       {projectedPreview.length > 0 ? projectedPreview.join(", ") : "пока нет таблиц"}
-                    </span>
-                    {projectedRest > 0 && <span style={{ color: t.text.muted }}> +{projectedRest} еще</span>}
+                      {projectedRest > 0 && <span style={{ color: t.text.muted }}> +{projectedRest} еще</span>}
+                    </div>
                   </div>
                   {connectorSelectedTables.length > 0 && (
                     <div style={{ color: t.amber.fg }}>
@@ -715,7 +728,7 @@ export function AddToPlanModal({
         <div style={S.footer}>
           <button onClick={onClose} disabled={busy} style={secondaryActionStyle(busy)}>Отмена</button>
           <button onClick={submit} disabled={submitDisabled} style={primaryActionStyle(submitDisabled)}>
-            {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-коннектор" : "Добавить в обычную пачку"}
+            {busy ? "Добавление..." : mode === "cdc" ? cdcSubmitLabel : "Добавить в обычную пачку"}
           </button>
         </div>
       </div>
