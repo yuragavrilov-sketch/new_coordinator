@@ -192,7 +192,9 @@ export interface MigrationPlanCdcGroup {
   group_name:             string;
   status:                 string;
   connector_name:         string;
+  active_connector_name?: string;
   topic_prefix:           string;
+  active_topic_prefix?:   string;
   consumer_group_prefix?: string | null;
   run_id?:                string | null;
   error_text?:            string | null;

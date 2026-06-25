@@ -128,3 +128,51 @@ def test_group_message_key_columns_uses_only_tables_without_pk_or_uk():
     ]
 
     assert planner._group_message_key_columns(tables) == "TCBPAY.ALLORDERS:ID,MERCHANT_ID"
+
+
+def test_cdc_group_snapshot_uses_active_run_topic_names(monkeypatch):
+    class CursorStub:
+        def __init__(self):
+            self.query = ""
+
+        def execute(self, sql, *_args):
+            self.query = sql
+
+        def fetchone(self):
+            if "FROM   connector_groups" in self.query:
+                return {
+                    "group_id": "gid",
+                    "group_name": "CDC",
+                    "status": "RUNNING",
+                    "connector_name": "base_connector",
+                    "topic_prefix": "base.topic",
+                    "consumer_group_prefix": "base.consumer",
+                    "run_id": "r123ab",
+                    "error_text": None,
+                }
+            return None
+
+        def fetchall(self):
+            if "FROM   group_tables" in self.query:
+                return [{
+                    "id": "row-1",
+                    "source_schema": "TCBPAY",
+                    "source_table": "ALLORDERS",
+                    "target_schema": "TCBPAY",
+                    "target_table": "ALLORDERS",
+                    "effective_key_type": "PRIMARY_KEY",
+                    "effective_key_columns_json": '["ID"]',
+                    "source_pk_exists": True,
+                    "source_uk_exists": False,
+                    "topic_name": "stale.topic.TCBPAY.ALLORDERS",
+                    "created_at": None,
+                }]
+            return []
+
+    monkeypatch.setitem(planner._state, "row_to_dict", lambda _cur, row: dict(row))
+
+    snapshot = planner._load_cdc_group_snapshot(CursorStub(), "gid")
+
+    assert snapshot["active_connector_name"] == "base_connector_r123ab"
+    assert snapshot["active_topic_prefix"] == "base.topic.r123ab"
+    assert snapshot["tables"][0]["topic_name"] == "base.topic.r123ab.TCBPAY.ALLORDERS"

@@ -123,6 +123,8 @@ def _group_message_key_columns(tables: list[dict]) -> str:
 def _load_cdc_group_snapshot(cur, group_id) -> dict | None:
     if not group_id:
         return None
+    from services.connector_groups import _active_connector_name, _active_topic_prefix, _topic_name
+
     cur.execute("""
         SELECT group_id, group_name, status, connector_name,
                topic_prefix, consumer_group_prefix, run_id, error_text
@@ -133,6 +135,7 @@ def _load_cdc_group_snapshot(cur, group_id) -> dict | None:
     if not row:
         return None
     group = _state["row_to_dict"](cur, row)
+    active_topic_prefix = _active_topic_prefix(group)
     cur.execute("""
         SELECT id, source_schema, source_table, target_schema, target_table,
                effective_key_type, effective_key_columns_json,
@@ -142,6 +145,14 @@ def _load_cdc_group_snapshot(cur, group_id) -> dict | None:
         ORDER BY source_schema, source_table
     """, (group_id,))
     tables = [_state["row_to_dict"](cur, r) for r in cur.fetchall()]
+    for table in tables:
+        table["topic_name"] = _topic_name(
+            active_topic_prefix,
+            table["source_schema"],
+            table["source_table"],
+        )
+    group["active_connector_name"] = _active_connector_name(group)
+    group["active_topic_prefix"] = active_topic_prefix
     group["tables"] = tables
     group["table_include_list"] = _group_table_include_list(tables)
     group["message_key_columns"] = _group_message_key_columns(tables)

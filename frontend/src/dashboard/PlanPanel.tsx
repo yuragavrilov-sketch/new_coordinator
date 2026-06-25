@@ -396,7 +396,7 @@ function CdcConnectorCard({
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
           <span style={{ fontFamily: t.font.mono, color: t.text.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
-            {group.connector_name}
+            {group.active_connector_name || group.connector_name}
           </span>
           <button
             onClick={() => onSync(group)}
@@ -424,6 +424,9 @@ function CdcConnectorCard({
       )}
       {group.table_include_list && (
         <MonoLine>table.include.list: {group.table_include_list}</MonoLine>
+      )}
+      {(group.active_topic_prefix || group.topic_prefix) && (
+        <MonoLine>topic.prefix: {group.active_topic_prefix || group.topic_prefix}</MonoLine>
       )}
       {group.message_key_columns && (
         <MonoLine>message.key.columns: {group.message_key_columns}</MonoLine>
