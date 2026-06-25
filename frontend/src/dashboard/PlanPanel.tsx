@@ -692,7 +692,7 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "minmax(160px, 1fr) 145px 110px",
+      gridTemplateColumns: "minmax(160px, 1fr) minmax(145px, auto) minmax(150px, 180px)",
       gap: 10,
       alignItems: "center",
       padding: "7px 10px",
