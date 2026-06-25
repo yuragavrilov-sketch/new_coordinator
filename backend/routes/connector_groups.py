@@ -205,6 +205,20 @@ def add_group_tables(group_id: str):
         rows = add_tables(group_id, tables)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    requested_count = len(tables)
+    added_count = len(rows)
+    already_present_count = max(0, requested_count - added_count)
+    if not rows:
+        return jsonify({
+            "tables":                [],
+            "migrations":            [],
+            "migrations_error":      None,
+            "sync_error":            None,
+            "requested_count":       requested_count,
+            "added_count":           0,
+            "already_present_count": already_present_count,
+            "message":               "Tables are already in CDC connector group",
+        }), 200
     # If the connector is already running, push table.include.list / key cols update
     sync_error = None
     try:
@@ -217,6 +231,9 @@ def add_group_tables(group_id: str):
         "migrations":       [],
         "migrations_error": None,
         "sync_error":       sync_error,
+        "requested_count":       requested_count,
+        "added_count":           added_count,
+        "already_present_count": already_present_count,
     }), 201
 
 

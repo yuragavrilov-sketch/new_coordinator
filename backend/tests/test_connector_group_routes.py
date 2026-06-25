@@ -76,8 +76,49 @@ def test_add_group_tables_returns_warning_when_sync_fails_after_insert(monkeypat
         "migrations": [],
         "migrations_error": None,
         "sync_error": "CDC connector config sync failed: connect unavailable",
+        "requested_count": 1,
+        "added_count": 1,
+        "already_present_count": 0,
     }
     assert calls == [
         ("add", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
         ("refresh", "gid-1"),
+    ]
+
+
+def test_add_group_tables_reports_existing_without_sync(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "add_tables",
+        lambda group_id, tables: calls.append(("add", group_id, tables)) or [],
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post(
+        "/api/connector-groups/gid-1/tables",
+        json={"tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "tables": [],
+        "migrations": [],
+        "migrations_error": None,
+        "sync_error": None,
+        "requested_count": 1,
+        "added_count": 0,
+        "already_present_count": 1,
+        "message": "Tables are already in CDC connector group",
+    }
+    assert calls == [
+        ("add", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
     ]
