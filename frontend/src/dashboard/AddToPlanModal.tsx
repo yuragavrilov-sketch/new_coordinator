@@ -32,6 +32,7 @@ interface Props {
   initialMode?: "historical" | "cdc";
   cdcGroup?: MigrationPlanCdcGroup | null;
   cdcGroupLoading?: boolean;
+  cdcGroupError?: string | null;
   onClose: () => void;
   onDone: (planId: number, count: number, response: AddPlanItemsResp) => void | Promise<void>;
 }
@@ -42,6 +43,7 @@ export function AddToPlanModal({
   initialMode = "historical",
   cdcGroup,
   cdcGroupLoading = false,
+  cdcGroupError = null,
   onClose,
   onDone,
 }: Props) {
@@ -81,7 +83,7 @@ export function AddToPlanModal({
   ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
-  const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading));
+  const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -191,6 +193,10 @@ export function AddToPlanModal({
       if (mode === "cdc") {
         if (cdcGroupLoading) {
           setErr("Дождитесь загрузки состава CDC-коннектора.");
+          return;
+        }
+        if (cdcGroupError) {
+          setErr(`Не удалось загрузить состав CDC-коннектора: ${cdcGroupError}`);
           return;
         }
         if (infoLoading) {
@@ -350,6 +356,17 @@ export function AddToPlanModal({
                   fontSize: 12,
                 }}>
                   Загружаю текущий состав CDC-коннектора...
+                </div>
+              ) : cdcGroupError ? (
+                <div style={{
+                  padding: "9px 10px",
+                  border: `1px solid ${t.red.border}`,
+                  borderRadius: t.radius.sm,
+                  background: `${t.red.border}22`,
+                  color: t.red.fg,
+                  fontSize: 12,
+                }}>
+                  Не удалось загрузить состав CDC-коннектора: {cdcGroupError}
                 </div>
               ) : cdcGroup ? (
                 <div style={{

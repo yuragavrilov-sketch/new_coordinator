@@ -345,6 +345,7 @@ export function Dashboard({
           initialMode={planMode}
           cdcGroup={planApi.data?.cdc_group || null}
           cdcGroupLoading={planMode === "cdc" && !!activePlanId && planApi.loading && !planApi.data}
+          cdcGroupError={planMode === "cdc" && !!activePlanId && !planApi.data ? planApi.error : null}
           onClose={() => setPlanMode(null)}
           onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
