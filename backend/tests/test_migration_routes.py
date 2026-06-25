@@ -36,3 +36,31 @@ def test_create_migration_rejects_direct_cdc_before_db(monkeypatch):
     body = res.get_json()
     assert "Legacy direct CDC migration creation is disabled" in body["error"]
     assert "schema migration screen" in body["error"]
+
+
+def test_bulk_create_migrations_rejects_direct_cdc_before_db(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(migrations.bp)
+
+    monkeypatch.setitem(migrations._state, "db_available", {"value": True})
+
+    def fail_get_conn():
+        raise AssertionError("CDC bulk reject must not open state DB connection")
+
+    monkeypatch.setitem(migrations._state, "get_conn", fail_get_conn)
+
+    res = app.test_client().post("/api/migrations/bulk", json={
+        "strategy": "CDC_STAGE",
+        "group_id": "gid-1",
+        "tables": [{
+            "source_schema": "TCBPAY",
+            "source_table": "ALLORDERS",
+            "target_schema": "TCBPAY",
+            "target_table": "ALLORDERS",
+        }],
+    })
+
+    assert res.status_code == 400
+    body = res.get_json()
+    assert "Legacy direct CDC migration creation is disabled" in body["error"]
+    assert "schema migration screen" in body["error"]

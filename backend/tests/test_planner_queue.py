@@ -86,6 +86,54 @@ def test_legacy_payload_allows_bulk_default_strategy_without_mode():
     )
 
 
+def test_planner_execute_rejects_cdc_payload_before_db(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(planner.bp)
+
+    def fail_get_conn():
+        raise AssertionError("legacy planner CDC reject must not open state DB connection")
+
+    monkeypatch.setitem(planner._state, "get_conn", fail_get_conn)
+
+    response = app.test_client().post("/api/planner/execute", json={
+        "src_schema": "TCBPAY",
+        "tgt_schema": "TCBPAY",
+        "name": "CDC plan",
+        "create_connector_group": {
+            "group_name": "CDC",
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.main",
+        },
+        "defaults": {"strategy": "CDC_DIRECT"},
+        "batches": [{"order": 1, "tables": [{"table": "ALLORDERS"}]}],
+    })
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "Legacy planner CDC flow is disabled" in payload["error"]
+    assert "schema migration screen" in payload["error"]
+
+
+def test_planner_add_items_rejects_cdc_payload_before_db(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(planner.bp)
+
+    def fail_get_conn():
+        raise AssertionError("legacy planner CDC reject must not open state DB connection")
+
+    monkeypatch.setitem(planner._state, "get_conn", fail_get_conn)
+
+    response = app.test_client().post("/api/planner/plans/42/items", json={
+        "defaults": {"strategy": "CDC_STAGE"},
+        "batches": [{"order": 1, "tables": [{"table": "ALLORDERS"}]}],
+    })
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert "Legacy planner CDC flow is disabled" in payload["error"]
+    assert "schema migration screen" in payload["error"]
+
+
 def test_plan_item_status_for_active_phase_is_running():
     assert planner._plan_item_status_for_phase("NEW") == "RUNNING"
     assert planner._plan_item_status_for_phase("CDC_APPLYING") == "RUNNING"
