@@ -317,8 +317,12 @@ export function Dashboard({
       <PlanPanel
         plan={activePlanId ? (planApi.data || null) : null}
         loading={!!activePlanId && planApi.loading}
+        cdcGroup={cdcGroup}
         onStart={handleStartPlan}
-        onReload={() => planApi.reload()}
+        onReload={() => {
+          planApi.reload();
+          cdcGroupApi.reload();
+        }}
         onOpenDetails={onOpenPlan}
         busy={planBusy}
         error={planErr || planApi.error || ""}

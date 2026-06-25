@@ -13,6 +13,7 @@ interface Props {
   busy: boolean;
   error: string;
   variant?: "overview" | "detail";
+  cdcGroup?: MigrationPlanCdcGroup | null;
 }
 
 const DONE = new Set(["DONE"]);
@@ -27,6 +28,7 @@ export function PlanPanel({
   busy,
   error,
   variant = "detail",
+  cdcGroup: cdcGroupProp = null,
 }: Props) {
   const batches = useMemo(() => {
     const map = new Map<number, MigrationPlanItem[]>();
@@ -96,18 +98,43 @@ export function PlanPanel({
     }
   }
 
+  const effectiveCdcGroup = plan?.cdc_group || cdcGroupProp || null;
+
   if (!plan && loading) {
     return <Shell><Muted>Загрузка пачки...</Muted></Shell>;
   }
   if (!plan) {
     return (
       <Shell>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: effectiveCdcGroup ? 10 : 0 }}>
           <div>
             <Title>Пачка таблиц</Title>
-            <Muted>Пока нет plan для этой миграции. Выделите таблицы и добавьте их в обычную пачку или CDC-коннектор.</Muted>
+            <Muted>
+              {effectiveCdcGroup
+                ? "Plan еще не создан, но CDC-коннектор этой миграции уже содержит таблицы."
+                : "Пока нет plan для этой миграции. Выделите таблицы и добавьте их в обычную пачку или CDC-коннектор."}
+            </Muted>
           </div>
         </div>
+        {effectiveCdcGroup && (
+          <CdcConnectorCard
+            group={effectiveCdcGroup}
+            planItems={[]}
+            busyAction={cdcActionBusy}
+            onSync={syncCdcGroup}
+            onStart={startCdcGroup}
+            showExtraTables={false}
+          />
+        )}
+        {cdcActionErr && (
+          <div style={{
+            marginTop: 10, padding: "7px 10px", borderRadius: t.radius.sm,
+            background: `${t.red.border}22`, border: `1px solid ${t.red.border}`,
+            color: t.red.fg, fontSize: 12,
+          }}>
+            {cdcActionErr}
+          </div>
+        )}
       </Shell>
     );
   }
@@ -204,7 +231,7 @@ export function PlanPanel({
           failed={failed}
           currentBatch={currentBatch}
           items={plan.items}
-          cdcGroup={plan.cdc_group || null}
+          cdcGroup={effectiveCdcGroup}
           cdcActionBusy={cdcActionBusy}
           onSyncCdcGroup={syncCdcGroup}
           onStartCdcGroup={startCdcGroup}
@@ -246,22 +273,22 @@ export function PlanPanel({
                     <PlanRow
                       key={item.item_id}
                       item={item}
-                      cdcGroupStatus={pack.key === "cdc" ? plan.cdc_group?.status : undefined}
+                      cdcGroupStatus={pack.key === "cdc" ? effectiveCdcGroup?.status : undefined}
                     />
                   ))}
                 </div>
               ))}
-              {pack.key === "cdc" && plan.cdc_group && (
+              {pack.key === "cdc" && effectiveCdcGroup && (
                 <>
                   <CdcConnectorCard
-                    group={plan.cdc_group}
+                    group={effectiveCdcGroup}
                     planItems={pack.items}
                     busyAction={cdcActionBusy}
                     onSync={syncCdcGroup}
                     onStart={startCdcGroup}
                   />
                   <CdcConnectorDetails
-                    group={plan.cdc_group}
+                    group={effectiveCdcGroup}
                     planItems={pack.items}
                     busyKey={cdcActionBusy}
                     onRemoveExtra={removeCdcGroupTable}
@@ -400,16 +427,20 @@ function CdcConnectorCard({
   busyAction,
   onSync,
   onStart,
+  showExtraTables = true,
 }: {
   group: MigrationPlanCdcGroup;
   planItems: MigrationPlanItem[];
   busyAction: string;
   onSync: (group: MigrationPlanCdcGroup) => void;
   onStart: (group: MigrationPlanCdcGroup) => void;
+  showExtraTables?: boolean;
 }) {
   const planKeys = new Set(planItems.map(i => i.table_name.toUpperCase()));
   const connectorTables = group.tables || [];
-  const extraTables = connectorTables.filter(tbl => !planKeys.has(tbl.source_table.toUpperCase()));
+  const extraTables = showExtraTables
+    ? connectorTables.filter(tbl => !planKeys.has(tbl.source_table.toUpperCase()))
+    : [];
   const keyColsCount = connectorTables.filter(tbl => {
     if (tbl.source_pk_exists || tbl.source_uk_exists) return false;
     const raw = tbl.effective_key_columns_json;
