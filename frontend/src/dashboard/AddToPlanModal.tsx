@@ -82,6 +82,7 @@ export function AddToPlanModal({
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
   const connectorNewTables = tables.filter(t => !connectorTableKeys.has(rowKey(t)));
+  const cdcBulkRemoveBusy = cdcRemoveBusy === "__bulk__";
   const projectedConnectorLabels = [
     ...connectorTables.map(cdcTableLabel),
     ...connectorNewTables.map(rowKey),
@@ -116,6 +117,10 @@ export function AddToPlanModal({
     setPackMode(initialMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMode]);
+
+  useEffect(() => {
+    setHiddenCdcTableKeys(new Set());
+  }, [cdcGroup?.group_id]);
 
   useEffect(() => {
     setHiddenCdcTableKeys(prev => {
@@ -227,6 +232,54 @@ export function AddToPlanModal({
       }
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCdcRemoveBusy("");
+    }
+  }
+
+  async function removeOtherCdcTables() {
+    if (!cdcGroup || busy || cdcRemoveBusy || connectorOtherTables.length === 0) return;
+    const labels = connectorOtherTables.map(cdcTableLabel);
+    if (!window.confirm(
+      `Оставить в CDC-коннекторе только выбранные сейчас таблицы?\n\nБудут удалены из пачки: ${labels.join(", ")}.\nDebezium table.include.list будет обновлен.`,
+    )) return;
+    setCdcRemoveBusy("__bulk__");
+    setErr("");
+    const removed: string[] = [];
+    const failed: string[] = [];
+    const syncErrors: string[] = [];
+    try {
+      for (const table of connectorOtherTables) {
+        const label = cdcTableLabel(table);
+        try {
+          const res = await fetch(
+            `/api/connector-groups/${cdcGroup.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
+            { method: "DELETE" },
+          );
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          const body = await res.json().catch(() => ({}));
+          removed.push(label);
+          if (body.sync_error) syncErrors.push(`${label}: ${body.sync_error}`);
+        } catch (e) {
+          failed.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (removed.length > 0) {
+        setHiddenCdcTableKeys(prev => {
+          const next = new Set(prev);
+          for (const label of removed) next.add(label);
+          return next;
+        });
+      }
+      await onReloadCdcGroup?.();
+      if (failed.length > 0) {
+        setErr(`Не все таблицы удалось убрать из CDC-пачки: ${failed.join("; ")}`);
+      } else if (syncErrors.length > 0) {
+        setErr(`Таблицы убраны из пачки, но Debezium не синхронизирован: ${syncErrors.join("; ")}`);
+      }
     } finally {
       setCdcRemoveBusy("");
     }
@@ -457,8 +510,25 @@ export function AddToPlanModal({
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
-                    <div style={{ color: t.amber.fg }}>
-                      Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                    <div style={{ display: "grid", gap: 7 }}>
+                      <div style={{ color: t.amber.fg }}>
+                        Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                        <button
+                          type="button"
+                          onClick={removeOtherCdcTables}
+                          disabled={!!cdcRemoveBusy || busy}
+                          style={{
+                            ...secondaryActionStyle(false),
+                            padding: "4px 9px",
+                            fontSize: 11,
+                            opacity: cdcBulkRemoveBusy ? 0.55 : 1,
+                          }}
+                        >
+                          {cdcBulkRemoveBusy ? "Очищаю пачку..." : "Оставить только выбранные"}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
