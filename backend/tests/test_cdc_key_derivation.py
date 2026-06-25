@@ -950,6 +950,45 @@ def test_schema_migration_add_first_cdc_item_creates_group_plan_and_autostarts(m
     assert any("SET plan_id = %s" in sql for sql in sqls)
     assert any("INSERT INTO group_tables" in sql for sql in sqls)
     assert any("INSERT INTO migrations" in sql for sql in sqls)
+    group_table_params = next(
+        params for _, sql, params in calls
+        if "INSERT INTO group_tables" in sql
+    )
+    assert group_table_params == (
+        "gt-new",
+        "gid-new",
+        "TCBPAY",
+        "ALLORDERS",
+        "PAY",
+        "ALLORDERS",
+        "PRIMARY_KEY",
+        '["ID"]',
+        True,
+        False,
+        "topic.prefix.TCBPAY.ALLORDERS",
+    )
+    migration_params = next(
+        params for _, sql, params in calls
+        if "INSERT INTO migrations" in sql
+    )
+    assert migration_params[0] == "mid-new"
+    assert migration_params[3:7] == ("TCBPAY", "ALLORDERS", "PAY", "ALLORDERS")
+    assert migration_params[14:20] == (
+        "PRIMARY_KEY",
+        "PK",
+        '["ID"]',
+        "CDC_DIRECT",
+        True,
+        "gid-new",
+    )
+    plan_item_params = next(
+        params for _, sql, params in calls
+        if "INSERT INTO migration_plan_items" in sql
+    )
+    assert plan_item_params[:5] == (42, "ALLORDERS", "CDC", 1, 0)
+    assert plan_item_params[6] == "mid-new"
+    labels = [call[0] for call in calls]
+    assert labels.index("commit") < labels.index("autostart")
     assert ("commit",) in calls
     assert ("oracle-close",) in calls
     assert ("close",) in calls
