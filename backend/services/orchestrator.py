@@ -1826,9 +1826,10 @@ def _check_group_connectors() -> None:
             print(f"[orchestrator] group {group_id} connector check error: {exc}")
             continue
 
-        if status == "FAILED":
-            print(f"[orchestrator] group connector {active_name} FAILED — failing group migrations")
-            connector_groups_svc.update_group_status(group_id, "FAILED", "Connector FAILED")
+        if status in ("FAILED", "NOT_FOUND"):
+            reason = "Connector FAILED" if status == "FAILED" else "Connector NOT_FOUND"
+            print(f"[orchestrator] group connector {active_name} {status} - failing group migrations")
+            connector_groups_svc.update_group_status(group_id, "FAILED", reason)
 
             # Fail all active CDC migrations in this group
             conn = _state["get_conn"]()

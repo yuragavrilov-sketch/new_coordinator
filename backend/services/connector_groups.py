@@ -18,6 +18,7 @@ from . import debezium
 from .strategy import Strategy
 
 log = logging.getLogger(__name__)
+_LIFECYCLE_STATUSES = {"TOPICS_CREATING", "CONNECTOR_STARTING", "STOPPING"}
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +243,21 @@ def get_group_history(group_id: str) -> list[dict]:
 # Backward compat alias
 def update_group_status(group_id: str, status: str, error_text: str | None = None) -> None:
     transition_group(group_id, status, error_text=error_text)
+
+
+def _normalize_polled_connector_status(group_status: str | None,
+                                       connector_status: str) -> tuple[str, str | None]:
+    """Return (reported_status, db_status_to_write).
+
+    Lifecycle states are owned by the orchestrator. A UI/status poll must not
+    turn TOPICS_CREATING or CONNECTOR_STARTING into STOPPED just because the
+    Debezium connector has not been created yet.
+    """
+    if group_status in _LIFECYCLE_STATUSES:
+        return group_status, None
+    if connector_status == "NOT_FOUND":
+        return "STOPPED", "STOPPED"
+    return connector_status, connector_status
 
 
 # ---------------------------------------------------------------------------
@@ -912,6 +928,10 @@ def refresh_connector_tables(group_id: str) -> None:
     connector_name = _active_connector_name(group)
     status = debezium.get_connector_status(connector_name)
     if status == "NOT_FOUND":
+        if group.get("status") == "RUNNING":
+            raise ValueError(
+                f"CDC connector {connector_name} is marked RUNNING but is missing in Kafka Connect"
+            )
         return  # connector not running, nothing to update
 
     table_list = _build_table_include_list(group_id)
@@ -930,8 +950,13 @@ def get_connector_status(group_id: str) -> str:
     if not group:
         return "NOT_FOUND"
     try:
-        status = debezium.get_connector_status(_active_connector_name(group))
-        update_group_status(group_id, status if status != "NOT_FOUND" else "STOPPED")
-        return status
+        connector_status = debezium.get_connector_status(_active_connector_name(group))
+        reported_status, db_status = _normalize_polled_connector_status(
+            group.get("status"),
+            connector_status,
+        )
+        if db_status and db_status != group.get("status"):
+            update_group_status(group_id, db_status)
+        return reported_status
     except Exception:
         return "UNKNOWN"
