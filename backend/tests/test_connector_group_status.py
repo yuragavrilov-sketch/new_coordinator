@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from services import connector_groups
 
 
@@ -92,6 +94,15 @@ def test_active_migration_for_group_table_finds_non_terminal_phase():
         cur, "gid", "tcbpay", "allorders",
     ) == ("mid-1", "CDC_APPLYING")
     assert "COALESCE(phase, '') NOT IN" in cur.executed[0][0]
+
+
+@pytest.mark.parametrize("phase", ["DRAFT", "NEW", "CDC_APPLYING", "STEADY_STATE"])
+def test_active_migration_for_group_table_treats_cdc_membership_as_active(phase):
+    cur = CursorStub(("mid-1", phase))
+
+    assert connector_groups._active_migration_for_group_table(
+        cur, "gid", "TCBPAY", "ALLORDERS",
+    ) == ("mid-1", phase)
 
 
 def test_active_migration_for_group_table_allows_terminal_phase_absent():
