@@ -468,7 +468,11 @@ export function Dashboard({
                   : " · запуск уже обработан";
               } else if (stateNote) {
                 startNote = stateNote;
-              } else if (!response.connector_start_error) {
+              } else if (response.connector_start_error) {
+                startNote = normalizedConnectorStatus === "RUNNING"
+                  ? " · CDC: добавлено в пачку, но очередь не стартовала из-за ошибки синхронизации Debezium"
+                  : " · ожидает запуска CDC-коннектора";
+              } else {
                 try {
                   const started = await startMigrationPlan(planId);
                   const startedCount = started.started.length;
@@ -485,8 +489,6 @@ export function Dashboard({
                     setPlanErr(msg);
                   }
                 }
-              } else {
-                startNote = " · ожидает запуска CDC-коннектора";
               }
               if (connectorCount !== undefined) {
                 startNote += ` · Debezium tables: ${connectorCount}`;
@@ -495,10 +497,10 @@ export function Dashboard({
                 startNote += ` · коннектор: ${connectorStatus}`;
               }
               if (connectorStartError) {
-                setPlanErr(
-                  `CDC-коннектор не стартовал: ${connectorStartError}. ` +
-                  "Таблицы добавлены в очередь; запустите CDC-коннектор вручную."
-                );
+                const actionText = normalizedConnectorStatus === "RUNNING"
+                  ? "Таблицы сохранены в CDC-пачке, но строка не запущена: сначала синхронизируйте Debezium."
+                  : "Таблицы добавлены в очередь; запустите CDC-коннектор вручную.";
+                setPlanErr(`CDC-коннектор не готов: ${connectorStartError}. ${actionText}`);
               }
             }
             setPlanMode(null);
