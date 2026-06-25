@@ -322,7 +322,7 @@ export function Dashboard({
               try {
                 const started = await startMigrationPlan(planId);
                 startNote = started.started.length
-                  ? ` · старт batch ${started.batch}`
+                  ? ` · старт позиции ${started.batch}`
                   : " · запуск уже обработан";
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);

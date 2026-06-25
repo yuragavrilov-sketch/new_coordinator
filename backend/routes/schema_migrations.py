@@ -362,6 +362,7 @@ def add_plan_items(sm_id: str):
             batch_base = cur.fetchone()[0] or 0
 
             created = []
+            seen_tables: set[str] = set()
             for idx, table in enumerate(tables):
                 manual_key_columns = []
                 if isinstance(table, dict):
@@ -385,6 +386,28 @@ def add_plan_items(sm_id: str):
                     target_table = table_name
                 if not table_name:
                     continue
+
+                if table_name in seen_tables:
+                    raise ValueError(f"Table {src_schema}.{table_name} is selected more than once")
+                seen_tables.add(table_name)
+
+                cur.execute("""
+                    SELECT i.status, m.phase
+                    FROM   migration_plan_items i
+                    LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                    WHERE  i.plan_id = %s
+                      AND  UPPER(i.table_name) = %s
+                      AND  i.status NOT IN ('DONE', 'FAILED', 'CANCELLED')
+                      AND  COALESCE(m.phase, '') NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+                    LIMIT  1
+                """, (plan_id, table_name))
+                duplicate = cur.fetchone()
+                if duplicate:
+                    dup_status, dup_phase = duplicate
+                    raise ValueError(
+                        f"Table {src_schema}.{table_name} is already in this plan "
+                        f"({dup_status}, {dup_phase or 'no migration phase'})"
+                    )
 
                 effective_key_type = "NONE"
                 effective_key_source = "NONE"

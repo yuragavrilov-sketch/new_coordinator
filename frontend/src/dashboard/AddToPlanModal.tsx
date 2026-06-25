@@ -255,7 +255,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
               lineHeight: 1.45,
             }}>
               {mode === "cdc"
-                ? "Таблицы попадут в единственный CDC-коннектор этой миграции. Если его ещё нет, coordinator создаст его автоматически. Запуск выполняется отдельно на экране CDC-коннектора."
+                ? "Таблицы попадут в единственный CDC-коннектор этой миграции. Если его ещё нет, coordinator создаст его автоматически. После добавления коннектор и перенос данных стартуют автоматически."
                 : "SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source. Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса."}
             </div>
             <Field label="Стратегия">
@@ -420,7 +420,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
           <Section title="Порядок и нагрузка">
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
               <input type="checkbox" checked={sequential} onChange={e => setSequential(e.target.checked)} />
-              <span>Каждую таблицу отдельным шагом, переносить по очереди</span>
+              <span>Каждую таблицу отдельной позицией очереди</span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
               <input
