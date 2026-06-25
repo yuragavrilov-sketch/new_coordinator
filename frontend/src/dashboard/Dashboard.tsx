@@ -420,7 +420,9 @@ export function Dashboard({
             setPlanMode(null);
             setSelectedIds(new Set());
             setActivePlanId(planId);
-            cdcGroupApi.setData(response.cdc_group || null);
+            if (planMode === "cdc") {
+              cdcGroupApi.setData(response.cdc_group || null);
+            }
             onPlanChanged(planId);
             setToast(
               autoStartOk
