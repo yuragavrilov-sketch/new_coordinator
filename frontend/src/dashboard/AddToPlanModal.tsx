@@ -34,6 +34,7 @@ interface Props {
   cdcGroupLoading?: boolean;
   cdcGroupError?: string | null;
   onClose: () => void;
+  onReloadCdcGroup?: () => void | Promise<void>;
   onDone: (planId: number, count: number, response: AddPlanItemsResp) => void | Promise<void>;
 }
 
@@ -45,6 +46,7 @@ export function AddToPlanModal({
   cdcGroupLoading = false,
   cdcGroupError = null,
   onClose,
+  onReloadCdcGroup,
   onDone,
 }: Props) {
   const [mode, setMode] = useState<"historical" | "cdc">(initialMode);
@@ -61,6 +63,7 @@ export function AddToPlanModal({
   const [keyColumns, setKeyColumns] = useState<Record<string, string[]>>({});
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [cdcRemoveBusy, setCdcRemoveBusy] = useState("");
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
@@ -83,7 +86,7 @@ export function AddToPlanModal({
   ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
-  const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
+  const submitDisabled = busy || !!cdcRemoveBusy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -182,6 +185,29 @@ export function AddToPlanModal({
       setStrategy("CDC_DIRECT");
       setWorkers(4);
       setSequential(true);
+    }
+  }
+
+  async function removeExistingCdcTable(table: MigrationPlanCdcTable) {
+    if (!cdcGroup || busy || cdcRemoveBusy) return;
+    const label = cdcTableLabel(table);
+    if (!window.confirm(`Убрать ${label} из CDC-коннектора? Debezium table.include.list будет обновлен.`)) return;
+    setCdcRemoveBusy(label);
+    setErr("");
+    try {
+      const res = await fetch(
+        `/api/connector-groups/${cdcGroup.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      await onReloadCdcGroup?.();
+    } catch (e) {
+      setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCdcRemoveBusy("");
     }
   }
 
@@ -399,6 +425,50 @@ export function AddToPlanModal({
                   {connectorOtherTables.length > 0 && (
                     <div style={{ color: t.amber.fg }}>
                       Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                    </div>
+                  )}
+                  {connectorOtherTables.length > 0 && (
+                    <div style={{
+                      display: "grid",
+                      gap: 4,
+                      borderTop: `1px solid ${t.border.subtle}`,
+                      paddingTop: 7,
+                    }}>
+                      {connectorOtherTables.map(table => {
+                        const label = cdcTableLabel(table);
+                        const rowBusy = cdcRemoveBusy === label;
+                        return (
+                          <div key={table.id || label} style={{
+                            display: "grid",
+                            gridTemplateColumns: "minmax(0, 1fr) auto",
+                            gap: 8,
+                            alignItems: "center",
+                          }}>
+                            <span style={{
+                              fontFamily: t.font.mono,
+                              color: t.text.primary,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}>
+                              {label}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeExistingCdcTable(table)}
+                              disabled={!!cdcRemoveBusy || busy}
+                              style={{
+                                ...secondaryActionStyle(false),
+                                padding: "3px 8px",
+                                fontSize: 11,
+                                opacity: rowBusy ? 0.55 : 1,
+                              }}
+                            >
+                              {rowBusy ? "Убираю..." : "Убрать"}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {cdcGroup.table_include_list && (
