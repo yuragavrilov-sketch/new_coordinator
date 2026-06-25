@@ -70,6 +70,16 @@ export interface BaselineProgressEvent {
   ts: string;
 }
 
+export interface TargetTriggerJobEvent {
+  type: "target_trigger_job";
+  migration_id: string;
+  job_id: string;
+  state: "PENDING" | "RUNNING" | "DONE" | "FAILED";
+  enabled_count?: number;
+  error_text?: string;
+  ts: string;
+}
+
 export interface DdlSnapshotProgressEvent {
   type: "ddl_snapshot.progress";
   src_schema: string;
@@ -101,6 +111,7 @@ export type SSEEvent =
   | SchemaPlanItemsAddedEvent
   | KafkaLagEvent
   | BaselineProgressEvent
+  | TargetTriggerJobEvent
   | DdlSnapshotProgressEvent
   | DdlSnapshotCompleteEvent;
 
@@ -152,7 +163,8 @@ export function useSSE({ url, maxEvents = 200 }: UseSSEOptions) {
           parsed.type === "connector_group_status" ||
           parsed.type === "schema_migration.plan_items_added" ||
           parsed.type === "kafka_lag"        ||
-          parsed.type === "baseline_progress"
+          parsed.type === "baseline_progress" ||
+          parsed.type === "target_trigger_job"
         ) {
           setEvents((prev) => [parsed as SSEEvent, ...prev].slice(0, maxEvents));
         }

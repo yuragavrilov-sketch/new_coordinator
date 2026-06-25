@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { t } from "../theme";
+import type { SSEEvent } from "../hooks/useSSE";
 import { ProgressBar } from "../components/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import type {
@@ -20,6 +21,7 @@ interface Props {
   error: string;
   variant?: "overview" | "detail";
   cdcGroup?: MigrationPlanCdcGroup | null;
+  sseEvents?: SSEEvent[];
 }
 
 const DONE = new Set(["DONE"]);
@@ -72,6 +74,7 @@ export function PlanPanel({
   error,
   variant = "detail",
   cdcGroup: cdcGroupProp = null,
+  sseEvents = [],
 }: Props) {
   const batches = useMemo(() => {
     const map = new Map<number, MigrationPlanItem[]>();
@@ -393,6 +396,7 @@ export function PlanPanel({
                       item={item}
                       cdcGroupStatus={pack.key === "cdc" ? effectiveCdcGroup?.status : undefined}
                       onReload={onReload}
+                      sseEvents={sseEvents}
                     />
                   ))}
                 </div>
@@ -869,10 +873,12 @@ function PlanRow({
   item,
   cdcGroupStatus,
   onReload,
+  sseEvents,
 }: {
   item: MigrationPlanItem;
   cdcGroupStatus?: string;
   onReload: () => void;
+  sseEvents: SSEEvent[];
 }) {
   const rowsLoaded = item.rows_loaded || 0;
   const totalRows = item.total_rows || 0;
@@ -916,7 +922,7 @@ function PlanRow({
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
         {showTriggerJob ? (
-          <TriggerJobInlineAction migrationId={item.migration_id!} onDone={onReload} />
+          <TriggerJobInlineAction migrationId={item.migration_id!} onDone={onReload} sseEvents={sseEvents} />
         ) : (
           <span style={{ color: t.text.disabled, fontSize: 11 }}>-</span>
         )}
@@ -925,7 +931,15 @@ function PlanRow({
   );
 }
 
-function TriggerJobInlineAction({ migrationId, onDone }: { migrationId: string; onDone: () => void }) {
+function TriggerJobInlineAction({
+  migrationId,
+  onDone,
+  sseEvents,
+}: {
+  migrationId: string;
+  onDone: () => void;
+  sseEvents: SSEEvent[];
+}) {
   const [jobs, setJobs] = React.useState<TargetTriggerJob[]>([]);
   const [busy, setBusy] = React.useState("");
   const [err, setErr] = React.useState("");
@@ -948,6 +962,12 @@ function TriggerJobInlineAction({ migrationId, onDone }: { migrationId: string; 
     const id = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(id); };
   }, [migrationId]);
+
+  React.useEffect(() => {
+    const event = sseEvents[0];
+    if (!event || event.type !== "target_trigger_job" || event.migration_id !== migrationId) return;
+    loadJobs();
+  }, [sseEvents, migrationId, loadJobs]);
 
   async function createJob() {
     setBusy("create");

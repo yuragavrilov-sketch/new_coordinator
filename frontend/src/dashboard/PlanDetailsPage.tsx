@@ -41,6 +41,7 @@ export function PlanDetailsPage({ schema, planId, onBack, sseEvents }: Props) {
     if (
       event.type === "migration_phase"
       || event.type === "connector_group_status"
+      || event.type === "target_trigger_job"
       || (event.type === "schema_migration.plan_items_added" && event.plan_id === planId)
     ) {
       planApi.reload();
@@ -78,6 +79,7 @@ export function PlanDetailsPage({ schema, planId, onBack, sseEvents }: Props) {
         busy={busy}
         error={err || planApi.error || ""}
         variant="detail"
+        sseEvents={sseEvents}
       />
     </div>
   );

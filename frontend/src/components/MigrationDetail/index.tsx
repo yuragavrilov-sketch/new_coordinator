@@ -47,7 +47,7 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
   useEffect(() => {
     const last = sseEvents[0];
     if (!last || !("migration_id" in last) || last.migration_id !== migrationId) return;
-    if (last.type === "migration_phase" || last.type === "baseline_progress") {
+    if (last.type === "migration_phase" || last.type === "baseline_progress" || last.type === "target_trigger_job") {
       loadDetail();
     }
   }, [sseEvents]); // eslint-disable-line

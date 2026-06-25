@@ -396,6 +396,7 @@ export function Dashboard({
         busy={planBusy}
         error={planErr || planApi.error || ""}
         variant="overview"
+        sseEvents={sseEvents}
       />
 
       <ObjectTable
