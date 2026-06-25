@@ -122,6 +122,17 @@ def _kick_cdc_group_best_effort(group_id: str | None) -> bool:
         return False
 
 
+def _kick_cdc_group_lifecycle_best_effort(group_id: str | None) -> bool:
+    if not group_id:
+        return False
+    try:
+        from services import orchestrator
+        return bool(orchestrator.kick_connector_group_lifecycle(group_id))
+    except Exception as exc:
+        print(f"[schema_migrations] CDC connector lifecycle kick warning: {exc}")
+        return False
+
+
 def _autostart_created_cdc_items(
     connector_group_id: str | None,
     connector_group_status: str | None,
@@ -146,6 +157,7 @@ def _autostart_created_cdc_items(
             "group_id": connector_group_id,
             "status": connector_start.get("status"),
         })
+        _kick_cdc_group_lifecycle_best_effort(connector_group_id)
     except Exception as exc:
         connector_start_error = str(exc)
         recorded_status = _record_cdc_connector_start_error(

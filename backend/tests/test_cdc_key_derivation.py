@@ -1307,6 +1307,11 @@ def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypat
         "_kick_cdc_group_best_effort",
         lambda group_id: calls.append(("kick", group_id)) or True,
     )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_kick_cdc_group_lifecycle_best_effort",
+        lambda group_id: calls.append(("lifecycle", group_id)) or True,
+    )
     monkeypatch.setitem(
         schema_migrations._state,
         "broadcast",
@@ -1332,6 +1337,7 @@ def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypat
         ("connector", "gid-1", "STOPPED"),
         ("clear", "gid-1"),
         ("broadcast", "connector_group_status", "RUNNING"),
+        ("lifecycle", "gid-1"),
         ("plan", 42, [{"migration_id": "mid-1", "batch_order": 2}]),
         ("kick", "gid-1"),
     ]
@@ -2153,6 +2159,47 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
         ("queue",),
         ("kick", "gid-1"),
         ("broadcast", "RUNNING"),
+    ]
+
+
+def test_orchestrator_chains_group_topics_to_connector_start(monkeypatch):
+    calls = []
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "do_create_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [
+            {"topic_name": "topic-1", "status": "ok"},
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "transition_group",
+        lambda group_id, status, message=None: calls.append(("transition", group_id, status, message)),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_handle_group_connector_starting",
+        lambda group_id: calls.append(("connector-start", group_id, group_id in orchestrator._group_in_progress)),
+    )
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event["status"])))
+    orchestrator._group_in_progress.clear()
+
+    orchestrator._handle_group_topics_creating("gid-1")
+
+    assert calls == [
+        ("topics", "gid-1"),
+        ("transition", "gid-1", "CONNECTOR_STARTING", "Создано 1 топиков"),
+        ("broadcast", "CONNECTOR_STARTING"),
+        ("connector-start", "gid-1", False),
     ]
 
 

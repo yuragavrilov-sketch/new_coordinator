@@ -127,6 +127,16 @@ def _kick_existing_new_cdc_for_running_group(group_id: str) -> bool:
     return True
 
 
+def _kick_group_lifecycle_best_effort(group_id: str) -> bool:
+    try:
+        from services import orchestrator
+
+        return bool(orchestrator.kick_connector_group_lifecycle(group_id))
+    except Exception as exc:
+        print(f"[connector_groups] connector lifecycle kick warning: {exc}")
+        return False
+
+
 @bp.get("/api/connector-groups")
 def list_groups():
     from services.connector_groups import list_groups as svc_list
@@ -345,6 +355,7 @@ def start_group(group_id: str):
         "group_id": group_id,
         "status": result["status"],
     })
+    _kick_group_lifecycle_best_effort(group_id)
     plan_starts = []
     plan_start_error = None
     cdc_queue_kicked = False

@@ -340,6 +340,11 @@ def test_start_group_starts_pending_cdc_batches_after_request_start(monkeypatch)
             {"batch": 2, "started": ["mid-1"]},
         ],
     )
+    monkeypatch.setattr(
+        connector_groups,
+        "_kick_group_lifecycle_best_effort",
+        lambda group_id: calls.append(("lifecycle", group_id)) or True,
+    )
     monkeypatch.setitem(
         connector_groups._state,
         "broadcast",
@@ -362,6 +367,7 @@ def test_start_group_starts_pending_cdc_batches_after_request_start(monkeypatch)
     assert calls == [
         ("request-start", "gid-1"),
         ("broadcast", "gid-1", "RUNNING"),
+        ("lifecycle", "gid-1"),
         ("start-pending", "gid-1"),
     ]
 
@@ -381,6 +387,11 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
         connector_groups,
         "_start_pending_cdc_plan_batches_for_group",
         lambda group_id: calls.append(("start-pending", group_id)) or [],
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_kick_group_lifecycle_best_effort",
+        lambda group_id: calls.append(("lifecycle", group_id)) or True,
     )
     monkeypatch.setattr(
         connector_groups_svc,
@@ -420,6 +431,7 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
     assert calls == [
         ("request-start", "gid-1"),
         ("broadcast", "gid-1", "RUNNING"),
+        ("lifecycle", "gid-1"),
         ("start-pending", "gid-1"),
         ("get-group", "gid-1"),
         ("has-new", "gid-1"),

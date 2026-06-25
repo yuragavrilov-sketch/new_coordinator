@@ -1818,6 +1818,24 @@ def _tick_groups() -> None:
             })
 
 
+def kick_connector_group_lifecycle(group_id: str) -> bool:
+    """Drive one connector group now instead of waiting for the next tick."""
+    group = connector_groups_svc.get_group(group_id)
+    if not group:
+        return False
+    status = group.get("status")
+    if status == "TOPICS_CREATING":
+        _handle_group_topics_creating(group_id)
+        return True
+    if status == "CONNECTOR_STARTING":
+        _handle_group_connector_starting(group_id)
+        return True
+    if status == "STOPPING":
+        _handle_group_stopping(group_id)
+        return True
+    return False
+
+
 def _handle_group_topics_creating(group_id: str) -> None:
     """Create Kafka topics, then move to CONNECTOR_STARTING."""
     with _group_in_progress_lock:
@@ -1826,6 +1844,7 @@ def _handle_group_topics_creating(group_id: str) -> None:
         _group_in_progress.add(group_id)
 
     def _run():
+        start_connector = False
         try:
             results = connector_groups_svc.do_create_topics(group_id)
             errors = [r for r in results if r.get("status") == "error"]
@@ -1847,6 +1866,7 @@ def _handle_group_topics_creating(group_id: str) -> None:
                 "type": "connector_group_status",
                 "group_id": group_id, "status": "CONNECTOR_STARTING",
             })
+            start_connector = True
         except Exception as exc:
             connector_groups_svc.transition_group(
                 group_id, "FAILED", str(exc))
@@ -1857,6 +1877,8 @@ def _handle_group_topics_creating(group_id: str) -> None:
         finally:
             with _group_in_progress_lock:
                 _group_in_progress.discard(group_id)
+            if start_connector:
+                _handle_group_connector_starting(group_id)
 
     threading.Thread(target=_run, daemon=True).start()
 
