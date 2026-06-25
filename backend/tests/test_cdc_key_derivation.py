@@ -516,6 +516,123 @@ def test_schema_migration_add_items_route_returns_created_item_states(monkeypatc
     assert ("close",) in calls
 
 
+def test_schema_migration_add_items_can_prune_cdc_pack_during_add(monkeypatch):
+    calls = []
+
+    class Cursor:
+        def __init__(self):
+            self.fetchone_results = [
+                ("sm-1", "TCBPAY->TCBPAY", "TCBPAY", "TCBPAY", 42, "gid-1", "gid-1"),
+                ("RUNNING", "topic.prefix", None),
+                (0,),
+                None,
+                None,
+                (7,),
+            ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchone(self):
+            return self.fetchone_results.pop(0)
+
+    class Conn:
+        def __init__(self):
+            self.cur = Cursor()
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def rollback(self):
+            calls.append(("rollback",))
+
+        def close(self):
+            calls.append(("close",))
+
+    class OracleConn:
+        def close(self):
+            calls.append(("oracle-close",))
+
+    monkeypatch.setitem(schema_migrations._state, "db_available", {"value": True})
+    monkeypatch.setitem(schema_migrations._state, "get_conn", lambda: Conn())
+    monkeypatch.setitem(schema_migrations._state, "broadcast", lambda event: calls.append(("broadcast", event["type"])))
+    monkeypatch.setattr(schema_migrations, "_source_oracle_conn", lambda: OracleConn())
+    monkeypatch.setattr(
+        schema_migrations,
+        "_prune_cdc_group_tables_tx",
+        lambda cur, group_id, keep_tables: calls.append(("prune", group_id, keep_tables)) or [{
+            "id": "old-1",
+            "source_schema": "TCBPAY",
+            "source_table": "OLDORDERS",
+            "target_schema": "TCBPAY",
+            "target_table": "OLDORDERS",
+        }],
+    )
+    monkeypatch.setattr(
+        oracle_browser,
+        "get_table_info",
+        lambda _conn, _schema, _table: {
+            "pk_columns": ["ID"],
+            "uk_constraints": [],
+            "columns": [{"name": "ID"}],
+            "supplemental_log_data_all": "YES",
+        },
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_autostart_created_cdc_items",
+        lambda group_id, status, plan_id, created: {
+            "connector_start": {"group_id": group_id, "status": "RUNNING"},
+            "connector_start_error": None,
+            "plan_start": {"batch": 1, "started": [created[0]["migration_id"]]},
+            "plan_starts": [{"batch": 1, "started": [created[0]["migration_id"]]}],
+            "plan_start_error": None,
+        },
+    )
+    monkeypatch.setattr(schema_migrations, "_load_created_plan_item_states", lambda _conn, created: [])
+    monkeypatch.setattr(
+        schema_migrations,
+        "_load_cdc_connector_summary",
+        lambda group_id: {"group_id": group_id, "tables": [{"source_table": "ALLORDERS"}], "table_include_list": "TCBPAY.ALLORDERS"},
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(schema_migrations.bp)
+
+    res = app.test_client().post(
+        "/api/schema-migrations/sm-1/plan/items",
+        json={
+            "strategy": "CDC_DIRECT",
+            "prune_cdc_pack": True,
+            "tables": [{"source_table": "ALLORDERS"}],
+        },
+    )
+
+    assert res.status_code == 201
+    body = res.get_json()
+    assert body["cdc_pruned_tables"] == [{
+        "id": "old-1",
+        "source_schema": "TCBPAY",
+        "source_table": "OLDORDERS",
+        "target_schema": "TCBPAY",
+        "target_table": "OLDORDERS",
+    }]
+    assert ("prune", "gid-1", {"TCBPAY.ALLORDERS"}) in calls
+    labels = [call[0] for call in calls]
+    assert labels.index("prune") < labels.index("commit")
+    assert ("rollback",) not in calls
+    assert ("oracle-close",) in calls
+
+
 def test_schema_migration_add_first_cdc_item_creates_group_plan_and_autostarts(monkeypatch):
     calls = []
     ids = iter(["gid-new", "mid-new", "gt-new"])
