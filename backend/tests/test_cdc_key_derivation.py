@@ -1472,12 +1472,21 @@ def test_connector_group_key_columns_include_unique_keys(monkeypatch):
                 "source_uk_exists": False,
                 "effective_key_columns_json": ["ID"],
             },
+            {
+                "source_schema": "TCBPAY",
+                "source_table": "MERCHANTS#ORDERS",
+                "source_pk_exists": False,
+                "source_uk_exists": False,
+                "effective_key_columns_json": ["MERCHANT_ID", "ORDER_ID"],
+            },
         ],
     )
 
     assert (
         connector_groups._build_key_columns("gid-1")
-        == "TCBPAY.ALLORDERS:ORDER_ID,MERCHANT_ID;TCBPAY.MANUAL_KEY_TABLE:ID"
+        == "TCBPAY.ALLORDERS:ORDER_ID,MERCHANT_ID;"
+        "TCBPAY.MANUAL_KEY_TABLE:ID;"
+        "TCBPAY.MERCHANTS#ORDERS:MERCHANT_ID,ORDER_ID"
     )
 
 
