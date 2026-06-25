@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from flask import Flask
+
 from routes import planner
 
 
@@ -188,3 +190,67 @@ def test_cdc_group_snapshot_uses_active_run_topic_names(monkeypatch):
     assert snapshot["active_connector_name"] == "base_connector_r123ab"
     assert snapshot["active_topic_prefix"] == "base.topic.r123ab"
     assert snapshot["tables"][0]["topic_name"] == "base.topic.r123ab.TCBPAY.ALLORDERS"
+
+
+def test_get_plan_includes_cdc_worker_state(monkeypatch):
+    executed: list[str] = []
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, *_args):
+            executed.append(sql)
+
+        def fetchone(self):
+            return {
+                "plan_id": 42,
+                "name": "TCBPAY",
+                "connector_group_id": "gid-1",
+                "status": "RUNNING",
+            }
+
+        def fetchall(self):
+            return [{
+                "item_id": 1,
+                "plan_id": 42,
+                "table_name": "ALLORDERS",
+                "mode": "CDC",
+                "batch_order": 1,
+                "sort_order": 0,
+                "migration_id": "mid-1",
+                "status": "RUNNING",
+                "phase": "CDC_APPLYING",
+                "cdc_total_lag": 7,
+                "cdc_rows_applied": 123,
+                "cdc_worker_heartbeat": "2026-06-25T00:00:00Z",
+            }]
+
+    class ConnStub:
+        def __init__(self):
+            self.cursor_stub = CursorStub()
+
+        def cursor(self):
+            return self.cursor_stub
+
+        def close(self):
+            pass
+
+    app = Flask(__name__)
+    app.register_blueprint(planner.bp)
+
+    monkeypatch.setitem(planner._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(planner._state, "row_to_dict", lambda _cur, row: dict(row))
+    monkeypatch.setattr(planner, "_load_cdc_group_snapshot", lambda _cur, group_id: {"group_id": group_id})
+
+    response = app.test_client().get("/api/planner/plans/42")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["items"][0]["cdc_total_lag"] == 7
+    assert payload["items"][0]["cdc_rows_applied"] == 123
+    assert payload["items"][0]["cdc_worker_heartbeat"] == "2026-06-25T00:00:00Z"
+    assert any("LEFT JOIN migration_cdc_state cs" in sql for sql in executed)
