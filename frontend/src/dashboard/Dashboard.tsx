@@ -69,8 +69,21 @@ function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number, con
     && String(item.phase || "").toUpperCase() === "NEW"
     && item.queue_position != null
   ).length;
+  const waitingWorker = states.filter(item => {
+    const phase = String(item.phase || "").toUpperCase();
+    return (
+      (phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING")
+      && !item.cdc_worker_heartbeat
+    );
+  }).length;
   const active = states.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
+    if (
+      (phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING")
+      && !item.cdc_worker_heartbeat
+    ) {
+      return false;
+    }
     return CDC_STARTED_PHASES.has(phase);
   }).length;
   const pending = states.filter(item =>
@@ -86,6 +99,7 @@ function cdcItemStateNote(response: AddPlanItemsResp, fallbackCount: number, con
   if (waitingConnector) parts.push(`ждут коннектор: ${waitingConnector}`);
   if (ready) parts.push(`стартуют: ${ready}`);
   if (queued) parts.push(`в очереди: ${queued}`);
+  if (waitingWorker) parts.push(`ждут worker: ${waitingWorker}`);
   if (pending) parts.push(`ожидают: ${pending}`);
   if (failed) parts.push(`ошибки: ${failed}`);
   return parts.length

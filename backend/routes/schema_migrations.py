@@ -26,6 +26,16 @@ bp = Blueprint("schema_migrations", __name__)
 _state: dict = {}
 
 
+def _utc_iso_z(value):
+    if not value:
+        return None
+    if getattr(value, "tzinfo", None) is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    if hasattr(value, "isoformat"):
+        return value.isoformat() + "Z"
+    return value
+
+
 def init(*, get_conn_fn, db_available_ref, broadcast_fn, load_configs_fn=None):
     _state["get_conn"]     = get_conn_fn
     _state["db_available"] = db_available_ref
@@ -385,9 +395,11 @@ def _load_created_plan_item_states(conn, created: list[dict]) -> list[dict]:
                    i.status,
                    m.phase,
                    m.queue_position,
-                   m.error_text
+                   m.error_text,
+                   cs.worker_heartbeat AS cdc_worker_heartbeat
             FROM   migration_plan_items i
             LEFT JOIN migrations m ON m.migration_id = i.migration_id
+            LEFT JOIN migration_cdc_state cs ON cs.migration_id = m.migration_id
             WHERE  i.migration_id = ANY(%s::uuid[])
         """, (migration_ids,))
         cols = [desc[0] for desc in cur.description]
@@ -395,6 +407,8 @@ def _load_created_plan_item_states(conn, created: list[dict]) -> list[dict]:
             str(row_dict["migration_id"]): row_dict
             for row_dict in (dict(zip(cols, row)) for row in cur.fetchall())
         }
+    for row in rows.values():
+        row["cdc_worker_heartbeat"] = _utc_iso_z(row.get("cdc_worker_heartbeat"))
     states = []
     for item in created:
         migration_id = str(item.get("migration_id"))
@@ -407,6 +421,7 @@ def _load_created_plan_item_states(conn, created: list[dict]) -> list[dict]:
             "phase": None,
             "queue_position": None,
             "error_text": None,
+            "cdc_worker_heartbeat": None,
         }))
     return states
 

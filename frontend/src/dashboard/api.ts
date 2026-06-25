@@ -275,6 +275,7 @@ export interface AddPlanItemsResp {
     phase: string | null;
     queue_position?: number | null;
     error_text?: string | null;
+    cdc_worker_heartbeat?: string | null;
   }>;
   connector_group_id?: string | null;
   cdc_group?: MigrationPlanCdcGroup | null;

@@ -692,9 +692,14 @@ function CdcConnectorCard({
       "INDEXES_ENABLING",
     ].includes(phase);
   }).length;
+  const waitingWorkerCdc = planItems.filter(item => {
+    const phase = String(item.phase || "").toUpperCase();
+    return (phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING") && !item.cdc_worker_heartbeat;
+  }).length;
   const applyingCdc = planItems.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
-    return phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING" || phase === "CDC_CATCHING_UP";
+    if (phase === "CDC_CATCHING_UP") return true;
+    return (phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING") && !!item.cdc_worker_heartbeat;
   }).length;
   const hasRawConfig = Boolean(
     group.table_include_list
@@ -765,6 +770,7 @@ function CdcConnectorCard({
         <span>Стартуют: <strong style={{ color: readyCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{readyCdc}</strong></span>
         <span>В очереди: <strong style={{ color: queuedCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{queuedCdc}</strong></span>
         <span>Переносятся: <strong style={{ color: loadingCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{loadingCdc}</strong></span>
+        <span>Ждут worker: <strong style={{ color: waitingWorkerCdc ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{waitingWorkerCdc}</strong></span>
         <span>Применяются: <strong style={{ color: applyingCdc ? t.green.fg : t.text.primary, fontFamily: t.font.mono }}>{applyingCdc}</strong></span>
         <span>Ручных ключей: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
       </div>
@@ -1255,6 +1261,9 @@ function itemProgressText(item: MigrationPlanItem, progress: number | undefined,
     return `очередь #${item.queue_position}`;
   }
   if (isCdcItem(item) && ["CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"].includes(phase)) {
+    if ((phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING") && !item.cdc_worker_heartbeat) {
+      return "ждет CDC worker";
+    }
     const rows = item.cdc_rows_applied ?? null;
     const lag = item.cdc_total_lag ?? null;
     if (rows !== null || lag !== null) {
@@ -1276,6 +1285,13 @@ function itemStatusLabel(item: MigrationPlanItem, cdcGroupStatus?: string) {
     if (groupStatus && groupStatus !== "RUNNING") return `ЖДЕТ ${groupStatus}`;
     if (item.queue_position != null) return "В ОЧЕРЕДИ";
     return "СТАРТУЕТ";
+  }
+  if (
+    isCdcItem(item)
+    && (phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING")
+    && !item.cdc_worker_heartbeat
+  ) {
+    return "ЖДЕТ WORKER";
   }
   return item.phase || item.status;
 }

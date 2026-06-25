@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 from flask import Flask
@@ -1056,6 +1057,7 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
             ("phase",),
             ("queue_position",),
             ("error_text",),
+            ("cdc_worker_heartbeat",),
         ]
 
         def __init__(self):
@@ -1072,8 +1074,8 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
 
         def fetchall(self):
             return [
-                (8, "PAYMENTS", "mid-2", 4, "PENDING", "DRAFT", None, None),
-                (7, "ALLORDERS", "mid-1", 3, "RUNNING", "NEW", None, None),
+                (8, "PAYMENTS", "mid-2", 4, "PENDING", "DRAFT", None, None, None),
+                (7, "ALLORDERS", "mid-1", 3, "RUNNING", "NEW", None, None, datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc)),
             ]
 
     class Conn:
@@ -1101,6 +1103,7 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
             "phase": "NEW",
             "queue_position": None,
             "error_text": None,
+            "cdc_worker_heartbeat": "2026-06-25T00:00:00Z",
         },
         {
             "item_id": 9,
@@ -1111,6 +1114,7 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
             "phase": None,
             "queue_position": None,
             "error_text": None,
+            "cdc_worker_heartbeat": None,
         },
         {
             "item_id": 8,
@@ -1121,6 +1125,7 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
             "phase": "DRAFT",
             "queue_position": None,
             "error_text": None,
+            "cdc_worker_heartbeat": None,
         },
     ]
 
