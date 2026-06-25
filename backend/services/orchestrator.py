@@ -1282,11 +1282,14 @@ def _handle_cdc_catching_up(mid: str, m: dict) -> None:
 
 
 def _handle_cdc_caught_up(mid: str, m: dict) -> None:
-    if _current_phase(mid) != "CDC_CAUGHT_UP":
-        return
-    _transition(mid, "STEADY_STATE",
-                message="Миграция догнала источник")
-    _ensure_trigger_job(mid)
+    transitioned = _safe_transition(
+        mid,
+        "CDC_CAUGHT_UP",
+        "STEADY_STATE",
+        message="Миграция догнала источник",
+    )
+    if transitioned:
+        _ensure_trigger_job(mid)
 
 
 def _handle_steady_state(mid: str, m: dict) -> None:
