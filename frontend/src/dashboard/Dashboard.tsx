@@ -325,6 +325,11 @@ export function Dashboard({
                 autoStartOk = false;
                 startNote = " · автозапуск не выполнен";
                 setPlanErr(response.plan_start_error);
+              } else if (response.plan_starts?.length) {
+                const startedCount = response.plan_starts.reduce((sum, item) => sum + item.started.length, 0);
+                startNote = startedCount
+                  ? ` · в очереди позиций: ${response.plan_starts.length}`
+                  : " · запуск уже обработан";
               } else if (response.plan_start) {
                 startNote = response.plan_start.started.length
                   ? ` · старт позиции ${response.plan_start.batch}`

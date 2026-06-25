@@ -554,6 +554,7 @@ def add_plan_items(sm_id: str):
         connector_start = None
         connector_start_error = None
         plan_start = None
+        plan_starts: list[dict] = []
         plan_start_error = None
         if strategy.has_cdc:
             try:
@@ -567,13 +568,15 @@ def add_plan_items(sm_id: str):
                 })
                 try:
                     from routes.planner import _start_next_plan_batch
-                    first_created_batch = min(item["batch_order"] for item in created)
-                    plan_start = _start_next_plan_batch(
-                        plan_id,
-                        actor="SYSTEM",
-                        batch_order=first_created_batch,
-                        allow_cdc_queue_when_blocked=True,
-                    )
+                    for batch_order in sorted({item["batch_order"] for item in created}):
+                        started_batch = _start_next_plan_batch(
+                            plan_id,
+                            actor="SYSTEM",
+                            batch_order=batch_order,
+                            allow_cdc_queue_when_blocked=True,
+                        )
+                        plan_starts.append(started_batch)
+                    plan_start = plan_starts[0] if plan_starts else None
                 except Exception as start_exc:
                     plan_start_error = str(start_exc)
                     print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
@@ -593,6 +596,7 @@ def add_plan_items(sm_id: str):
             "connector_start": connector_start,
             "connector_start_error": connector_start_error,
             "plan_start": plan_start,
+            "plan_starts": plan_starts,
             "plan_start_error": plan_start_error,
         }), 201
     except ValueError as exc:
