@@ -46,6 +46,16 @@ def _legacy_cdc_membership_error() -> dict:
     }
 
 
+def _legacy_cdc_group_create_error() -> dict:
+    return {
+        "error": (
+            "Direct connector-group creation is disabled. "
+            "Add the first CDC table through the schema migration screen so the "
+            "single CDC connector pack is created, queued and autostarted."
+        )
+    }
+
+
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
 def _pending_cdc_plan_batches_for_group(group_id: str) -> list[tuple[int, int]]:
@@ -114,19 +124,7 @@ def create_group():
     missing = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"error": f"Отсутствуют поля: {', '.join(missing)}"}), 400
-
-    from services.connector_groups import create_group as svc_create
-    try:
-        group = svc_create(
-            group_name=body["group_name"],
-            source_connection_id=body.get("source_connection_id", "oracle_source"),
-            connector_name=body["connector_name"],
-            topic_prefix=body["topic_prefix"],
-            consumer_group_prefix=body.get("consumer_group_prefix", body["topic_prefix"]),
-        )
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(group), 201
+    return jsonify(_legacy_cdc_group_create_error()), 400
 
 
 @bp.post("/api/connector-groups/wizard")
