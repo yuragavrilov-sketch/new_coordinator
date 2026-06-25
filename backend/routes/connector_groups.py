@@ -237,7 +237,7 @@ def add_group_tables(group_id: str):
     if body.get("create_migrations"):
         try:
             strategy = Strategy.parse(body.get("strategy") or "CDC_STAGE")
-            new_ids = [r["id"] for r in rows] if rows else None
+            new_ids = [r["id"] for r in rows]
             migrations_created = create_migrations_for_group_tables(
                 group_id, table_ids=new_ids,
                 strategy=strategy,
@@ -252,11 +252,12 @@ def add_group_tables(group_id: str):
         except Exception as exc:
             migrations_error = str(exc)
 
+    status_code = 207 if migrations_error else 201
     return jsonify({
         "tables":           rows,
         "migrations":       migrations_created,
         "migrations_error": migrations_error,
-    }), 201
+    }), status_code
 
 
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
