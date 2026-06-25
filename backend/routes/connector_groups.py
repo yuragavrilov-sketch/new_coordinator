@@ -350,6 +350,7 @@ def start_group(group_id: str):
     cdc_queue_kicked = False
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+        cdc_queue_kicked = bool(plan_starts)
         if not plan_starts and str(result.get("status") or "").upper() == "RUNNING":
             cdc_queue_kicked = _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
@@ -406,6 +407,7 @@ def refresh_tables(group_id: str):
     cdc_queue_kicked = False
     try:
         plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+        cdc_queue_kicked = bool(plan_starts)
         if not plan_starts:
             cdc_queue_kicked = _kick_existing_new_cdc_for_running_group(group_id)
     except Exception as exc:
