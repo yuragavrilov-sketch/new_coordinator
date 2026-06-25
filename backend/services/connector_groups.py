@@ -378,6 +378,67 @@ def remove_table(group_id: str, source_schema: str, source_table: str) -> None:
         conn.close()
 
 
+def prune_tables(group_id: str, keep_tables: list[dict]) -> list[dict]:
+    """Remove group tables that are not present in keep_tables.
+
+    Active CDC migrations are protected the same way as remove_table().
+    The caller is expected to refresh Debezium config after this transaction.
+    """
+    keep_keys = set()
+    for item in keep_tables:
+        source_schema = str(item.get("source_schema") or "").strip()
+        source_table = str(item.get("source_table") or "").strip()
+        if not source_schema or not source_table:
+            raise ValueError("Each keep table must include source_schema and source_table")
+        keep_keys.add((source_schema.upper(), source_table.upper()))
+
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT *
+                FROM   group_tables
+                WHERE  group_id = %s
+                ORDER BY source_schema, source_table
+            """, (group_id,))
+            rows = [_r2d(cur, row) for row in cur.fetchall()]
+            to_remove = [
+                row for row in rows
+                if (str(row["source_schema"]).upper(), str(row["source_table"]).upper()) not in keep_keys
+            ]
+
+            for row in to_remove:
+                active = _active_migration_for_group_table(
+                    cur,
+                    group_id,
+                    row["source_schema"],
+                    row["source_table"],
+                )
+                if active:
+                    raise ValueError(
+                        f"Cannot remove {row['source_schema']}.{row['source_table']} from CDC connector: "
+                        f"active migration {active[0]} is in phase {active[1]}"
+                    )
+
+            for row in to_remove:
+                cur.execute("""
+                    DELETE FROM group_tables
+                    WHERE group_id = %s
+                      AND UPPER(source_schema) = UPPER(%s)
+                      AND UPPER(source_table) = UPPER(%s)
+                """, (group_id, row["source_schema"], row["source_table"]))
+        conn.commit()
+        return to_remove
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Legacy: group members via migrations (for backward compat)
 # ---------------------------------------------------------------------------

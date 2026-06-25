@@ -82,6 +82,80 @@ def test_remove_group_table_returns_warning_when_sync_fails_after_delete(monkeyp
     ]
 
 
+def test_prune_group_tables_syncs_debezium_once(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "prune_tables",
+        lambda group_id, keep_tables: calls.append(("prune", group_id, keep_tables)) or [
+            {"source_schema": "TCBPAY", "source_table": "OLDORDERS"},
+        ],
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post(
+        "/api/connector-groups/gid-1/tables/prune",
+        json={"keep_tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "removed": [{"source_schema": "TCBPAY", "source_table": "OLDORDERS"}],
+        "removed_count": 1,
+        "synced": True,
+    }
+    assert calls == [
+        ("prune", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
+        ("refresh", "gid-1"),
+    ]
+
+
+def test_prune_group_tables_returns_warning_when_sync_fails(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "prune_tables",
+        lambda group_id, keep_tables: calls.append(("prune", group_id, keep_tables)) or [
+            {"source_schema": "TCBPAY", "source_table": "OLDORDERS"},
+        ],
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)) or (
+            (_ for _ in ()).throw(RuntimeError("connect unavailable"))
+        ),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post(
+        "/api/connector-groups/gid-1/tables/prune",
+        json={"keep_tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "removed": [{"source_schema": "TCBPAY", "source_table": "OLDORDERS"}],
+        "removed_count": 1,
+        "sync_error": "CDC connector config sync failed: connect unavailable",
+    }
+    assert calls == [
+        ("prune", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
+        ("refresh", "gid-1"),
+    ]
+
+
 def test_add_group_tables_rejects_direct_membership_edits(monkeypatch):
     calls = []
 

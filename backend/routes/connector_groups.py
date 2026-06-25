@@ -208,6 +208,33 @@ def add_group_tables(group_id: str):
     return jsonify(_legacy_cdc_membership_error()), 400
 
 
+@bp.post("/api/connector-groups/<group_id>/tables/prune")
+def prune_group_tables(group_id: str):
+    body = request.get_json(force=True)
+    keep_tables = body.get("keep_tables", [])
+    if not isinstance(keep_tables, list) or not keep_tables:
+        return jsonify({"error": "keep_tables must contain at least one table"}), 400
+
+    from services.connector_groups import prune_tables, refresh_connector_tables
+    try:
+        removed = prune_tables(group_id, keep_tables)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        refresh_connector_tables(group_id)
+    except Exception as exc:
+        return jsonify({
+            "removed": removed,
+            "removed_count": len(removed),
+            "sync_error": f"CDC connector config sync failed: {exc}",
+        }), 200
+    return jsonify({
+        "removed": removed,
+        "removed_count": len(removed),
+        "synced": True,
+    })
+
+
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
 def remove_group_table(group_id: str, source_schema: str, source_table: str):
     from services.connector_groups import remove_table, refresh_connector_tables

@@ -105,11 +105,11 @@ export function AddToPlanModal({
     return raw === "YES" || raw === "TRUE" || raw === "1";
   }
 
-  function cdcTableKey(x: MigrationPlanCdcTable) {
+  function cdcTableKey(x: { source_schema: string; source_table: string }) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
   }
 
-  function cdcTableLabel(x: MigrationPlanCdcTable) {
+  function cdcTableLabel(x: { source_schema: string; source_table: string }) {
     return cdcTableKey(x);
   }
 
@@ -245,40 +245,33 @@ export function AddToPlanModal({
     )) return;
     setCdcRemoveBusy("__bulk__");
     setErr("");
-    const removed: string[] = [];
-    const failed: string[] = [];
-    const syncErrors: string[] = [];
     try {
-      for (const table of connectorOtherTables) {
-        const label = cdcTableLabel(table);
-        try {
-          const res = await fetch(
-            `/api/connector-groups/${cdcGroup.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
-            { method: "DELETE" },
-          );
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${res.status}`);
-          }
-          const body = await res.json().catch(() => ({}));
-          removed.push(label);
-          if (body.sync_error) syncErrors.push(`${label}: ${body.sync_error}`);
-        } catch (e) {
-          failed.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
-        }
+      const res = await fetch(`/api/connector-groups/${cdcGroup.group_id}/tables/prune`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keep_tables: tables.map(table => ({
+            source_schema: table.source_schema,
+            source_table: table.source_table,
+          })),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(body.error || `HTTP ${res.status}`);
       }
-      if (removed.length > 0) {
+      const removedTables = Array.isArray(body.removed) ? body.removed : connectorOtherTables;
+      const removedLabels = removedTables.map(cdcTableLabel);
+      if (removedLabels.length > 0) {
         setHiddenCdcTableKeys(prev => {
           const next = new Set(prev);
-          for (const label of removed) next.add(label);
+          for (const label of removedLabels) next.add(label);
           return next;
         });
       }
       await onReloadCdcGroup?.();
-      if (failed.length > 0) {
-        setErr(`Не все таблицы удалось убрать из CDC-пачки: ${failed.join("; ")}`);
-      } else if (syncErrors.length > 0) {
-        setErr(`Таблицы убраны из пачки, но Debezium не синхронизирован: ${syncErrors.join("; ")}`);
+      if (body.sync_error) {
+        setErr(`Таблицы убраны из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
       }
     } finally {
       setCdcRemoveBusy("");
