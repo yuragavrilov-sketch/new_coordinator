@@ -43,6 +43,7 @@ export function Dashboard({
   onPlanChanged,
   onOpenPlan,
   showEmptyState,
+  sseEvents,
 }: Props) {
   const [typeFilter,   setTypeFilter]   = useState<ObjectType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -83,6 +84,37 @@ export function Dashboard({
   useEffect(() => {
     setActivePlanId(planId ?? schema?.planId ?? null);
   }, [schema?.id, schema?.planId, planId]);
+
+  useEffect(() => {
+    const event = sseEvents[0];
+    if (!event) return;
+
+    if (event.type === "schema_migration.plan_items_added" && event.id === selectedId) {
+      setActivePlanId(event.plan_id);
+      objectsApi.reload();
+      eventsApi.reload();
+      planApi.reload();
+      return;
+    }
+
+    if (event.type === "connector_group_status" && activePlanId) {
+      planApi.reload();
+      return;
+    }
+
+    if (event.type === "migration_phase" && activePlanId) {
+      objectsApi.reload();
+      eventsApi.reload();
+      planApi.reload();
+    }
+  }, [
+    sseEvents,
+    selectedId,
+    activePlanId,
+    objectsApi.reload,
+    eventsApi.reload,
+    planApi.reload,
+  ]);
 
   // Filtered + sorted
   const filtered = useMemo(() => {

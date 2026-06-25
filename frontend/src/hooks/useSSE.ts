@@ -39,6 +39,21 @@ export interface ConnectorStatusEvent {
   ts: string;
 }
 
+export interface ConnectorGroupStatusEvent {
+  type: "connector_group_status";
+  group_id: string;
+  status: string;
+  ts?: string;
+}
+
+export interface SchemaPlanItemsAddedEvent {
+  type: "schema_migration.plan_items_added";
+  id: string;
+  plan_id: number;
+  count: number;
+  ts?: string;
+}
+
 export interface KafkaLagEvent {
   type: "kafka_lag";
   migration_id: string;
@@ -82,6 +97,8 @@ export type SSEEvent =
   | MigrationPhaseEvent
   | ChunkProgressEvent
   | ConnectorStatusEvent
+  | ConnectorGroupStatusEvent
+  | SchemaPlanItemsAddedEvent
   | KafkaLagEvent
   | BaselineProgressEvent
   | DdlSnapshotProgressEvent
@@ -132,6 +149,8 @@ export function useSSE({ url, maxEvents = 200 }: UseSSEOptions) {
           parsed.type === "migration_phase"  ||
           parsed.type === "chunk_progress"   ||
           parsed.type === "connector_status" ||
+          parsed.type === "connector_group_status" ||
+          parsed.type === "schema_migration.plan_items_added" ||
           parsed.type === "kafka_lag"        ||
           parsed.type === "baseline_progress"
         ) {
