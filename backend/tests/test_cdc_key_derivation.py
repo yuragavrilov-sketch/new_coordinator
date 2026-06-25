@@ -885,6 +885,51 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     ]
 
 
+def test_orchestrator_kicks_first_new_cdc_migration_for_running_group(monkeypatch):
+    calls = []
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params):
+            calls.append(("query", params))
+
+        def fetchall(self):
+            return [{
+                "migration_id": "mid-1",
+                "group_id": "gid-1",
+                "phase": "NEW",
+                "strategy": "CDC_DIRECT",
+            }]
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setattr(orchestrator, "row_to_dict", lambda _cur, row: dict(row))
+    monkeypatch.setattr(
+        orchestrator,
+        "_handle_new",
+        lambda migration_id, migration: calls.append(("handle", migration_id, migration["group_id"])),
+    )
+
+    orchestrator._kick_new_migrations_for_group("gid-1")
+
+    assert calls == [
+        ("query", ("gid-1",)),
+        ("close",),
+        ("handle", "mid-1", "gid-1"),
+    ]
+
+
 def test_orchestrator_marks_group_failed_when_connector_start_fails(monkeypatch):
     calls = []
 
