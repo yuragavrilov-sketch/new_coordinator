@@ -207,6 +207,31 @@ export interface MigrationPlanCdcGroup {
   tables:                 MigrationPlanCdcTable[];
 }
 
+export interface WorkerStatusWorker {
+  worker_id: string;
+  role: string;
+  capabilities: string[];
+  started_at: string | null;
+  last_heartbeat: string | null;
+  active: boolean;
+}
+
+export interface WorkerStatus {
+  workers: WorkerStatusWorker[];
+  active_count: number;
+  cdc_ready: boolean;
+  stale_after_seconds: number;
+}
+
+export async function getWorkerStatus(): Promise<WorkerStatus> {
+  const r = await fetch("/api/workers/status");
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
 export interface MigrationPlanCdcPrunedTable {
   id?:            string;
   source_schema: string;

@@ -209,6 +209,16 @@ schema_mig_mod.init(
 )
 app.register_blueprint(schema_mig_bp)
 
+# ── Worker liveness ──────────────────────────────────────────────────────────
+import routes.workers as workers_mod
+from routes.workers import bp as workers_bp
+
+workers_mod.init(
+    get_conn_fn=get_conn,
+    db_available_ref=_db_available,
+)
+app.register_blueprint(workers_bp)
+
 # ── Status poller ─────────────────────────────────────────────────────────────
 from services.status_poller import start_poller
 

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { t } from "../theme";
 import type { SSEEvent } from "../hooks/useSSE";
+import { useApi } from "../hooks/useApi";
 import { ProgressBar } from "../components/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import type {
@@ -9,6 +10,7 @@ import type {
   MigrationPlanDetail,
   MigrationPlanItem,
   StartMigrationPlanResp,
+  WorkerStatus,
 } from "./api";
 
 interface Props {
@@ -105,6 +107,10 @@ export function PlanPanel({
   const [cdcSyncStatus, setCdcSyncStatus] = React.useState<DebeziumSyncStatus | null>(null);
   const [cdcSyncStatusErr, setCdcSyncStatusErr] = React.useState("");
   const [cdcSyncStatusLoading, setCdcSyncStatusLoading] = React.useState(false);
+  const workerStatusApi = useApi<WorkerStatus>(
+    effectiveCdcGroup ? "/api/workers/status" : null,
+    { intervalMs: 10000, enabled: !!effectiveCdcGroup },
+  );
   const cdcSyncFingerprint = [
     effectiveCdcGroup?.group_id || "",
     effectiveCdcGroup?.status || "",
@@ -272,6 +278,9 @@ export function PlanPanel({
               syncStatus={cdcSyncStatus}
               syncStatusLoading={cdcSyncStatusLoading}
               syncStatusErr={cdcSyncStatusErr}
+              workerStatus={workerStatusApi.data}
+              workerStatusLoading={workerStatusApi.loading}
+              workerStatusErr={workerStatusApi.error || ""}
               onSync={syncCdcGroup}
               onStart={startCdcGroup}
               showExtraTables={false}
@@ -416,6 +425,9 @@ export function PlanPanel({
           cdcSyncStatus={cdcSyncStatus}
           cdcSyncStatusLoading={cdcSyncStatusLoading}
           cdcSyncStatusErr={cdcSyncStatusErr}
+          workerStatus={workerStatusApi.data}
+          workerStatusLoading={workerStatusApi.loading}
+          workerStatusErr={workerStatusApi.error || ""}
           onSyncCdcGroup={syncCdcGroup}
           onStartCdcGroup={startCdcGroup}
           canStart={canStart}
@@ -475,6 +487,9 @@ export function PlanPanel({
                     syncStatus={cdcSyncStatus}
                     syncStatusLoading={cdcSyncStatusLoading}
                     syncStatusErr={cdcSyncStatusErr}
+                    workerStatus={workerStatusApi.data}
+                    workerStatusLoading={workerStatusApi.loading}
+                    workerStatusErr={workerStatusApi.error || ""}
                     onSync={syncCdcGroup}
                     onStart={startCdcGroup}
                   />
@@ -531,6 +546,9 @@ function PlanOverview({
   cdcSyncStatus,
   cdcSyncStatusLoading,
   cdcSyncStatusErr,
+  workerStatus,
+  workerStatusLoading,
+  workerStatusErr,
   onSyncCdcGroup,
   onStartCdcGroup,
   canStart,
@@ -549,6 +567,9 @@ function PlanOverview({
   cdcSyncStatus: DebeziumSyncStatus | null;
   cdcSyncStatusLoading: boolean;
   cdcSyncStatusErr: string;
+  workerStatus: WorkerStatus | null;
+  workerStatusLoading: boolean;
+  workerStatusErr: string;
   onSyncCdcGroup: (group: MigrationPlanCdcGroup) => void;
   onStartCdcGroup: (group: MigrationPlanCdcGroup) => void;
   canStart: boolean;
@@ -586,6 +607,9 @@ function PlanOverview({
           syncStatus={cdcSyncStatus}
           syncStatusLoading={cdcSyncStatusLoading}
           syncStatusErr={cdcSyncStatusErr}
+          workerStatus={workerStatus}
+          workerStatusLoading={workerStatusLoading}
+          workerStatusErr={workerStatusErr}
           onSync={onSyncCdcGroup}
           onStart={onStartCdcGroup}
         />
@@ -638,6 +662,9 @@ function CdcConnectorCard({
   syncStatus,
   syncStatusLoading,
   syncStatusErr,
+  workerStatus,
+  workerStatusLoading,
+  workerStatusErr,
   onSync,
   onStart,
   showExtraTables = true,
@@ -649,6 +676,9 @@ function CdcConnectorCard({
   syncStatus: DebeziumSyncStatus | null;
   syncStatusLoading: boolean;
   syncStatusErr: string;
+  workerStatus: WorkerStatus | null;
+  workerStatusLoading: boolean;
+  workerStatusErr: string;
   onSync: (group: MigrationPlanCdcGroup) => void;
   onStart: (group: MigrationPlanCdcGroup) => void;
   showExtraTables?: boolean;
@@ -714,6 +744,8 @@ function CdcConnectorCard({
     syncStatusErr
     || (syncStatus && (!syncStatus.exists || !syncStatus.in_sync)),
   );
+  const activeWorkers = workerStatus?.active_count ?? 0;
+  const cdcWorkerReady = workerStatus?.cdc_ready === true;
 
   return (
     <div style={{
@@ -772,8 +804,25 @@ function CdcConnectorCard({
         <span>Переносятся: <strong style={{ color: loadingCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{loadingCdc}</strong></span>
         <span>Ждут worker: <strong style={{ color: waitingWorkerCdc ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{waitingWorkerCdc}</strong></span>
         <span>Применяются: <strong style={{ color: applyingCdc ? t.green.fg : t.text.primary, fontFamily: t.font.mono }}>{applyingCdc}</strong></span>
+        <span>Worker: <strong style={{ color: cdcWorkerReady ? t.green.fg : t.amber.fg, fontFamily: t.font.mono }}>{workerStatusLoading ? "..." : workerStatusErr ? "?" : cdcWorkerReady ? `${activeWorkers} online` : "offline"}</strong></span>
         <span>Ручных ключей: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
       </div>
+      {(workerStatusErr || (!workerStatusLoading && workerStatus && !cdcWorkerReady)) && (
+        <div style={{
+          marginTop: 7,
+          padding: "6px 8px",
+          borderRadius: t.radius.sm,
+          border: `1px solid ${t.amber.dim}`,
+          background: t.amber.bg,
+          color: t.amber.fg,
+          fontSize: 12,
+          lineHeight: 1.4,
+        }}>
+          {workerStatusErr
+            ? `Статус worker не прочитан: ${workerStatusErr}`
+            : "CDC worker не активен. Таблицы можно добавить в пачку, но apply начнется после запуска universal worker.py."}
+        </div>
+      )}
       <div style={{ marginTop: 7, fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
         {connectorPreview.length > 0 ? (
           <>

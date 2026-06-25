@@ -16,6 +16,7 @@ Environment variables (see .env.example):
     CDC_CHECKIN_SEC    Seconds between checkins (default: 30)
     CDC_POLL_MS        Kafka poll timeout ms    (default: 1000)
     CDC_SCAN_INTERVAL  Seconds between CDC scans (default: 3)
+    WORKER_HEARTBEAT_SEC Seconds between worker liveness writes (default: 10)
 """
 
 import json
@@ -70,6 +71,7 @@ CDC_POLL_MS        = int(os.environ.get("CDC_POLL_MS",        1_000))
 CDC_POLL_ERROR_THRESHOLD = max(1, int(os.environ.get("CDC_POLL_ERROR_THRESHOLD", 3)))
 CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  3))
 CMP_POLL_INTERVAL  = int(os.environ.get("CMP_POLL_INTERVAL",  5))
+WORKER_HEARTBEAT_SEC = int(os.environ.get("WORKER_HEARTBEAT_SEC", 10))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -713,6 +715,27 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
 # CDC MANAGER — background thread that claims CDC migrations
 # ══════════════════════════════════════════════════════════════════════════════
 
+def worker_heartbeat_loop(stop_event: threading.Event) -> None:
+    capabilities = ["bulk", "baseline", "cdc", "compare", "ddl"]
+    pg = db.get_pg_conn_with_retry()
+    try:
+        while not stop_event.is_set():
+            try:
+                db.worker_heartbeat(pg, role="universal", capabilities=capabilities)
+            except Exception as exc:
+                print(f"[worker] heartbeat error: {exc}")
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+                pg = db.get_pg_conn_with_retry()
+            stop_event.wait(WORKER_HEARTBEAT_SEC)
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
+
 def cdc_manager(stop_event: threading.Event) -> None:
     """
     Periodically scans for CDC migrations needing a worker and starts
@@ -988,6 +1011,12 @@ def main() -> None:
     )
     mgr.start()
 
+    hb = threading.Thread(
+        target=worker_heartbeat_loop, args=(main_stop,),
+        name="worker-heartbeat", daemon=True,
+    )
+    hb.start()
+
     cmp = threading.Thread(
         target=compare_loop, args=(main_stop,),
         name="compare-loop", daemon=True,
@@ -1006,6 +1035,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("[worker] shutting down…")
         main_stop.set()
+        hb.join(timeout=5)
         mgr.join(timeout=15)
         cmp.join(timeout=10)
         ddl.join(timeout=10)

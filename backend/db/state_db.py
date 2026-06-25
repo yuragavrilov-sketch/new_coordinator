@@ -417,6 +417,21 @@ def _init_schema_legacy() -> None:
             )
             print("[state_db]   column ok: migration_cdc_state.rows_applied")
 
+            # ── worker_heartbeats ────────────────────────────────────────
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS worker_heartbeats (
+                    worker_id       VARCHAR(200) PRIMARY KEY,
+                    role            VARCHAR(64) NOT NULL DEFAULT 'universal',
+                    capabilities    JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_worker_heartbeats_last
+                    ON worker_heartbeats(last_heartbeat DESC)
+            """)
+
             # ── checklist tables ────────────────────────────────────────
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS checklist_lists (

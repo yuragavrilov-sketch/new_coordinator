@@ -478,6 +478,22 @@ def cdc_heartbeat(conn, migration_id: str) -> None:
     conn.commit()
 
 
+def worker_heartbeat(conn, role: str = "universal", capabilities: Optional[list[str]] = None) -> None:
+    """Publish process-level worker liveness for coordinator/UI diagnostics."""
+    caps_json = json.dumps(capabilities or [])
+    with conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO worker_heartbeats
+                (worker_id, role, capabilities, started_at, last_heartbeat)
+            VALUES (%s, %s, %s::jsonb, NOW(), NOW())
+            ON CONFLICT (worker_id) DO UPDATE
+                SET role           = EXCLUDED.role,
+                    capabilities   = EXCLUDED.capabilities,
+                    last_heartbeat = NOW()
+        """, (WORKER_ID, role, caps_json))
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Data comparison chunks
 # ---------------------------------------------------------------------------

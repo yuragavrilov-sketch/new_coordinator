@@ -148,6 +148,19 @@ def test_cdc_heartbeat_does_not_write_lag(monkeypatch):
     assert conn.committed is True
 
 
+def test_worker_heartbeat_upserts_process_liveness(monkeypatch):
+    monkeypatch.setattr(worker_common, "WORKER_ID", "worker-1")
+    conn = ConnStub()
+
+    worker_common.worker_heartbeat(conn, role="universal", capabilities=["bulk", "cdc"])
+
+    sql, params = conn.cur.executed[0]
+    assert "INSERT INTO worker_heartbeats" in sql
+    assert "ON CONFLICT (worker_id) DO UPDATE" in sql
+    assert params == ("worker-1", "universal", '["bulk", "cdc"]')
+    assert conn.committed is True
+
+
 def test_fail_cdc_migration_marks_plan_item_and_plan_failed():
     conn = RowcountConnStub([1, 1, 1])
 
