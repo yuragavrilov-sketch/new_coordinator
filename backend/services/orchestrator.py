@@ -1309,6 +1309,7 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
             n_idx = len(result["enabled"]["indexes"])
             n_con = len(result["enabled"]["constraints"])
+            n_fk_nv = len(result["enabled"].get("fk_novalidate", []))
 
             try:
                 strategy = Strategy.parse(m.get("strategy"))
@@ -1320,7 +1321,7 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                 _safe_transition(
                     mid, "INDEXES_ENABLING", "DATA_VERIFYING",
                     message=(
-                        f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                        f"Включено: индексов={n_idx}, констрейнтов={n_con}, FK NOVALIDATE={n_fk_nv}. "
                         "Triggers stay disabled until the manual trigger job is run. "
                         "Без CDC — запуск сверки данных"
                     ),
@@ -1330,7 +1331,7 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
                 _safe_transition(
                     mid, "INDEXES_ENABLING", "CDC_APPLYING",
                     message=(
-                        f"Включено: индексов={n_idx}, констрейнтов={n_con}. "
+                        f"Включено: индексов={n_idx}, констрейнтов={n_con}, FK NOVALIDATE={n_fk_nv}. "
                         "Ожидание CDC apply-worker"
                     ),
                     extra_fields={"error_code": None, "error_text": None},

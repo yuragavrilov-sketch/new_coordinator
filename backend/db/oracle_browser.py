@@ -931,6 +931,9 @@ def disable_triggers(conn, schema: str, table: str) -> list[str]:
 def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     """
     Rebuild UNUSABLE indexes and re-enable DISABLED constraints on *table*.
+    Foreign keys are enabled NOVALIDATE so per-table migration does not fail
+    on ORA-02298 while the referenced parent rows are loaded by another table
+    in the same schema pack.
 
     Triggers are NOT touched here — they must be re-enabled separately
     (e.g. via enable_triggers()) after CDC apply has fully caught up,
@@ -951,7 +954,7 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
     # используем обычный REBUILD без NOLOGGING.
     is_temp = is_temporary_table(conn, s, t)
     rebuild_clause = "REBUILD" if is_temp else "REBUILD NOLOGGING"
-    enabled: dict = {"indexes": [], "constraints": []}
+    enabled: dict = {"indexes": [], "constraints": [], "fk_novalidate": []}
     errors:  dict = {"indexes": [], "constraints": []}
 
     with conn.cursor() as cur:
@@ -966,6 +969,12 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
         for con in info["constraints"]:
             if con["status"] == "DISABLED":
                 try:
+                    if con.get("type_code") == "R":
+                        cur.execute(
+                            f'ALTER TABLE "{s}"."{t}" ENABLE NOVALIDATE CONSTRAINT "{con["name"]}"'
+                        )
+                        enabled["fk_novalidate"].append(con["name"])
+                        continue
                     cur.execute(
                         f'ALTER TABLE "{s}"."{t}" ENABLE CONSTRAINT "{con["name"]}"'
                     )
