@@ -103,6 +103,43 @@ def test_schema_migration_cdc_autostart_refreshes_running_connector_after_topics
     ]
 
 
+def test_schema_migration_cdc_autostart_creates_topics_while_connector_is_starting(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_ensure_cdc_group_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [],
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "request_start",
+        lambda group_id: calls.append(("start", group_id)) or {
+            "group_id": group_id,
+            "status": "CONNECTOR_STARTING",
+            "already_started": True,
+        },
+    )
+
+    result = schema_migrations._sync_and_request_cdc_connector_start("gid-1", "CONNECTOR_STARTING")
+
+    assert result == {
+        "group_id": "gid-1",
+        "status": "CONNECTOR_STARTING",
+        "already_started": True,
+    }
+    assert calls == [
+        ("topics", "gid-1"),
+        ("refresh", "gid-1"),
+        ("start", "gid-1"),
+    ]
+
+
 def test_schema_migration_cdc_autostart_keeps_refresh_errors_blocking(monkeypatch):
     calls = []
 
