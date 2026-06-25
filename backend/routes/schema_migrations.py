@@ -81,6 +81,26 @@ def _should_start_created_cdc_plan_batches(
     return str(connector_group_status or "").upper() != "RUNNING"
 
 
+def _record_cdc_connector_start_error(
+    connector_group_id: str | None,
+    connector_group_status: str | None,
+    error_text: str,
+) -> str | None:
+    if not connector_group_id:
+        return None
+    from services import connector_groups as groups
+
+    current_status = str(connector_group_status or "").upper()
+    next_status = "RUNNING" if current_status == "RUNNING" else "FAILED"
+    groups.transition_group(
+        connector_group_id,
+        next_status,
+        f"CDC connector autostart failed: {error_text}",
+        error_text=error_text,
+    )
+    return next_status
+
+
 def _kick_cdc_group_best_effort(group_id: str | None) -> None:
     if not group_id:
         return
@@ -766,6 +786,17 @@ def add_plan_items(sm_id: str):
                 })
             except Exception as exc:
                 connector_start_error = str(exc)
+                recorded_status = _record_cdc_connector_start_error(
+                    connector_group_id,
+                    connector_group_status,
+                    connector_start_error,
+                )
+                if recorded_status:
+                    _state["broadcast"]({
+                        "type": "connector_group_status",
+                        "group_id": connector_group_id,
+                        "status": recorded_status,
+                    })
                 print(f"[schema_migrations.add_plan_items] CDC connector autostart warning: {exc}")
             if _should_start_created_cdc_plan_batches(connector_group_status, connector_start_error):
                 try:

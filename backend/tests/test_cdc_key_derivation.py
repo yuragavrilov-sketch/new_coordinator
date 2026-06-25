@@ -223,6 +223,50 @@ def test_schema_migration_does_not_queue_running_cdc_items_after_sync_error():
     assert schema_migrations._should_start_created_cdc_plan_batches("RUNNING", None)
 
 
+def test_schema_migration_records_stopped_connector_start_error_as_failed(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "transition_group",
+        lambda group_id, status, message=None, error_text=None: calls.append({
+            "group_id": group_id,
+            "status": status,
+            "message": message,
+            "error_text": error_text,
+        }),
+    )
+
+    assert schema_migrations._record_cdc_connector_start_error(
+        "gid-1",
+        "STOPPED",
+        "Oracle source is not configured",
+    ) == "FAILED"
+    assert calls == [{
+        "group_id": "gid-1",
+        "status": "FAILED",
+        "message": "CDC connector autostart failed: Oracle source is not configured",
+        "error_text": "Oracle source is not configured",
+    }]
+
+
+def test_schema_migration_records_running_connector_sync_error_without_stopping(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "transition_group",
+        lambda group_id, status, message=None, error_text=None: calls.append((group_id, status, error_text)),
+    )
+
+    assert schema_migrations._record_cdc_connector_start_error(
+        "gid-1",
+        "RUNNING",
+        "bad table.include.list",
+    ) == "RUNNING"
+    assert calls == [("gid-1", "RUNNING", "bad table.include.list")]
+
+
 def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     calls = []
 
