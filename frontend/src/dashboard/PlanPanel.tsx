@@ -59,7 +59,7 @@ export function PlanPanel({
 
   async function removeCdcGroupTable(group: MigrationPlanCdcGroup, table: MigrationPlanCdcTable) {
     const label = tableLabel(table);
-    if (!window.confirm(`Remove ${label} from CDC connector? Debezium table.include.list will be updated.`)) return;
+    if (!window.confirm(`Убрать ${label} из CDC-коннектора? Debezium table.include.list будет обновлен.`)) return;
     setCdcActionBusy(label);
     setCdcActionErr("");
     try {
@@ -403,7 +403,7 @@ function CdcConnectorCard({
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>CDC connector</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>CDC-коннектор</div>
           <Badge tone={group.status === "RUNNING" ? "run" : group.status === "FAILED" ? "bad" : "idle"}>
             {group.status}
           </Badge>
@@ -422,14 +422,14 @@ function CdcConnectorCard({
               opacity: busy ? 0.55 : 1,
             }}
           >
-            {busy ? "Sync..." : "Sync Debezium"}
+            {busy ? "Синхронизация..." : "Синхронизировать"}
           </button>
         </div>
       </div>
       <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
-        <span>Debezium tables: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
-        <span>CDC rows in plan: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
-        <span>Manual keys: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
+        <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+        <span>Строк CDC в пачке: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
+        <span>Ручных ключей: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
       </div>
       <div style={{ marginTop: 7, fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
         {connectorPreview.length > 0 ? (
@@ -443,12 +443,12 @@ function CdcConnectorCard({
       </div>
       {extraTables.length > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
-          In connector, not in this plan: {extraTables.map(tableLabel).join(", ")}
+          В коннекторе, но не в этой пачке: {extraTables.map(tableLabel).join(", ")}
         </div>
       )}
       {group.status !== "RUNNING" && planItems.some(item => String(item.phase || "").toUpperCase() === "NEW") && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.text.muted }}>
-          CDC rows are queued and will continue after connector status becomes RUNNING.
+          CDC-строки ждут запуска коннектора и продолжат работу после статуса RUNNING.
         </div>
       )}
       {hasRawConfig && (
@@ -504,8 +504,8 @@ function CdcConnectorDetails({
         padding: "7px 10px",
         borderBottom: `1px solid ${t.border.subtle}`,
       }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Actual Debezium connector</span>
-        <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} tables</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Фактический состав Debezium-коннектора</span>
+        <span style={{ fontSize: 11, color: t.text.muted }}>{rows.length} таблиц</span>
       </div>
       {rows.map(tbl => {
         const tablePlanItems = planItemsByTable.get(tbl.source_table.toUpperCase()) || [];
@@ -525,7 +525,7 @@ function CdcConnectorDetails({
             <div style={{ fontFamily: t.font.mono, color: t.text.primary, overflow: "hidden", textOverflow: "ellipsis" }}>
               {tableLabel(tbl)}
             </div>
-            <Badge tone={inPlan ? "ok" : "idle"}>{inPlan ? "in plan" : "connector"}</Badge>
+            <Badge tone={inPlan ? "ok" : "idle"}>{inPlan ? "в пачке" : "коннектор"}</Badge>
             <div style={{ fontFamily: t.font.mono, color: t.text.muted, overflow: "hidden", textOverflow: "ellipsis" }}>
               {tbl.topic_name || "-"}
             </div>
@@ -541,7 +541,7 @@ function CdcConnectorDetails({
                     opacity: busyKey === tableLabel(tbl) ? 0.55 : 1,
                   }}
                 >
-                  {busyKey === tableLabel(tbl) ? "..." : "Remove"}
+                  {busyKey === tableLabel(tbl) ? "..." : "Убрать"}
                 </button>
               )}
             </div>
