@@ -676,6 +676,22 @@ function CdcConnectorCard({
   const runnableNewCdc = planItems.filter(item => isNewPhase(item) && status === "RUNNING");
   const queuedCdc = runnableNewCdc.filter(item => item.queue_position != null).length;
   const readyCdc = runnableNewCdc.length - queuedCdc;
+  const loadingCdc = planItems.filter(item => {
+    const phase = String(item.phase || "").toUpperCase();
+    return [
+      "TOPIC_CREATING",
+      "CHUNKING",
+      "BULK_LOADING",
+      "BULK_LOADED",
+      "STAGE_VALIDATING",
+      "STAGE_VALIDATED",
+      "BASELINE_PUBLISHING",
+      "BASELINE_LOADING",
+      "BASELINE_PUBLISHED",
+      "STAGE_DROPPING",
+      "INDEXES_ENABLING",
+    ].includes(phase);
+  }).length;
   const applyingCdc = planItems.filter(item => {
     const phase = String(item.phase || "").toUpperCase();
     return phase === "CDC_APPLY_STARTING" || phase === "CDC_APPLYING" || phase === "CDC_CATCHING_UP";
@@ -748,6 +764,7 @@ function CdcConnectorCard({
         <span>Ждут коннектор: <strong style={{ color: waitingConnector ? t.amber.fg : t.text.primary, fontFamily: t.font.mono }}>{waitingConnector}</strong></span>
         <span>Стартуют: <strong style={{ color: readyCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{readyCdc}</strong></span>
         <span>В очереди: <strong style={{ color: queuedCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{queuedCdc}</strong></span>
+        <span>Переносятся: <strong style={{ color: loadingCdc ? t.blue.fg : t.text.primary, fontFamily: t.font.mono }}>{loadingCdc}</strong></span>
         <span>Применяются: <strong style={{ color: applyingCdc ? t.green.fg : t.text.primary, fontFamily: t.font.mono }}>{applyingCdc}</strong></span>
         <span>Ручных ключей: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
       </div>

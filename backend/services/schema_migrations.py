@@ -34,6 +34,7 @@ _PHASE_TO_STAGE: dict[str, str] = {
     "BASELINE_LOADING":    "bulk",
     "BASELINE_PUBLISHED":  "bulk",
     # cdc — change-data-capture apply
+    "CDC_APPLY_STARTING":  "cdc",
     "CDC_APPLYING":        "cdc",
     "CDC_CATCHING_UP":     "cdc",
     "CDC_CAUGHT_UP":       "cdc",
@@ -59,7 +60,7 @@ _ACTIVE_PHASES = {
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING", "INDEXES_ENABLING",
     "DATA_VERIFYING", "DATA_MISMATCH",
-    "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
+    "CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP",
     "STEADY_STATE",
 }
 
@@ -113,7 +114,7 @@ def _aggregate_status(children_phases: list[str], any_failed: bool, paused: bool
     if all(p in _DONE_PHASES for p in children_phases):
         return "done"
     # If any child in CDC phase, consider whole schema in CDC
-    cdc_phases = {"CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
+    cdc_phases = {"CDC_APPLY_STARTING", "CDC_APPLYING", "CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"}
     if any(p in cdc_phases for p in children_phases):
         return "cdc"
     if any(p in {"DATA_VERIFYING", "STAGE_VALIDATING"} for p in children_phases):
