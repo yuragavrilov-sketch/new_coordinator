@@ -299,6 +299,103 @@ def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     ]
 
 
+def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_sync_and_request_cdc_connector_start",
+        lambda group_id, status: calls.append(("connector", group_id, status)) or {
+            "group_id": group_id,
+            "status": "RUNNING",
+        },
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_clear_cdc_connector_start_error",
+        lambda group_id: calls.append(("clear", group_id)),
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_start_created_cdc_plan_batches",
+        lambda plan_id, created: calls.append(("plan", plan_id, created)) or [
+            {"batch": 2, "started": ["mid-1"]},
+        ],
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_kick_cdc_group_best_effort",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+    monkeypatch.setitem(
+        schema_migrations._state,
+        "broadcast",
+        lambda event: calls.append(("broadcast", event["type"], event["status"])),
+    )
+
+    result = schema_migrations._autostart_created_cdc_items(
+        "gid-1",
+        "STOPPED",
+        42,
+        [{"migration_id": "mid-1", "batch_order": 2}],
+    )
+
+    assert result == {
+        "connector_start": {"group_id": "gid-1", "status": "RUNNING"},
+        "connector_start_error": None,
+        "plan_start": {"batch": 2, "started": ["mid-1"]},
+        "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
+        "plan_start_error": None,
+    }
+    assert calls == [
+        ("connector", "gid-1", "STOPPED"),
+        ("clear", "gid-1"),
+        ("broadcast", "connector_group_status", "RUNNING"),
+        ("plan", 42, [{"migration_id": "mid-1", "batch_order": 2}]),
+        ("kick", "gid-1"),
+    ]
+
+
+def test_schema_migration_autostart_running_sync_error_does_not_start_plan(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_sync_and_request_cdc_connector_start",
+        lambda *_args: (_ for _ in ()).throw(ValueError("bad table.include.list")),
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_record_cdc_connector_start_error",
+        lambda group_id, status, error: calls.append(("record", group_id, status, error)) or "RUNNING",
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_start_created_cdc_plan_batches",
+        lambda *_args: calls.append(("plan",)),
+    )
+    monkeypatch.setitem(
+        schema_migrations._state,
+        "broadcast",
+        lambda event: calls.append(("broadcast", event["status"])),
+    )
+
+    result = schema_migrations._autostart_created_cdc_items(
+        "gid-1",
+        "RUNNING",
+        42,
+        [{"migration_id": "mid-1", "batch_order": 2}],
+    )
+
+    assert result["connector_start"] is None
+    assert result["connector_start_error"] == "bad table.include.list"
+    assert result["plan_starts"] == []
+    assert calls == [
+        ("record", "gid-1", "RUNNING", "bad table.include.list"),
+        ("broadcast", "RUNNING"),
+    ]
+
+
 def test_schema_migration_ensures_cdc_group_topics(monkeypatch):
     from services import connector_groups
 

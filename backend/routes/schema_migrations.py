@@ -120,6 +120,62 @@ def _kick_cdc_group_best_effort(group_id: str | None) -> None:
         print(f"[schema_migrations] CDC queue kick warning: {exc}")
 
 
+def _autostart_created_cdc_items(
+    connector_group_id: str | None,
+    connector_group_status: str | None,
+    plan_id: int,
+    created: list[dict],
+) -> dict:
+    connector_start = None
+    connector_start_error = None
+    plan_start = None
+    plan_starts: list[dict] = []
+    plan_start_error = None
+
+    try:
+        connector_start = _sync_and_request_cdc_connector_start(
+            connector_group_id,
+            connector_group_status,
+        )
+        _clear_cdc_connector_start_error(connector_group_id)
+        _state["broadcast"]({
+            "type": "connector_group_status",
+            "group_id": connector_group_id,
+            "status": connector_start.get("status"),
+        })
+    except Exception as exc:
+        connector_start_error = str(exc)
+        recorded_status = _record_cdc_connector_start_error(
+            connector_group_id,
+            connector_group_status,
+            connector_start_error,
+        )
+        if recorded_status:
+            _state["broadcast"]({
+                "type": "connector_group_status",
+                "group_id": connector_group_id,
+                "status": recorded_status,
+            })
+        print(f"[schema_migrations.add_plan_items] CDC connector autostart warning: {exc}")
+
+    if _should_start_created_cdc_plan_batches(connector_group_status, connector_start_error):
+        try:
+            plan_starts = _start_created_cdc_plan_batches(plan_id, created)
+            plan_start = plan_starts[0] if plan_starts else None
+            _kick_cdc_group_best_effort(connector_group_id)
+        except Exception as start_exc:
+            plan_start_error = str(start_exc)
+            print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
+
+    return {
+        "connector_start": connector_start,
+        "connector_start_error": connector_start_error,
+        "plan_start": plan_start,
+        "plan_starts": plan_starts,
+        "plan_start_error": plan_start_error,
+    }
+
+
 def _ensure_cdc_group_topics(group_id: str) -> list[dict]:
     from services.connector_groups import create_group_topics
 
@@ -782,39 +838,17 @@ def add_plan_items(sm_id: str):
         plan_starts: list[dict] = []
         plan_start_error = None
         if strategy.has_cdc:
-            try:
-                connector_start = _sync_and_request_cdc_connector_start(
-                    connector_group_id,
-                    connector_group_status,
-                )
-                _clear_cdc_connector_start_error(connector_group_id)
-                _state["broadcast"]({
-                    "type": "connector_group_status",
-                    "group_id": connector_group_id,
-                    "status": connector_start.get("status"),
-                })
-            except Exception as exc:
-                connector_start_error = str(exc)
-                recorded_status = _record_cdc_connector_start_error(
-                    connector_group_id,
-                    connector_group_status,
-                    connector_start_error,
-                )
-                if recorded_status:
-                    _state["broadcast"]({
-                        "type": "connector_group_status",
-                        "group_id": connector_group_id,
-                        "status": recorded_status,
-                    })
-                print(f"[schema_migrations.add_plan_items] CDC connector autostart warning: {exc}")
-            if _should_start_created_cdc_plan_batches(connector_group_status, connector_start_error):
-                try:
-                    plan_starts = _start_created_cdc_plan_batches(plan_id, created)
-                    plan_start = plan_starts[0] if plan_starts else None
-                    _kick_cdc_group_best_effort(connector_group_id)
-                except Exception as start_exc:
-                    plan_start_error = str(start_exc)
-                    print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
+            autostart = _autostart_created_cdc_items(
+                connector_group_id,
+                connector_group_status,
+                plan_id,
+                created,
+            )
+            connector_start = autostart["connector_start"]
+            connector_start_error = autostart["connector_start_error"]
+            plan_start = autostart["plan_start"]
+            plan_starts = autostart["plan_starts"]
+            plan_start_error = autostart["plan_start_error"]
         _state["broadcast"]({
             "type": "schema_migration.plan_items_added",
             "id": sm_id,
