@@ -449,6 +449,7 @@ function CdcConnectorCard({
   }).length;
   const connectorPreview = connectorTables.slice(0, 6).map(tableLabel);
   const connectorRest = Math.max(0, connectorTables.length - connectorPreview.length);
+  const status = String(group.status || "").toUpperCase();
   const waitingConnector = planItems.filter(item => isNewPhase(item) && status !== "RUNNING").length;
   const queuedCdc = planItems.filter(item => isNewPhase(item) && status === "RUNNING").length;
   const applyingCdc = planItems.filter(item => {
@@ -461,7 +462,6 @@ function CdcConnectorCard({
     || group.topic_prefix
     || group.message_key_columns,
   );
-  const status = String(group.status || "").toUpperCase();
   const canStartConnector = !["RUNNING", "TOPICS_CREATING", "CONNECTOR_STARTING", "STOPPING"].includes(status);
   const syncBusy = busyAction === "sync";
   const startBusy = busyAction === "start";
@@ -812,8 +812,8 @@ function itemVisualState(item: MigrationPlanItem): "done" | "failed" | "queued" 
   const status = String(item.status || "").toUpperCase();
   if (status === "DONE" || phase === "COMPLETED" || phase === "STEADY_STATE") return "done";
   if (BAD.has(status) || phase === "FAILED" || phase === "CANCELLED") return "failed";
-  if (status === "PENDING" || phase === "DRAFT" || phase === "NEW") return "queued";
   if (status === "RUNNING") return "running";
+  if (status === "PENDING" || phase === "DRAFT" || phase === "NEW") return "queued";
   return "idle";
 }
 
