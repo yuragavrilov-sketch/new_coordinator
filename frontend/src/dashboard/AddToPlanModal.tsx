@@ -458,14 +458,28 @@ export function AddToPlanModal({
                 </div>
               ) : (
                 <div style={{
+                  display: "grid",
+                  gap: 6,
                   padding: "9px 10px",
                   border: `1px solid ${t.blue.dim}`,
                   borderRadius: t.radius.sm,
                   background: t.blue.bg,
                   color: t.blue.fg,
                   fontSize: 12,
+                  lineHeight: 1.45,
                 }}>
-                  CDC-коннектор еще не создан. Он будет создан автоматически для этой миграции.
+                  <div>
+                    CDC-коннектор еще не создан. Он будет создан автоматически для этой миграции.
+                  </div>
+                  {projectedIncludeList && (
+                    <div style={{
+                      fontFamily: t.font.mono,
+                      color: t.text.primary,
+                      overflowWrap: "anywhere",
+                    }}>
+                      table.include.list: {projectedIncludeList}
+                    </div>
+                  )}
                 </div>
               )}
             </Section>
