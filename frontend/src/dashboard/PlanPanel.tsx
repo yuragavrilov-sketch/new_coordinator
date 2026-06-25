@@ -446,6 +446,21 @@ function CdcConnectorCard({
           В коннекторе, но не в этой пачке: {extraTables.map(tableLabel).join(", ")}
         </div>
       )}
+      {group.error_text && (
+        <div style={{
+          marginTop: 7,
+          padding: "6px 8px",
+          borderRadius: t.radius.sm,
+          border: `1px solid ${t.red.border}`,
+          background: `${t.red.border}22`,
+          color: t.red.fg,
+          fontSize: 12,
+          lineHeight: 1.35,
+          overflowWrap: "anywhere",
+        }}>
+          {group.error_text}
+        </div>
+      )}
       {group.status !== "RUNNING" && planItems.some(item => String(item.phase || "").toUpperCase() === "NEW") && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.text.muted }}>
           CDC-строки ждут запуска коннектора и продолжат работу после статуса RUNNING.
