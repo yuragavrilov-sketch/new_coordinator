@@ -359,7 +359,7 @@ export function Dashboard({
           initialMode={planMode}
           cdcGroup={cdcGroup}
           cdcGroupLoading={planMode === "cdc" && !cdcGroup && (cdcGroupApi.loading || (!!activePlanId && planApi.loading && !planApi.data))}
-          cdcGroupError={planMode === "cdc" ? (cdcGroupApi.error || (!!activePlanId && !planApi.data ? planApi.error : null)) : null}
+          cdcGroupError={planMode === "cdc" && !cdcGroup ? (cdcGroupApi.error || (!!activePlanId && !planApi.data ? planApi.error : null)) : null}
           onClose={() => setPlanMode(null)}
           onReloadCdcGroup={() => {
             cdcGroupApi.reload();
