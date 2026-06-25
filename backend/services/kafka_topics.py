@@ -9,6 +9,16 @@ def _bootstrap_servers() -> list[str]:
     return [s.strip() for s in raw.split(",")]
 
 
+def _new_admin_client(bootstrap_servers: list[str]):
+    from kafka.admin import KafkaAdminClient
+
+    return KafkaAdminClient(
+        bootstrap_servers=bootstrap_servers,
+        request_timeout_ms=5000,
+        connections_max_idle_ms=8000,
+    )
+
+
 def create_topic(
     bootstrap_servers: list[str] | None = None,
     topic_name: str = "",
@@ -26,7 +36,7 @@ def create_topic(
     partitions = num_partitions or int(os.environ.get("DEBEZIUM_TOPIC_PARTITIONS", "1"))
     replication = replication_factor or int(os.environ.get("DEBEZIUM_TOPIC_REPLICATION_FACTOR", "1"))
 
-    admin = KafkaAdminClient(bootstrap_servers=servers)
+    admin = _new_admin_client(servers)
     try:
         admin.create_topics([
             NewTopic(
@@ -47,10 +57,8 @@ def topic_exists(
     topic_name: str = "",
 ) -> bool:
     """Check if a topic already exists."""
-    from kafka.admin import KafkaAdminClient
-
     servers = bootstrap_servers or _bootstrap_servers()
-    admin = KafkaAdminClient(bootstrap_servers=servers)
+    admin = _new_admin_client(servers)
     try:
         topics = admin.list_topics()
         return topic_name in topics
@@ -63,11 +71,10 @@ def delete_topic(
     topic_name: str = "",
 ) -> None:
     """Delete a Kafka topic.  No error if it does not exist."""
-    from kafka.admin import KafkaAdminClient
     from kafka.errors import UnknownTopicOrPartitionError
 
     servers = bootstrap_servers or _bootstrap_servers()
-    admin = KafkaAdminClient(bootstrap_servers=servers)
+    admin = _new_admin_client(servers)
     try:
         admin.delete_topics([topic_name])
         print(f"[kafka_topics] deleted topic {topic_name}")
