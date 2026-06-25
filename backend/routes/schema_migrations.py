@@ -109,15 +109,17 @@ def _clear_cdc_connector_start_error(connector_group_id: str | None) -> None:
     groups.clear_group_error(connector_group_id)
 
 
-def _kick_cdc_group_best_effort(group_id: str | None) -> None:
+def _kick_cdc_group_best_effort(group_id: str | None) -> bool:
     if not group_id:
-        return
+        return False
     try:
         from services import orchestrator
         orchestrator._update_queue_positions()
         orchestrator._kick_new_migrations_for_group(group_id)
+        return True
     except Exception as exc:
         print(f"[schema_migrations] CDC queue kick warning: {exc}")
+        return False
 
 
 def _autostart_created_cdc_items(
@@ -131,6 +133,7 @@ def _autostart_created_cdc_items(
     plan_start = None
     plan_starts: list[dict] = []
     plan_start_error = None
+    cdc_queue_kicked = False
 
     try:
         connector_start = _sync_and_request_cdc_connector_start(
@@ -162,7 +165,7 @@ def _autostart_created_cdc_items(
         try:
             plan_starts = _start_created_cdc_plan_batches(plan_id, created)
             plan_start = plan_starts[0] if plan_starts else None
-            _kick_cdc_group_best_effort(connector_group_id)
+            cdc_queue_kicked = _kick_cdc_group_best_effort(connector_group_id)
         except Exception as start_exc:
             plan_start_error = str(start_exc)
             print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
@@ -173,6 +176,7 @@ def _autostart_created_cdc_items(
         "plan_start": plan_start,
         "plan_starts": plan_starts,
         "plan_start_error": plan_start_error,
+        "cdc_queue_kicked": cdc_queue_kicked,
     }
 
 
@@ -333,6 +337,7 @@ def _build_add_plan_items_response_payload(
     plan_start: dict | None = None,
     plan_starts: list[dict] | None = None,
     plan_start_error: str | None = None,
+    cdc_queue_kicked: bool = False,
     cdc_pruned_tables: list[dict] | None = None,
 ) -> dict:
     return {
@@ -347,6 +352,7 @@ def _build_add_plan_items_response_payload(
         "plan_start": plan_start,
         "plan_starts": plan_starts or [],
         "plan_start_error": plan_start_error,
+        "cdc_queue_kicked": cdc_queue_kicked,
     }
 
 
@@ -1012,6 +1018,7 @@ def add_plan_items(sm_id: str):
         plan_start = None
         plan_starts: list[dict] = []
         plan_start_error = None
+        cdc_queue_kicked = False
         if strategy.has_cdc:
             autostart = _autostart_created_cdc_items(
                 connector_group_id,
@@ -1024,6 +1031,7 @@ def add_plan_items(sm_id: str):
             plan_start = autostart["plan_start"]
             plan_starts = autostart["plan_starts"]
             plan_start_error = autostart["plan_start_error"]
+            cdc_queue_kicked = bool(autostart.get("cdc_queue_kicked", False))
         item_states = []
         try:
             item_states = _load_created_plan_item_states(conn, created)
@@ -1046,6 +1054,7 @@ def add_plan_items(sm_id: str):
             plan_start=plan_start,
             plan_starts=plan_starts,
             plan_start_error=plan_start_error,
+            cdc_queue_kicked=cdc_queue_kicked,
             cdc_pruned_tables=cdc_pruned_tables,
         )), 201
     except ValueError as exc:

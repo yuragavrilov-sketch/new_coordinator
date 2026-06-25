@@ -1256,12 +1256,27 @@ def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
         lambda group_id: calls.append(("kick", group_id)),
     )
 
-    schema_migrations._kick_cdc_group_best_effort("gid-1")
+    assert schema_migrations._kick_cdc_group_best_effort("gid-1") is True
 
     assert calls == [
         ("queue",),
         ("kick", "gid-1"),
     ]
+
+
+def test_schema_migration_queue_kick_reports_failure(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "_update_queue_positions",
+        lambda: (_ for _ in ()).throw(RuntimeError("state db down")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda _group_id: (_ for _ in ()).throw(AssertionError("must not kick after queue failure")),
+    )
+
+    assert schema_migrations._kick_cdc_group_best_effort("gid-1") is False
 
 
 def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypatch):
@@ -1290,7 +1305,7 @@ def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypat
     monkeypatch.setattr(
         schema_migrations,
         "_kick_cdc_group_best_effort",
-        lambda group_id: calls.append(("kick", group_id)),
+        lambda group_id: calls.append(("kick", group_id)) or True,
     )
     monkeypatch.setitem(
         schema_migrations._state,
@@ -1311,6 +1326,7 @@ def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypat
         "plan_start": {"batch": 2, "started": ["mid-1"]},
         "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
         "plan_start_error": None,
+        "cdc_queue_kicked": True,
     }
     assert calls == [
         ("connector", "gid-1", "STOPPED"),
@@ -1344,7 +1360,7 @@ def test_schema_migration_autostart_queues_items_when_stopped_connector_start_fa
     monkeypatch.setattr(
         schema_migrations,
         "_kick_cdc_group_best_effort",
-        lambda group_id: calls.append(("kick", group_id)),
+        lambda group_id: calls.append(("kick", group_id)) or True,
     )
     monkeypatch.setitem(
         schema_migrations._state,
@@ -1365,6 +1381,7 @@ def test_schema_migration_autostart_queues_items_when_stopped_connector_start_fa
         "plan_start": {"batch": 2, "started": ["mid-1"]},
         "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
         "plan_start_error": None,
+        "cdc_queue_kicked": True,
     }
     assert calls == [
         ("record", "gid-1", "STOPPED", "Oracle source is not configured"),
@@ -1408,6 +1425,7 @@ def test_schema_migration_autostart_running_sync_error_does_not_start_plan(monke
     assert result["connector_start"] is None
     assert result["connector_start_error"] == "bad table.include.list"
     assert result["plan_starts"] == []
+    assert result["cdc_queue_kicked"] is False
     assert calls == [
         ("record", "gid-1", "RUNNING", "bad table.include.list"),
         ("broadcast", "RUNNING"),

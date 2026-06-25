@@ -283,6 +283,7 @@ export interface AddPlanItemsResp {
   plan_start?: StartMigrationPlanResp | null;
   plan_starts?: StartMigrationPlanResp[] | null;
   plan_start_error?: string | null;
+  cdc_queue_kicked?: boolean;
   cdc_pruned_tables?: MigrationPlanCdcPrunedTable[];
 }
 

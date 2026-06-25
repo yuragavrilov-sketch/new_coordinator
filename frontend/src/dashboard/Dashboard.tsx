@@ -468,6 +468,8 @@ export function Dashboard({
                   : " · запуск уже обработан";
               } else if (stateNote) {
                 startNote = stateNote;
+              } else if (response.cdc_queue_kicked) {
+                startNote = ` · CDC: ${count} таблиц (очередь проверена)`;
               } else if (response.connector_start_error) {
                 startNote = normalizedConnectorStatus === "RUNNING"
                   ? " · CDC: добавлено в пачку, но очередь не стартовала из-за ошибки синхронизации Debezium"
