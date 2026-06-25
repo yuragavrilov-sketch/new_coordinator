@@ -362,18 +362,20 @@ export function Dashboard({
               } else if (response.plan_starts?.length) {
                 const startedCount = response.plan_starts.reduce((sum, item) => sum + item.started.length, 0);
                 startNote = startedCount
-                  ? ` · в очереди позиций: ${response.plan_starts.length}`
+                  ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
                   : " · запуск уже обработан";
               } else if (response.plan_start) {
-                startNote = response.plan_start.started.length
-                  ? ` · старт позиции ${response.plan_start.batch}`
+                const startedCount = response.plan_start.started.length;
+                startNote = startedCount
+                  ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
                   : " · запуск уже обработан";
               } else {
                 try {
                   const started = await startMigrationPlan(planId);
-                  startNote = started.started.length
-                  ? ` · старт позиции ${started.batch}`
-                  : " · запуск уже обработан";
+                  const startedCount = started.started.length;
+                  startNote = startedCount
+                    ? ` · очередь: ${count} таблиц / запущено: ${startedCount}`
+                    : " · запуск уже обработан";
                 } catch (e) {
                   const msg = e instanceof Error ? e.message : String(e);
                   if (/already running/i.test(msg)) {
