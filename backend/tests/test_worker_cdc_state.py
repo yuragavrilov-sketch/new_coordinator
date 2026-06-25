@@ -15,6 +15,7 @@ class CursorStub:
     def __init__(self, row=None):
         self.row = row
         self.executed: list[tuple[str, tuple]] = []
+        self.rowcount = 0
 
     def __enter__(self):
         return self
@@ -24,6 +25,7 @@ class CursorStub:
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params or ()))
+        self.rowcount = 0
 
     def fetchone(self):
         return self.row
@@ -43,6 +45,23 @@ class ConnStub:
 
     def rollback(self):
         self.rolled_back = True
+
+
+class RowcountCursorStub(CursorStub):
+    def __init__(self, rowcounts):
+        super().__init__()
+        self.rowcounts = list(rowcounts)
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params or ()))
+        self.rowcount = self.rowcounts.pop(0) if self.rowcounts else 0
+
+
+class RowcountConnStub(ConnStub):
+    def __init__(self, rowcounts):
+        self.cur = RowcountCursorStub(rowcounts)
+        self.committed = False
+        self.rolled_back = False
 
 
 def test_cdc_topic_name_sanitizes_hash_table_names():
@@ -92,4 +111,41 @@ def test_cdc_checkin_recomputes_topic_from_migration_columns(monkeypatch):
     assert "UPPER(source_schema) || '.' || UPPER(source_table)" in sql
     assert "topic            = EXCLUDED.topic" in sql
     assert params == (7, "{}", 3, "worker-1", "mid-1")
+    assert conn.committed is True
+
+
+def test_fail_cdc_migration_marks_plan_item_and_plan_failed():
+    conn = RowcountConnStub([1, 1, 1])
+
+    worker_common.fail_cdc_migration(
+        conn,
+        "mid-1",
+        "CDC_APPLY_FAILED",
+        "poison event",
+    )
+
+    sqls = [sql for sql, _params in conn.cur.executed]
+    assert "UPDATE migrations" in sqls[0]
+    assert "UPDATE migration_plan_items" in sqls[1]
+    assert "UPDATE migration_plans" in sqls[1]
+    assert "UPDATE migration_cdc_state" in sqls[2]
+    assert conn.cur.executed[1][1] == ("mid-1",)
+    assert conn.committed is True
+
+
+def test_fail_cdc_migration_does_not_touch_plan_when_phase_not_changed():
+    conn = RowcountConnStub([0, 1])
+
+    worker_common.fail_cdc_migration(
+        conn,
+        "mid-1",
+        "CDC_APPLY_FAILED",
+        "already terminal",
+    )
+
+    sqls = [sql for sql, _params in conn.cur.executed]
+    assert len(sqls) == 2
+    assert "UPDATE migrations" in sqls[0]
+    assert "UPDATE migration_cdc_state" in sqls[1]
+    assert all("migration_plan_items" not in sql for sql in sqls)
     assert conn.committed is True

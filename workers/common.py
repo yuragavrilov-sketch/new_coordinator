@@ -709,6 +709,19 @@ def fail_cdc_migration(conn, migration_id: str,
               AND  phase IN ('CDC_APPLY_STARTING','CDC_APPLYING',
                              'CDC_CATCHING_UP','CDC_CAUGHT_UP','STEADY_STATE')
         """, (error_code[:64], error_text[:4000], migration_id))
+        if cur.rowcount > 0:
+            cur.execute("""
+                WITH changed_items AS (
+                    UPDATE migration_plan_items
+                    SET    status = 'FAILED'
+                    WHERE  migration_id = %s
+                      AND  status <> 'FAILED'
+                    RETURNING plan_id
+                )
+                UPDATE migration_plans p
+                SET    status = 'FAILED'
+                WHERE  p.plan_id IN (SELECT DISTINCT plan_id FROM changed_items)
+            """, (migration_id,))
         cur.execute("""
             UPDATE migration_cdc_state
             SET    worker_id        = NULL,
