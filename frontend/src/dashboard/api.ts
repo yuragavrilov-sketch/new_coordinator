@@ -170,6 +170,7 @@ export interface MigrationPlanItem {
   rows_loaded?:     number | null;
   total_rows?:      number | null;
   error_text?:      string | null;
+  queue_position?:  number | null;
   state_changed_at?: string | null;
 }
 

@@ -469,6 +469,7 @@ def get_plan(plan_id):
                        m.rows_loaded,
                        m.total_rows,
                        m.error_text,
+                       m.queue_position,
                        m.state_changed_at
                 FROM migration_plan_items i
                 LEFT JOIN migrations m ON m.migration_id = i.migration_id

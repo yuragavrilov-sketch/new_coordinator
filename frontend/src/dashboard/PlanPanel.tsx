@@ -597,6 +597,7 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
   const totalRows = item.total_rows || 0;
   const progress = totalRows ? rowsLoaded / totalRows * 100 : undefined;
   const status = itemStatusLabel(item, cdcGroupStatus);
+  const progressText = itemProgressText(item, progress);
   const visual = itemVisualState(item);
   return (
     <div style={{
@@ -622,10 +623,18 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
         {status}
       </Badge>
       <div style={{ fontFamily: t.font.mono, color: t.text.muted, textAlign: "right" }}>
-        {progress === undefined ? "rows n/a" : `${progress.toFixed(0)}%`}
+        {progressText}
       </div>
     </div>
   );
+}
+
+function itemProgressText(item: MigrationPlanItem, progress: number | undefined) {
+  const phase = String(item.phase || "").toUpperCase();
+  if (phase === "NEW" && item.queue_position != null) {
+    return `queue #${item.queue_position}`;
+  }
+  return progress === undefined ? "rows n/a" : `${progress.toFixed(0)}%`;
 }
 
 function itemStatusLabel(item: MigrationPlanItem, cdcGroupStatus?: string) {
