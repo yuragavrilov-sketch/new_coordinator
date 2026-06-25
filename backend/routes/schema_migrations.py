@@ -276,6 +276,31 @@ def _load_cdc_connector_summary(group_id: str | None) -> dict | None:
         return None
 
 
+def _build_add_plan_items_response_payload(
+    *,
+    plan_id: int,
+    created: list[dict],
+    strategy: Strategy,
+    connector_group_id: str | None,
+    connector_start: dict | None = None,
+    connector_start_error: str | None = None,
+    plan_start: dict | None = None,
+    plan_starts: list[dict] | None = None,
+    plan_start_error: str | None = None,
+) -> dict:
+    return {
+        "plan_id": plan_id,
+        "items": created,
+        "connector_group_id": connector_group_id if strategy.has_cdc else None,
+        "cdc_group": _load_cdc_connector_summary(connector_group_id) if strategy.has_cdc else None,
+        "connector_start": connector_start,
+        "connector_start_error": connector_start_error,
+        "plan_start": plan_start,
+        "plan_starts": plan_starts or [],
+        "plan_start_error": plan_start_error,
+    }
+
+
 def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list[str]:
     available = {
         str(col.get("name") or "").strip().upper()
@@ -881,17 +906,17 @@ def add_plan_items(sm_id: str):
             "plan_id": plan_id,
             "count": len(created),
         })
-        return jsonify({
-            "plan_id": plan_id,
-            "items": created,
-            "connector_group_id": connector_group_id if strategy.has_cdc else None,
-            "cdc_group": _load_cdc_connector_summary(connector_group_id) if strategy.has_cdc else None,
-            "connector_start": connector_start,
-            "connector_start_error": connector_start_error,
-            "plan_start": plan_start,
-            "plan_starts": plan_starts,
-            "plan_start_error": plan_start_error,
-        }), 201
+        return jsonify(_build_add_plan_items_response_payload(
+            plan_id=plan_id,
+            created=created,
+            strategy=strategy,
+            connector_group_id=connector_group_id,
+            connector_start=connector_start,
+            connector_start_error=connector_start_error,
+            plan_start=plan_start,
+            plan_starts=plan_starts,
+            plan_start_error=plan_start_error,
+        )), 201
     except ValueError as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 400

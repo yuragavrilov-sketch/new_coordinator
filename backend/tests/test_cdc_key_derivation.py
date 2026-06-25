@@ -275,6 +275,54 @@ def test_schema_migration_cdc_group_endpoint_uses_schema_group_without_plan(monk
     assert conn.closed
 
 
+def test_schema_migration_add_items_response_includes_cdc_autostart_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        schema_migrations,
+        "_load_cdc_connector_summary",
+        lambda group_id: {
+            "group_id": group_id,
+            "tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}],
+            "table_include_list": "TCBPAY.ALLORDERS",
+        },
+    )
+
+    payload = schema_migrations._build_add_plan_items_response_payload(
+        plan_id=42,
+        created=[{"item_id": 7, "table": "ALLORDERS", "migration_id": "mid-1", "batch_order": 3}],
+        strategy=schema_migrations.Strategy.CDC_DIRECT,
+        connector_group_id="gid-1",
+        connector_start={"group_id": "gid-1", "status": "RUNNING"},
+        plan_starts=[{"batch": 3, "started": ["mid-1"]}],
+    )
+
+    assert payload["plan_id"] == 42
+    assert payload["connector_group_id"] == "gid-1"
+    assert payload["cdc_group"]["table_include_list"] == "TCBPAY.ALLORDERS"
+    assert payload["connector_start"]["status"] == "RUNNING"
+    assert payload["plan_starts"] == [{"batch": 3, "started": ["mid-1"]}]
+
+
+def test_schema_migration_add_items_response_omits_cdc_snapshot_for_bulk(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        schema_migrations,
+        "_load_cdc_connector_summary",
+        lambda group_id: calls.append(group_id) or {"group_id": group_id},
+    )
+
+    payload = schema_migrations._build_add_plan_items_response_payload(
+        plan_id=42,
+        created=[],
+        strategy=schema_migrations.Strategy.BULK_DIRECT,
+        connector_group_id="gid-1",
+    )
+
+    assert payload["connector_group_id"] is None
+    assert payload["cdc_group"] is None
+    assert payload["plan_starts"] == []
+    assert calls == []
+
+
 def test_schema_migration_records_stopped_connector_start_error_as_failed(monkeypatch):
     calls = []
 
