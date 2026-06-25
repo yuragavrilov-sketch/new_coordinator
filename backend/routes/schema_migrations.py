@@ -100,6 +100,30 @@ def _validate_manual_cdc_key_columns(info: dict, key_columns: list[str]) -> list
     return missing
 
 
+def _effective_cdc_key_info(
+    info: dict,
+    manual_key_columns: list[str],
+    source_schema: str,
+    table_name: str,
+) -> tuple[str, str, list[str], bool, bool]:
+    derived = _derive_cdc_key_info(info)
+    _key_type, _key_source, _key_columns, source_pk_exists, source_uk_exists = derived
+    if manual_key_columns:
+        if source_pk_exists or source_uk_exists:
+            raise ValueError(
+                f"CDC table {source_schema}.{table_name} already has PK/UK. "
+                "Manual CDC key columns are allowed only when PK/UK is missing."
+            )
+        missing_key_columns = _validate_manual_cdc_key_columns(info, manual_key_columns)
+        if missing_key_columns:
+            raise ValueError(
+                f"CDC key columns not found in {source_schema}.{table_name}: "
+                f"{', '.join(missing_key_columns)}"
+            )
+        return "USER_DEFINED", "USER", manual_key_columns, False, False
+    return derived
+
+
 @bp.get("/api/schema-migrations")
 def list_schema_migrations():
     if not _db_ok():
@@ -476,22 +500,13 @@ def add_plan_items(sm_id: str):
                             f"CDC table {src_schema}.{table_name} does not have "
                             "ALL COLUMNS supplemental logging."
                         )
-                    if manual_key_columns:
-                        missing_key_columns = _validate_manual_cdc_key_columns(info, manual_key_columns)
-                        if missing_key_columns:
-                            raise ValueError(
-                                f"CDC key columns not found in {src_schema}.{table_name}: "
-                                f"{', '.join(missing_key_columns)}"
-                            )
-                        effective_key_type = "USER_DEFINED"
-                        effective_key_source = "USER"
-                        effective_key_columns = manual_key_columns
-                    else:
-                        (effective_key_type,
-                         effective_key_source,
-                         effective_key_columns,
-                         source_pk_exists,
-                         source_uk_exists) = _derive_cdc_key_info(info)
+                    (effective_key_type,
+                     effective_key_source,
+                     effective_key_columns,
+                     source_pk_exists,
+                     source_uk_exists) = _effective_cdc_key_info(
+                        info, manual_key_columns, src_schema, table_name,
+                    )
                     if not source_pk_exists and not source_uk_exists and not effective_key_columns:
                         raise ValueError(
                             f"CDC table {src_schema}.{table_name} has no PK/UK and no key columns. "

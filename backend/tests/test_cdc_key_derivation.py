@@ -130,6 +130,37 @@ def test_schema_migration_rejects_missing_manual_cdc_key_columns():
     ) == ["MISSING_COL"]
 
 
+def test_schema_migration_manual_cdc_key_requires_missing_pk_uk():
+    try:
+        schema_migrations._effective_cdc_key_info(
+            {
+                "columns": [{"name": "ID"}, {"name": "ALT_ID"}],
+                "pk_columns": ["ID"],
+                "uk_constraints": [],
+            },
+            ["ALT_ID"],
+            "TCBPAY",
+            "ALLORDERS",
+        )
+    except ValueError as exc:
+        assert "allowed only when PK/UK is missing" in str(exc)
+    else:
+        raise AssertionError("expected manual CDC key rejection for PK table")
+
+
+def test_schema_migration_manual_cdc_key_for_no_key_table_is_user_defined():
+    assert schema_migrations._effective_cdc_key_info(
+        {
+            "columns": [{"name": "ID"}, {"name": "MERCHANT_ID"}],
+            "pk_columns": [],
+            "uk_constraints": [],
+        },
+        ["ID", "MERCHANT_ID"],
+        "TCBPAY",
+        "ALLORDERS",
+    ) == ("USER_DEFINED", "USER", ["ID", "MERCHANT_ID"], False, False)
+
+
 def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
