@@ -4,8 +4,6 @@ import { ObjectTable } from "./ObjectTable";
 import { ObjectDrawer } from "./ObjectDrawer";
 import { NewMigrationWizard } from "./NewMigrationWizard";
 import { DashboardEmptyState } from "./EmptyState";
-import { BulkCreateMigrationModal } from "./BulkCreateMigrationModal";
-import { AddToCdcGroupModal } from "./AddToCdcGroupModal";
 import { AddToPlanModal } from "./AddToPlanModal";
 import { PlanPanel } from "./PlanPanel";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
@@ -58,9 +56,7 @@ export function Dashboard({
   const [pageSize,     setPageSize]     = useState(25);
   const [migrateModalPrefill, setMigrateModalPrefill] = useState<MigrationPrefill | null>(null);
   const [selectedIds,         setSelectedIds]         = useState<Set<string>>(() => new Set());
-  const [bulkOpen,            setBulkOpen]            = useState(false);
-  const [cdcGroupOpen,        setCdcGroupOpen]        = useState(false);
-  const [planOpen,            setPlanOpen]            = useState(false);
+  const [planMode,            setPlanMode]            = useState<"historical" | "cdc" | null>(null);
   const [activePlanId,        setActivePlanId]        = useState<number | null>(planId ?? schema?.planId ?? null);
   const [planBusy,            setPlanBusy]            = useState(false);
   const [planErr,             setPlanErr]             = useState("");
@@ -305,51 +301,24 @@ export function Dashboard({
         <BulkSelectionBar
           count={selectedIds.size}
           onClear={() => setSelectedIds(new Set())}
-          onCreate={() => setBulkOpen(true)}
-          onCdcGroup={() => setCdcGroupOpen(true)}
-          onPlan={() => setPlanOpen(true)}
+          onCdcPack={() => setPlanMode("cdc")}
+          onBulkPack={() => setPlanMode("historical")}
         />
       )}
 
-      {bulkOpen && selectedTables.length > 0 && (
-        <BulkCreateMigrationModal
-          tables={selectedTables}
-          onClose={() => setBulkOpen(false)}
-          onCreated={() => {
-            setBulkOpen(false);
-            setSelectedIds(new Set());
-            objectsApi.reload();
-            eventsApi.reload();
-          }}
-        />
-      )}
-
-      {cdcGroupOpen && selectedTables.length > 0 && (
-        <AddToCdcGroupModal
-          tables={selectedTables}
-          onClose={() => setCdcGroupOpen(false)}
-          onDone={msg => {
-            setCdcGroupOpen(false);
-            setSelectedIds(new Set());
-            setToast(msg);
-            objectsApi.reload();
-            eventsApi.reload();
-            setTimeout(() => setToast(""), 5000);
-          }}
-        />
-      )}
-
-      {planOpen && selectedTables.length > 0 && selectedId && (
+      {planMode && selectedTables.length > 0 && selectedId && (
         <AddToPlanModal
           schemaMigrationId={selectedId}
           tables={selectedTables}
-          onClose={() => setPlanOpen(false)}
+          initialMode={planMode}
+          onClose={() => setPlanMode(null)}
           onDone={(planId, count) => {
-            setPlanOpen(false);
+            const target = planMode === "cdc" ? "CDC-пачку" : "обычную пачку";
+            setPlanMode(null);
             setSelectedIds(new Set());
             setActivePlanId(planId);
             onPlanChanged(planId);
-            setToast(`Добавлено в пачку: ${count}`);
+            setToast(`Добавлено в ${target}: ${count}`);
             objectsApi.reload();
             eventsApi.reload();
             planApi.reload();
@@ -417,9 +386,9 @@ export function Dashboard({
   );
 }
 
-function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup, onPlan }: {
-  count: number; onClear: () => void; onCreate: () => void;
-  onCdcGroup: () => void; onPlan: () => void;
+function BulkSelectionBar({ count, onClear, onCdcPack, onBulkPack }: {
+  count: number; onClear: () => void;
+  onCdcPack: () => void; onBulkPack: () => void;
 }) {
   return (
     <div style={{
@@ -441,14 +410,11 @@ function BulkSelectionBar({ count, onClear, onCreate, onCdcGroup, onPlan }: {
         Выбрано: <strong style={{ fontFamily: t.font.mono }}>{count}</strong>
       </span>
       <button onClick={onClear} style={secondaryActionStyle()}>Очистить</button>
-      <button onClick={onCdcGroup} style={secondaryActionStyle()}>
+      <button onClick={onCdcPack} style={secondaryActionStyle()}>
         В CDC-пачку ({count})
       </button>
-      <button onClick={onPlan} style={secondaryActionStyle()}>
-        В пачку ({count})
-      </button>
-      <button onClick={onCreate} style={primaryActionStyle(false)}>
-        Создать миграции ({count})
+      <button onClick={onBulkPack} style={secondaryActionStyle()}>
+        В обычную пачку ({count})
       </button>
     </div>
   );

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type { ConnectorGroup, MigrationSummary } from "../../types/migration";
-import { CreateGroupWizard } from "../CreateGroupWizard";
 import { t } from "../../theme";
 import type { GroupTable, TopicCount, GroupHistoryEntry } from "./types";
 import { STATUS_COLORS, actionBtn } from "./helpers";
@@ -12,7 +11,6 @@ import { MigrateModal } from "./MigrateModal";
 export function ConnectorGroupsPanel() {
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [loading,       setLoading]       = useState(true);
-  const [showCreate,    setShowCreate]    = useState(false);
   const [expanded,      setExpanded]      = useState<string | null>(null);
   const [detail,        setDetail]        = useState<(ConnectorGroup & { tables?: GroupTable[] }) | null>(null);
   const [configModal,   setConfigModal]   = useState<{ json: string; name: string } | null>(null);
@@ -138,34 +136,15 @@ export function ConnectorGroupsPanel() {
 
   return (
     <div>
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12,
-      }}>
+      <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: t.text.secondary }}>
           CDC-пачки
         </h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          style={{
-            background: t.bg.s3, border: `1px solid ${t.blue.dim}`,
-            borderRadius: t.radius.md, color: t.blue.fg,
-            padding: "5px 14px", fontSize: t.size.base, cursor: "pointer",
-          }}
-        >
-          + Создать CDC-пачку
-        </button>
       </div>
 
-      {showCreate && (
-        <CreateGroupWizard
-          onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); load(); }}
-        />
-      )}
-
-      {groups.length === 0 && !showCreate && (
+      {groups.length === 0 && (
         <div style={{ color: t.text.disabled, padding: 24, textAlign: "center" }}>
-          Нет CDC-пачек. Создайте пачку таблиц для одного Debezium-коннектора.
+          Нет CDC-пачек. Добавьте таблицы в CDC-пачку на экране "Эта миграция".
         </div>
       )}
 

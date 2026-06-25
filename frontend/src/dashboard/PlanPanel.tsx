@@ -65,8 +65,6 @@ export function PlanPanel({
   const currentBatch = batches.find(([, items]) => items.some(i => i.status === "RUNNING"))
     || batches.find(([, items]) => items.some(i => i.status === "PENDING"))
     || batches[batches.length - 1];
-  const modeCounts = countModes(plan.items);
-  const groupLabel = "Шаг";
 
   return (
     <Shell>
@@ -130,28 +128,43 @@ export function PlanPanel({
           pending={pending}
           failed={failed}
           currentBatch={currentBatch}
-          modeCounts={modeCounts}
-          groupLabel={groupLabel}
+          items={plan.items}
         />
       )}
 
       {variant === "detail" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {batches.map(([batch, items]) => (
-            <div key={batch} style={{
-              border: `1px solid ${t.border.subtle}`,
-              borderRadius: t.radius.md,
-              overflow: "hidden",
-              background: t.bg.s2,
-            }}>
+          {packGroups(plan.items).map(pack => (
+            <div key={pack.key} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{
-                display: "flex", justifyContent: "space-between", alignItems: "center",
-                padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
+                fontSize: 12,
+                fontWeight: 700,
+                color: t.text.primary,
+                padding: "4px 2px",
               }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>{groupLabel} {batch}</span>
-                <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
+                {pack.title} · {pack.items.length} таблиц
               </div>
-              {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
+              {pack.items.length === 0 ? (
+                <div style={{ fontSize: 12, color: t.text.muted, padding: "4px 2px" }}>
+                  Таблицы ещё не добавлены.
+                </div>
+              ) : groupBatches(pack.items).map(([batch, items]) => (
+                <div key={`${pack.key}-${batch}`} style={{
+                  border: `1px solid ${t.border.subtle}`,
+                  borderRadius: t.radius.md,
+                  overflow: "hidden",
+                  background: t.bg.s2,
+                }}>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "7px 10px", borderBottom: `1px solid ${t.border.subtle}`,
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Шаг {batch}</span>
+                    <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
+                  </div>
+                  {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -160,13 +173,25 @@ export function PlanPanel({
   );
 }
 
-function countModes(items: MigrationPlanItem[]) {
-  const out = new Map<string, number>();
+function groupBatches(items: MigrationPlanItem[]) {
+  const map = new Map<number, MigrationPlanItem[]>();
   for (const item of items) {
-    const mode = item.mode || item.strategy || "UNKNOWN";
-    out.set(mode, (out.get(mode) || 0) + 1);
+    const key = item.batch_order || 1;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(item);
   }
-  return Array.from(out.entries()).sort((a, b) => b[1] - a[1]);
+  return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
+}
+
+function isCdcItem(item: MigrationPlanItem) {
+  return item.mode === "CDC" || String(item.strategy || "").startsWith("CDC");
+}
+
+function packGroups(items: MigrationPlanItem[]) {
+  return [
+    { key: "bulk", title: "Обычная пачка", items: items.filter(i => !isCdcItem(i)) },
+    { key: "cdc", title: "CDC-пачка", items: items.filter(isCdcItem) },
+  ];
 }
 
 function PlanOverview({
@@ -177,8 +202,7 @@ function PlanOverview({
   pending,
   failed,
   currentBatch,
-  modeCounts,
-  groupLabel,
+  items,
 }: {
   batchCount: number;
   total: number;
@@ -187,8 +211,7 @@ function PlanOverview({
   pending: number;
   failed: number;
   currentBatch?: [number, MigrationPlanItem[]];
-  modeCounts: Array<[string, number]>;
-  groupLabel: string;
+  items: MigrationPlanItem[];
 }) {
   const [batchNo, batchItems]: [number, MigrationPlanItem[]] = currentBatch || [0, []];
   const batchDone = batchItems.filter(i => DONE.has(i.status)).length;
@@ -209,9 +232,13 @@ function PlanOverview({
         <Stat label="Failed" value={failed}/>
       </div>
 
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        {packGroups(items).map(pack => <PackCard key={pack.key} title={pack.title} items={pack.items}/>)}
+      </div>
+
       <div style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) minmax(160px, 260px)",
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: 10,
       }}>
         <div style={{
@@ -224,7 +251,7 @@ function PlanOverview({
           <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Текущий шаг запуска</div>
           {batchNo ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>{groupLabel} {batchNo}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>Шаг {batchNo}</span>
               <span style={{ fontSize: 12, color: t.text.muted }}>
                 {batchDone}/{batchItems.length} done · {batchRunning} running · {batchFailed} failed
               </span>
@@ -233,31 +260,6 @@ function PlanOverview({
             <div style={{ fontSize: 12, color: t.text.muted }}>Нет таблиц в пачке</div>
           )}
         </div>
-
-        <div style={{
-          padding: "8px 10px",
-          border: `1px solid ${t.border.subtle}`,
-          borderRadius: t.radius.md,
-          background: t.bg.s2,
-          minWidth: 0,
-        }}>
-          <div style={{ fontSize: 11, color: t.text.muted, marginBottom: 5 }}>Режимы</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {modeCounts.length === 0 ? (
-              <span style={{ fontSize: 12, color: t.text.muted }}>n/a</span>
-            ) : modeCounts.map(([mode, count]) => (
-              <span key={mode} style={{
-                padding: "3px 7px",
-                borderRadius: t.radius.sm,
-                border: `1px solid ${t.border.subtle}`,
-                background: t.bg.s1,
-                color: t.text.secondary,
-                fontSize: 11,
-                fontFamily: t.font.mono,
-              }}>{mode}: {count}</span>
-            ))}
-          </div>
-        </div>
       </div>
 
       {pending > 0 && running === 0 && failed === 0 && (
@@ -265,6 +267,35 @@ function PlanOverview({
           Готово к запуску: в очереди {pending} таблиц.
         </div>
       )}
+    </div>
+  );
+}
+
+function PackCard({ title, items }: { title: string; items: MigrationPlanItem[] }) {
+  const done = items.filter(i => DONE.has(i.status)).length;
+  const running = items.filter(i => i.status === "RUNNING").length;
+  const failed = items.filter(i => BAD.has(i.status)).length;
+  const steps = new Set(items.map(i => i.batch_order || 1)).size;
+  return (
+    <div style={{
+      padding: "9px 10px",
+      border: `1px solid ${t.border.subtle}`,
+      borderRadius: t.radius.md,
+      background: t.bg.s2,
+      minWidth: 0,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: t.text.primary }}>{title}</div>
+        <Badge tone={failed ? "bad" : running ? "run" : done && done === items.length ? "ok" : "idle"}>
+          {items.length ? `${done}/${items.length}` : "empty"}
+        </Badge>
+      </div>
+      <div style={{ marginTop: 7, display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: t.text.muted }}>
+        <span>Таблиц: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{items.length}</strong></span>
+        <span>Шагов: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{steps}</strong></span>
+        <span>Running: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{running}</strong></span>
+        <span>Failed: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{failed}</strong></span>
+      </div>
     </div>
   );
 }

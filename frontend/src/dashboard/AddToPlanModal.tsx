@@ -4,7 +4,6 @@ import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import { addSchemaPlanItems, type AddPlanItemsPayload } from "./api";
-import type { ConnectorGroup } from "../types/migration";
 
 interface BulkTable {
   source_schema: string;
@@ -16,40 +15,31 @@ interface BulkTable {
 interface Props {
   schemaMigrationId: string;
   tables: BulkTable[];
+  initialMode?: "historical" | "cdc";
   onClose: () => void;
   onDone: (planId: number, count: number) => void;
 }
 
-export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: Props) {
-  const [mode, setMode] = useState<"historical" | "cdc">("historical");
-  const [strategy, setStrategy] = useState<AddPlanItemsPayload["strategy"]>("BULK_DIRECT");
-  const [connectorGroupId, setConnectorGroupId] = useState("");
+export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", onClose, onDone }: Props) {
+  const [mode, setMode] = useState<"historical" | "cdc">(initialMode);
+  const [strategy, setStrategy] = useState<AddPlanItemsPayload["strategy"]>(
+    initialMode === "cdc" ? "CDC_DIRECT" : "BULK_DIRECT",
+  );
   const [sequential, setSequential] = useState(true);
   const [truncateTarget, setTruncateTarget] = useState(true);
   const [chunkSize, setChunkSize] = useState(1_000_000);
   const [workers, setWorkers] = useState(1);
   const [baselinePd, setBaselinePd] = useState(4);
   const [stageTablespace, setStageTablespace] = useState("PAYSTAGE");
-  const [groups, setGroups] = useState<ConnectorGroup[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const usesStage = strategy.endsWith("_STAGE");
-  const runningGroups = groups.filter(g => g.status === "RUNNING");
 
   useEffect(() => {
-    fetch("/api/connector-groups")
-      .then(r => r.ok ? r.json() : [])
-      .then((data: ConnectorGroup[]) => setGroups(data))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (mode !== "cdc") return;
-    if (!connectorGroupId && runningGroups.length > 0) {
-      setConnectorGroupId(runningGroups[0].group_id);
-    }
-  }, [mode, connectorGroupId, runningGroups]);
+    setPackMode(initialMode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMode]);
 
   useEffect(() => {
     if (usesStage && !truncateTarget) setTruncateTarget(true);
@@ -61,7 +51,6 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
     if (next === "historical") {
       setStrategy("BULK_DIRECT");
       setWorkers(1);
-      setConnectorGroupId("");
     } else {
       setStrategy("CDC_DIRECT");
       setWorkers(4);
@@ -73,18 +62,12 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
     setBusy(true);
     setErr("");
     try {
-      if (mode === "cdc" && !connectorGroupId) {
-        setErr("Для CDC-пачки выберите RUNNING CDC-пачку.");
-        setBusy(false);
-        return;
-      }
       const payload: AddPlanItemsPayload = {
         tables: tables.map(t => ({
           source_table: t.source_table,
           target_table: t.target_table || t.source_table,
         })),
         strategy,
-        connector_group_id: mode === "cdc" ? connectorGroupId : undefined,
         sequential,
         truncate_target: truncateTarget,
         chunk_size: chunkSize,
@@ -106,7 +89,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
       <div style={{ ...S.modal, maxWidth: 640 }}>
         <div style={S.header}>
           <span style={{ fontSize: 15, fontWeight: 700, color: t.text.primary }}>
-            Добавить в пачку таблиц
+            {mode === "cdc" ? "Добавить в CDC-пачку" : "Добавить в обычную пачку"}
           </span>
           <span style={{ fontSize: 12, color: t.text.muted, fontFamily: t.font.mono }}>
             {tables.length} таблиц
@@ -142,7 +125,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
                   color: mode === "historical" ? t.green.fg : t.text.primary,
                 }}
               >
-                Исторические без CDC
+                Обычная пачка
               </button>
               <button
                 type="button"
@@ -155,7 +138,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
                   color: mode === "cdc" ? t.blue.fg : t.text.primary,
                 }}
               >
-                CDC пачка
+                CDC-пачка
               </button>
             </div>
             <div style={{
@@ -168,7 +151,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
               lineHeight: 1.45,
             }}>
               {mode === "cdc"
-                ? "CDC-пачка создаёт DRAFT-миграции с выбранной CDC-пачкой. После старта batch coordinator запустит bulk и CDC apply по обычному CDC flow."
+                ? "Таблицы попадут в единственную CDC-пачку этой миграции. Если её ещё нет, coordinator создаст её автоматически. Запуск коннектора выполняется отдельно на экране CDC-пачки."
                 : "SCN не фиксируется. Используйте только для таблиц, которые уже не меняются на source. Для DIRECT target будет подготовлен перед загрузкой: триггеры отключаются, вторичные индексы пересчитываются после переноса."}
             </div>
             <Field label="Стратегия">
@@ -186,24 +169,6 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
                 )}
               </select>
             </Field>
-            {mode === "cdc" && (
-              <Field label="CDC-пачка (RUNNING)" required>
-                <select
-                  value={connectorGroupId}
-                  onChange={e => setConnectorGroupId(e.target.value)}
-                  style={S.select}
-                  disabled={runningGroups.length === 0}
-                >
-                  {runningGroups.length === 0 ? (
-                    <option value="">нет запущенных CDC-пачек</option>
-                  ) : runningGroups.map(g => (
-                    <option key={g.group_id} value={g.group_id}>
-                      {g.group_name} · {g.topic_prefix}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
             {usesStage && (
               <Field label="Stage tablespace">
                 <input value={stageTablespace} onChange={e => setStageTablespace(e.target.value)} style={S.input}/>
@@ -214,7 +179,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
           <Section title="Порядок и нагрузка">
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
               <input type="checkbox" checked={sequential} onChange={e => setSequential(e.target.checked)} />
-              <span>Каждую таблицу отдельным batch, переносить по очереди</span>
+              <span>Каждую таблицу отдельным шагом, переносить по очереди</span>
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: t.text.primary }}>
               <input
@@ -260,7 +225,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, onClose, onDone }: P
         <div style={S.footer}>
           <button onClick={onClose} disabled={busy} style={secondaryActionStyle(busy)}>Отмена</button>
           <button onClick={submit} disabled={busy} style={primaryActionStyle(busy)}>
-            {busy ? "Добавление..." : "Добавить в пачку"}
+            {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-пачку" : "Добавить в обычную пачку"}
           </button>
         </div>
       </div>

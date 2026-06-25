@@ -234,9 +234,7 @@ def add_plan_items(sm_id: str):
     truncate_target = bool(payload.get("truncate_target", True))
     if strategy.uses_stage and not truncate_target:
         return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
-    connector_group_id = payload.get("connector_group_id")
-    if strategy.has_cdc and not connector_group_id:
-        return jsonify({"error": "connector_group_id required for CDC strategy"}), 400
+    connector_group_id = payload.get("connector_group_id") or None
 
     sequential = bool(payload.get("sequential", True))
     chunk_size = int(payload.get("chunk_size") or 1_000_000)
@@ -249,7 +247,7 @@ def add_plan_items(sm_id: str):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT schema_migration_id, name, src_schema, tgt_schema, plan_id
+                SELECT schema_migration_id, name, src_schema, tgt_schema, plan_id, group_id
                 FROM   schema_migrations
                 WHERE  schema_migration_id = %s
                 FOR UPDATE
@@ -257,12 +255,37 @@ def add_plan_items(sm_id: str):
             row = cur.fetchone()
             if not row:
                 return jsonify({"error": "schema_migration not found"}), 404
-            _, sm_name, src_schema, tgt_schema, plan_id = row
+            _, sm_name, src_schema, tgt_schema, plan_id, sm_group_id = row
             src_schema = (src_schema or "").strip().upper()
             tgt_schema = (tgt_schema or "").strip().upper()
             if not src_schema or not tgt_schema:
                 return jsonify({"error": "schema migration src_schema/tgt_schema required"}), 400
             if strategy.has_cdc:
+                connector_group_id = sm_group_id or connector_group_id
+                if connector_group_id is None:
+                    connector_group_id = str(uuid.uuid4())
+                    suffix = connector_group_id.split("-")[0]
+                    base = f"{src_schema.lower()}_{tgt_schema.lower()}_{suffix}"
+                    cur.execute("""
+                        INSERT INTO connector_groups
+                            (group_id, group_name, source_connection_id,
+                             connector_name, topic_prefix, consumer_group_prefix)
+                        VALUES (%s, %s, 'oracle_source', %s, %s, %s)
+                    """, (
+                        connector_group_id,
+                        f"{src_schema}->{tgt_schema} CDC",
+                        f"sm_{base}_connector",
+                        f"sm.{src_schema.lower()}.{tgt_schema.lower()}.{suffix}",
+                        f"sm.{src_schema.lower()}.{tgt_schema.lower()}.{suffix}",
+                    ))
+                if sm_group_id is None:
+                    cur.execute("""
+                        UPDATE schema_migrations
+                        SET    group_id = %s,
+                               updated_at = NOW()
+                        WHERE  schema_migration_id = %s
+                    """, (connector_group_id, sm_id))
+
                 cur.execute("""
                     SELECT status, topic_prefix, run_id
                     FROM   connector_groups
@@ -271,9 +294,7 @@ def add_plan_items(sm_id: str):
                 group_row = cur.fetchone()
                 if not group_row:
                     return jsonify({"error": "connector group not found"}), 400
-                group_status, group_topic_prefix, group_run_id = group_row
-                if group_status != "RUNNING":
-                    return jsonify({"error": f"connector group is {group_status}, expected RUNNING"}), 400
+                _group_status, group_topic_prefix, group_run_id = group_row
                 active_topic_prefix = (
                     f"{group_topic_prefix}.{group_run_id}"
                     if group_run_id else group_topic_prefix
