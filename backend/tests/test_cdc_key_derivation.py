@@ -1477,14 +1477,14 @@ def test_connector_group_topic_creation_uses_active_run_topic_names(monkeypatch)
                 "row-1",
                 "gid-1",
                 "TCBPAY",
-                "ALLORDERS",
+                "MERCHANTS#ORDERS",
                 "TCBPAY",
-                "ALLORDERS",
+                "MERCHANTS#ORDERS",
                 "PRIMARY_KEY",
                 '["ID"]',
                 True,
                 False,
-                "stale.topic.TCBPAY.ALLORDERS",
+                "stale.topic.TCBPAY.MERCHANTS_ORDERS",
                 None,
             )]
 
@@ -1516,10 +1516,10 @@ def test_connector_group_topic_creation_uses_active_run_topic_names(monkeypatch)
     )
 
     assert connector_groups.create_group_topics("gid-1") == [
-        {"topic_name": "base.topic.r123ab.TCBPAY.ALLORDERS", "status": "ok"},
+        {"topic_name": "base.topic.r123ab.TCBPAY.MERCHANTS_ORDERS", "status": "ok"},
     ]
     assert created_topics == [
-        (["k:9092"], "base.topic.r123ab.TCBPAY.ALLORDERS"),
+        (["k:9092"], "base.topic.r123ab.TCBPAY.MERCHANTS_ORDERS"),
     ]
 
 
