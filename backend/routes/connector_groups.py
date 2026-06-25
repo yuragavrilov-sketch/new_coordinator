@@ -395,11 +395,12 @@ def group_history(group_id: str):
 @bp.post("/api/connector-groups/<group_id>/refresh-tables")
 def refresh_tables(group_id: str):
     """Re-sync table.include.list and message.key.columns from group_tables."""
-    from services.connector_groups import refresh_connector_tables
+    from services.connector_groups import get_group, refresh_connector_tables
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
+    group = get_group(group_id) or {}
     plan_starts = []
     plan_start_error = None
     cdc_queue_kicked = False
@@ -411,6 +412,7 @@ def refresh_tables(group_id: str):
         plan_start_error = str(exc)
     return jsonify({
         "ok": True,
+        "status": group.get("status"),
         "plan_starts": plan_starts,
         "plan_start_error": plan_start_error,
         "cdc_queue_kicked": cdc_queue_kicked,

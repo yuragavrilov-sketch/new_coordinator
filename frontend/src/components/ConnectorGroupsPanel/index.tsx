@@ -198,9 +198,13 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
         setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
         return;
       }
+      const status = String(body.status || "").toUpperCase();
+      const prefix = status && status !== "RUNNING"
+        ? `CDC-коннектор ${status}; Debezium синхронизируется после запуска`
+        : "Debezium синхронизирован";
       setActionMsg(continuationMessage(
         body,
-        "Debezium синхронизирован",
+        prefix,
         "запущено CDC строк",
         "CDC строк переведено в ожидание коннектора",
       ));

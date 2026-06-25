@@ -290,6 +290,11 @@ def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
         lambda group_id: calls.append(("refresh", group_id)),
     )
     monkeypatch.setattr(
+        connector_groups_svc,
+        "get_group",
+        lambda group_id: calls.append(("get-group", group_id)) or {"group_id": group_id, "status": "RUNNING"},
+    )
+    monkeypatch.setattr(
         connector_groups,
         "_start_pending_cdc_plan_batches_for_group",
         lambda group_id: calls.append(("start-pending", group_id)) or [
@@ -305,12 +310,14 @@ def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
     assert res.status_code == 200
     assert res.get_json() == {
         "ok": True,
+        "status": "RUNNING",
         "plan_starts": [{"batch": 4, "started": ["mid-1"]}],
         "plan_start_error": None,
         "cdc_queue_kicked": False,
     }
     assert calls == [
         ("refresh", "gid-1"),
+        ("get-group", "gid-1"),
         ("start-pending", "gid-1"),
     ]
 
@@ -459,12 +466,14 @@ def test_refresh_tables_kicks_existing_new_cdc_when_group_running(monkeypatch):
     assert res.status_code == 200
     assert res.get_json() == {
         "ok": True,
+        "status": "RUNNING",
         "plan_starts": [],
         "plan_start_error": None,
         "cdc_queue_kicked": True,
     }
     assert calls == [
         ("refresh", "gid-1"),
+        ("get-group", "gid-1"),
         ("start-pending", "gid-1"),
         ("get-group", "gid-1"),
         ("has-new", "gid-1"),

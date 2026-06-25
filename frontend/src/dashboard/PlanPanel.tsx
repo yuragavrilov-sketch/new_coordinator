@@ -103,15 +103,19 @@ export function PlanPanel({
       if (body.plan_start_error) {
         setCdcActionErr(`Debezium синхронизирован, но CDC очередь не продолжена: ${body.plan_start_error}`);
       } else {
+        const status = String(body.status || group.status || "").toUpperCase();
+        const syncText = status && status !== "RUNNING"
+          ? `CDC-коннектор ${status}; Debezium синхронизируется после запуска`
+          : "Debezium синхронизирован";
         const startedCount = (body.plan_starts || []).reduce(
           (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
           0,
         );
         setCdcActionInfo(startedCount
-          ? `Debezium синхронизирован, запущено CDC строк: ${startedCount}`
+          ? `${syncText}, ${status === "RUNNING" ? "запущено CDC строк" : "CDC строк ждут коннектор"}: ${startedCount}`
           : body.cdc_queue_kicked
-            ? "Debezium синхронизирован, очередь CDC продолжена"
-            : "Debezium синхронизирован");
+            ? `${syncText}, очередь CDC продолжена`
+            : syncText);
       }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
