@@ -405,6 +405,21 @@ def _effective_cdc_key_info(
     return derived
 
 
+def _require_cdc_supplemental_logging(info: dict, source_schema: str, table_name: str) -> None:
+    supp_log = str(info.get("supplemental_log_data_all") or "").strip().upper()
+    if supp_log == "YES":
+        return
+    if supp_log == "NO":
+        raise ValueError(
+            f"CDC table {source_schema}.{table_name} does not have "
+            "ALL COLUMNS supplemental logging."
+        )
+    raise ValueError(
+        f"CDC table {source_schema}.{table_name} supplemental logging could not be checked. "
+        "Grant access to V$DATABASE/ALL_LOG_GROUPS metadata or enable ALL COLUMNS supplemental logging and retry."
+    )
+
+
 @bp.get("/api/schema-migrations")
 def list_schema_migrations():
     if not _db_ok():
@@ -802,12 +817,7 @@ def add_plan_items(sm_id: str):
                         src_oconn = _source_oracle_conn()
                     from db.oracle_browser import get_table_info
                     info = get_table_info(src_oconn, src_schema, table_name)
-                    supp_log = str(info.get("supplemental_log_data_all") or "").upper()
-                    if supp_log == "NO":
-                        raise ValueError(
-                            f"CDC table {src_schema}.{table_name} does not have "
-                            "ALL COLUMNS supplemental logging."
-                        )
+                    _require_cdc_supplemental_logging(info, src_schema, table_name)
                     (effective_key_type,
                      effective_key_source,
                      effective_key_columns,

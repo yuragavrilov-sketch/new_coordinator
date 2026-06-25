@@ -1298,6 +1298,29 @@ def test_schema_migration_manual_cdc_key_for_no_key_table_is_user_defined():
     ) == ("USER_DEFINED", "USER", ["ID", "MERCHANT_ID"], False, False)
 
 
+def test_schema_migration_requires_known_cdc_supplemental_logging():
+    schema_migrations._require_cdc_supplemental_logging(
+        {"supplemental_log_data_all": "YES"},
+        "TCBPAY",
+        "ALLORDERS",
+    )
+
+    for value, expected in [
+        ("NO", "does not have ALL COLUMNS supplemental logging"),
+        (None, "supplemental logging could not be checked"),
+    ]:
+        try:
+            schema_migrations._require_cdc_supplemental_logging(
+                {"supplemental_log_data_all": value},
+                "TCBPAY",
+                "ALLORDERS",
+            )
+        except ValueError as exc:
+            assert expected in str(exc)
+        else:
+            raise AssertionError("expected supplemental logging rejection")
+
+
 def test_schema_migration_normalizes_manual_cdc_key_columns_from_csv():
     assert schema_migrations._normalize_manual_cdc_key_columns(
         " id, ID, merchant_id, "

@@ -261,8 +261,11 @@ export function AddToPlanModal({
             setErr(`${key}: ${info.error}`);
             return;
           }
-          if (hasSuppLog(info) === false) {
-            setErr(`${key}: для CDC нужен supplemental logging ALL COLUMNS.`);
+          const suppLog = hasSuppLog(info);
+          if (suppLog !== true) {
+            setErr(suppLog === false
+              ? `${key}: для CDC нужен supplemental logging ALL COLUMNS.`
+              : `${key}: не удалось проверить supplemental logging ALL COLUMNS.`);
             return;
           }
           if (info.pk_columns.length === 0 && info.uk_constraints.length === 0 && (keyColumns[key] ?? []).length === 0) {
