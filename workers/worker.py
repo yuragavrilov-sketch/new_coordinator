@@ -650,9 +650,13 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
             if time.time() - last_checkin_ts >= CDC_CHECKIN_SEC:
                 try:
                     total_lag, by_partition = _calc_lag(consumer, consumer_group, bootstrap)
-                    db.cdc_checkin(pg, migration_id, total_lag, rows_applied,
-                                   lag_by_partition=by_partition)
-                    print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied} parts={len(by_partition)}")
+                    if by_partition:
+                        db.cdc_checkin(pg, migration_id, total_lag, rows_applied,
+                                       lag_by_partition=by_partition)
+                        print(f"[cdc:{tag}] checkin lag={total_lag} rows={rows_applied} parts={len(by_partition)}")
+                    else:
+                        db.cdc_heartbeat(pg, migration_id)
+                        print(f"[cdc:{tag}] heartbeat only: no Kafka partitions assigned yet")
                 except Exception as exc:
                     print(f"[cdc:{tag}] checkin error: {exc}")
                     # Reconnect pg on error

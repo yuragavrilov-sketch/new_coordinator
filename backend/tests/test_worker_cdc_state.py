@@ -114,6 +114,20 @@ def test_cdc_checkin_recomputes_topic_from_migration_columns(monkeypatch):
     assert conn.committed is True
 
 
+def test_cdc_heartbeat_does_not_write_lag(monkeypatch):
+    monkeypatch.setattr(worker_common, "WORKER_ID", "worker-1")
+    conn = ConnStub()
+
+    worker_common.cdc_heartbeat(conn, "mid-1")
+
+    sql, params = conn.cur.executed[0]
+    assert "UPDATE migration_cdc_state" in sql
+    assert "total_lag" not in sql
+    assert "lag_by_partition" not in sql
+    assert params == ("worker-1", "mid-1")
+    assert conn.committed is True
+
+
 def test_fail_cdc_migration_marks_plan_item_and_plan_failed():
     conn = RowcountConnStub([1, 1, 1])
 

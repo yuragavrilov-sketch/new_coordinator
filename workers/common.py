@@ -455,6 +455,19 @@ def cdc_checkin(conn, migration_id: str, total_lag: int,
     conn.commit()
 
 
+def cdc_heartbeat(conn, migration_id: str) -> None:
+    """Refresh CDC worker heartbeat without declaring lag as measured."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE migration_cdc_state
+            SET    worker_id        = %s,
+                   worker_heartbeat = NOW(),
+                   updated_at       = NOW()
+            WHERE  migration_id = %s
+        """, (WORKER_ID, migration_id))
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Data comparison chunks
 # ---------------------------------------------------------------------------
