@@ -127,7 +127,13 @@ export function PlanPanel({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
+      const body = await res.json().catch(() => ({}));
       onReload();
+      if (body.sync_error) {
+        setCdcActionErr(`Таблица убрана из CDC-коннектора, но Debezium не синхронизирован: ${body.sync_error}`);
+      } else {
+        setCdcActionInfo(`${label} убрана из CDC-коннектора`);
+      }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -154,14 +160,23 @@ export function PlanPanel({
           </div>
         </div>
         {effectiveCdcGroup && (
-          <CdcConnectorCard
-            group={effectiveCdcGroup}
-            planItems={[]}
-            busyAction={cdcActionBusy}
-            onSync={syncCdcGroup}
-            onStart={startCdcGroup}
-            showExtraTables={false}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <CdcConnectorCard
+              group={effectiveCdcGroup}
+              planItems={[]}
+              busyAction={cdcActionBusy}
+              onSync={syncCdcGroup}
+              onStart={startCdcGroup}
+              showExtraTables={false}
+            />
+            <CdcConnectorDetails
+              group={effectiveCdcGroup}
+              planItems={[]}
+              planSourceSchema=""
+              busyKey={cdcActionBusy}
+              onRemoveExtra={removeCdcGroupTable}
+            />
+          </div>
         )}
         {cdcActionErr && (
           <div style={{
