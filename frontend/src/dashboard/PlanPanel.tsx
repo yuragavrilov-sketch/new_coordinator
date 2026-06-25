@@ -224,7 +224,13 @@ export function PlanPanel({
                     <span style={{ fontSize: 12, fontWeight: 700, color: t.text.primary }}>Позиция {batch}</span>
                     <span style={{ fontSize: 11, color: t.text.muted }}>{items.length} таблиц</span>
                   </div>
-                  {items.map(item => <PlanRow key={item.item_id} item={item}/>)}
+                  {items.map(item => (
+                    <PlanRow
+                      key={item.item_id}
+                      item={item}
+                      cdcGroupStatus={pack.key === "cdc" ? plan.cdc_group?.status : undefined}
+                    />
+                  ))}
                 </div>
               ))}
               {pack.key === "cdc" && plan.cdc_group && (
@@ -422,6 +428,11 @@ function CdcConnectorCard({
           In connector, not in this plan: {extraTables.map(tableLabel).join(", ")}
         </div>
       )}
+      {group.status !== "RUNNING" && planItems.some(item => String(item.phase || "").toUpperCase() === "NEW") && (
+        <div style={{ marginTop: 7, fontSize: 12, color: t.text.muted }}>
+          CDC rows are queued and will continue after connector status becomes RUNNING.
+        </div>
+      )}
       {group.table_include_list && (
         <MonoLine>table.include.list: {group.table_include_list}</MonoLine>
       )}
@@ -581,11 +592,11 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-function PlanRow({ item }: { item: MigrationPlanItem }) {
+function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupStatus?: string }) {
   const rowsLoaded = item.rows_loaded || 0;
   const totalRows = item.total_rows || 0;
   const progress = totalRows ? rowsLoaded / totalRows * 100 : undefined;
-  const status = item.phase || item.status;
+  const status = itemStatusLabel(item, cdcGroupStatus);
   const visual = itemVisualState(item);
   return (
     <div style={{
@@ -615,6 +626,17 @@ function PlanRow({ item }: { item: MigrationPlanItem }) {
       </div>
     </div>
   );
+}
+
+function itemStatusLabel(item: MigrationPlanItem, cdcGroupStatus?: string) {
+  const phase = String(item.phase || "").toUpperCase();
+  const status = String(item.status || "").toUpperCase();
+  const groupStatus = String(cdcGroupStatus || "").toUpperCase();
+  if (isCdcItem(item) && status === "RUNNING" && phase === "NEW") {
+    if (groupStatus && groupStatus !== "RUNNING") return `WAIT ${groupStatus}`;
+    return "LOAD QUEUE";
+  }
+  return item.phase || item.status;
 }
 
 function itemVisualState(item: MigrationPlanItem): "done" | "failed" | "queued" | "running" | "idle" {
