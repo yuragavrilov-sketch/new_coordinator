@@ -1028,12 +1028,41 @@ def test_schema_migration_reuses_plan_cdc_group_when_schema_group_is_empty():
     ) == "plan-gid"
 
 
+def test_schema_migration_accepts_matching_payload_cdc_group():
+    assert schema_migrations._resolve_cdc_connector_group_id(
+        sm_group_id="schema-gid",
+        plan_group_id="schema-gid",
+        payload_group_id="schema-gid",
+    ) == "schema-gid"
+
+
+def test_schema_migration_uses_payload_cdc_group_when_schema_has_none():
+    assert schema_migrations._resolve_cdc_connector_group_id(
+        sm_group_id=None,
+        plan_group_id=None,
+        payload_group_id="payload-gid",
+    ) == "payload-gid"
+
+
 def test_schema_migration_rejects_conflicting_cdc_groups():
     try:
         schema_migrations._resolve_cdc_connector_group_id(
             sm_group_id="schema-gid",
             plan_group_id="plan-gid",
             payload_group_id=None,
+        )
+    except ValueError as exc:
+        assert "only one CDC connector pack" in str(exc)
+    else:
+        raise AssertionError("expected CDC connector group conflict")
+
+
+def test_schema_migration_rejects_conflicting_payload_cdc_group():
+    try:
+        schema_migrations._resolve_cdc_connector_group_id(
+            sm_group_id="schema-gid",
+            plan_group_id="schema-gid",
+            payload_group_id="payload-gid",
         )
     except ValueError as exc:
         assert "only one CDC connector pack" in str(exc)
