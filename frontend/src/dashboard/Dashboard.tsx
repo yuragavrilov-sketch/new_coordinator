@@ -368,9 +368,9 @@ export function Dashboard({
           onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
             let autoStartOk = true;
-            if (response.connector_start_error) {
+            const connectorStartError = response.connector_start_error || "";
+            if (connectorStartError) {
               autoStartOk = false;
-              setPlanErr(`CDC-коннектор не стартовал: ${response.connector_start_error}`);
             }
             let startNote = "";
             if (planMode === "cdc") {
@@ -416,6 +416,12 @@ export function Dashboard({
               if (connectorStatus) {
                 startNote += ` · коннектор: ${connectorStatus}`;
               }
+              if (connectorStartError) {
+                setPlanErr(
+                  `CDC-коннектор не стартовал: ${connectorStartError}. ` +
+                  "Таблицы добавлены в очередь; запустите CDC-коннектор вручную."
+                );
+              }
             }
             setPlanMode(null);
             setSelectedIds(new Set());
@@ -427,7 +433,7 @@ export function Dashboard({
             setToast(
               autoStartOk
                 ? `Добавлено в ${target}: ${count}${startNote}`
-                : `Добавлено в ${target}: ${count} · проверьте ошибку автозапуска`
+                : `Добавлено в ${target}: ${count}${startNote} · коннектор требует внимания`
             );
             objectsApi.reload();
             eventsApi.reload();
