@@ -206,15 +206,17 @@ def add_group_tables(group_id: str):
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     # If the connector is already running, push table.include.list / key cols update
+    sync_error = None
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
-        return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
+        sync_error = f"CDC connector config sync failed: {exc}"
 
     return jsonify({
         "tables":           rows,
         "migrations":       [],
         "migrations_error": None,
+        "sync_error":       sync_error,
     }), 201
 
 

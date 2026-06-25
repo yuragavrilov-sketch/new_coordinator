@@ -101,11 +101,13 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
         alert(body?.error || `HTTP ${r.status}`);
         return;
       }
+      const body = await r.json().catch(() => ({}));
       const d = await fetch(`/api/connector-groups/${gid}`)
         .then(resp => resp.ok ? resp.json() : Promise.reject());
       setDetail(d);
       loadTopicCounts(gid);
       load();
+      if (body?.sync_error) alert(`Таблица удалена из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
     } catch (e) {
       alert(`Сеть: ${String(e)}`);
     }

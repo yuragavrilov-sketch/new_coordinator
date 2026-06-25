@@ -42,3 +42,42 @@ def test_remove_group_table_returns_warning_when_sync_fails_after_delete(monkeyp
         ("remove", "gid-1", "TCBPAY", "ALLORDERS"),
         ("refresh", "gid-1"),
     ]
+
+
+def test_add_group_tables_returns_warning_when_sync_fails_after_insert(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "add_tables",
+        lambda group_id, tables: calls.append(("add", group_id, tables)) or [
+            {"source_schema": "TCBPAY", "source_table": "ALLORDERS"},
+        ],
+    )
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)) or (
+            (_ for _ in ()).throw(RuntimeError("connect unavailable"))
+        ),
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post(
+        "/api/connector-groups/gid-1/tables",
+        json={"tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]},
+    )
+
+    assert res.status_code == 201
+    assert res.get_json() == {
+        "tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}],
+        "migrations": [],
+        "migrations_error": None,
+        "sync_error": "CDC connector config sync failed: connect unavailable",
+    }
+    assert calls == [
+        ("add", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
+        ("refresh", "gid-1"),
+    ]
