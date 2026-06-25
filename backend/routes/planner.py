@@ -81,7 +81,12 @@ def _plan_item_status_for_phase(phase: str | None) -> str | None:
 
 # ── helpers (reused from target_prep) ────────────────────────────────────────
 
-def _start_next_plan_batch(plan_id: int, *, actor: str = "USER") -> dict:
+def _start_next_plan_batch(
+    plan_id: int,
+    *,
+    actor: str = "USER",
+    batch_order: int | None = None,
+) -> dict:
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
@@ -94,17 +99,20 @@ def _start_next_plan_batch(plan_id: int, *, actor: str = "USER") -> dict:
             if plan["status"] not in ("READY", "RUNNING"):
                 raise ValueError(f"Cannot start plan in status {plan['status']}")
 
-            cur.execute("""
-                SELECT DISTINCT batch_order
-                FROM migration_plan_items
-                WHERE plan_id = %s AND status = 'PENDING'
-                ORDER BY batch_order
-                LIMIT 1
-            """, (plan_id,))
-            batch_row = cur.fetchone()
-            if not batch_row:
-                raise ValueError("No pending batches")
-            next_batch = batch_row[0]
+            if batch_order is None:
+                cur.execute("""
+                    SELECT DISTINCT batch_order
+                    FROM migration_plan_items
+                    WHERE plan_id = %s AND status = 'PENDING'
+                    ORDER BY batch_order
+                    LIMIT 1
+                """, (plan_id,))
+                batch_row = cur.fetchone()
+                if not batch_row:
+                    raise ValueError("No pending batches")
+                next_batch = batch_row[0]
+            else:
+                next_batch = int(batch_order)
 
             cur.execute("""
                 SELECT i.item_id, i.migration_id, i.mode, m.strategy, m.phase
@@ -114,6 +122,8 @@ def _start_next_plan_batch(plan_id: int, *, actor: str = "USER") -> dict:
                 ORDER BY i.sort_order, i.item_id
             """, (plan_id, next_batch))
             items = cur.fetchall()
+            if not items:
+                raise ValueError(f"No pending items for batch {next_batch}")
 
             cur.execute("""
                 SELECT i.mode, m.strategy

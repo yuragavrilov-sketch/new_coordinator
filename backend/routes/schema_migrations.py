@@ -567,7 +567,12 @@ def add_plan_items(sm_id: str):
                 })
                 try:
                     from routes.planner import _start_next_plan_batch
-                    plan_start = _start_next_plan_batch(plan_id, actor="SYSTEM")
+                    first_created_batch = min(item["batch_order"] for item in created)
+                    plan_start = _start_next_plan_batch(
+                        plan_id,
+                        actor="SYSTEM",
+                        batch_order=first_created_batch,
+                    )
                 except Exception as start_exc:
                     plan_start_error = str(start_exc)
                     print(f"[schema_migrations.add_plan_items] CDC plan autostart warning: {start_exc}")
