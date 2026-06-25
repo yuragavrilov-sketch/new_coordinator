@@ -95,6 +95,27 @@ def test_schema_migration_starts_each_created_cdc_queue_position(monkeypatch):
     ]
 
 
+def test_schema_migration_reuses_plan_cdc_group_when_schema_group_is_empty():
+    assert schema_migrations._resolve_cdc_connector_group_id(
+        sm_group_id=None,
+        plan_group_id="plan-gid",
+        payload_group_id=None,
+    ) == "plan-gid"
+
+
+def test_schema_migration_rejects_conflicting_cdc_groups():
+    try:
+        schema_migrations._resolve_cdc_connector_group_id(
+            sm_group_id="schema-gid",
+            plan_group_id="plan-gid",
+            payload_group_id=None,
+        )
+    except ValueError as exc:
+        assert "only one CDC connector pack" in str(exc)
+    else:
+        raise AssertionError("expected CDC connector group conflict")
+
+
 def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 

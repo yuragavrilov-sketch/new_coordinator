@@ -72,6 +72,24 @@ def _start_created_cdc_plan_batches(plan_id: int, created: list[dict]) -> list[d
     return starts
 
 
+def _resolve_cdc_connector_group_id(
+    sm_group_id,
+    plan_group_id,
+    payload_group_id,
+) -> str | None:
+    values = [
+        str(value)
+        for value in (sm_group_id, plan_group_id, payload_group_id)
+        if value
+    ]
+    if len(set(values)) > 1:
+        raise ValueError(
+            "CDC connector group mismatch between schema migration, plan and request. "
+            "A schema migration can use only one CDC connector pack."
+        )
+    return values[0] if values else None
+
+
 @bp.get("/api/schema-migrations")
 def list_schema_migrations():
     if not _db_ok():
@@ -284,21 +302,27 @@ def add_plan_items(sm_id: str):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT schema_migration_id, name, src_schema, tgt_schema, plan_id, group_id
-                FROM   schema_migrations
-                WHERE  schema_migration_id = %s
-                FOR UPDATE
+                SELECT sm.schema_migration_id, sm.name, sm.src_schema, sm.tgt_schema,
+                       sm.plan_id, sm.group_id, p.connector_group_id
+                FROM   schema_migrations sm
+                LEFT JOIN migration_plans p ON p.plan_id = sm.plan_id
+                WHERE  sm.schema_migration_id = %s
+                FOR UPDATE OF sm
             """, (sm_id,))
             row = cur.fetchone()
             if not row:
                 return jsonify({"error": "schema_migration not found"}), 404
-            _, sm_name, src_schema, tgt_schema, plan_id, sm_group_id = row
+            _, sm_name, src_schema, tgt_schema, plan_id, sm_group_id, plan_group_id = row
             src_schema = (src_schema or "").strip().upper()
             tgt_schema = (tgt_schema or "").strip().upper()
             if not src_schema or not tgt_schema:
                 return jsonify({"error": "schema migration src_schema/tgt_schema required"}), 400
             if strategy.has_cdc:
-                connector_group_id = sm_group_id or connector_group_id
+                connector_group_id = _resolve_cdc_connector_group_id(
+                    sm_group_id,
+                    plan_group_id,
+                    connector_group_id,
+                )
                 if connector_group_id is None:
                     connector_group_id = str(uuid.uuid4())
                     suffix = connector_group_id.split("-")[0]
