@@ -35,6 +35,11 @@ CDC_HEARTBEAT_STALE_MINUTES = int(os.environ.get("CDC_HEARTBEAT_STALE_MINUTES", 
 _STALE_MINUTES = 10
 
 
+def cdc_topic_name(topic_prefix: str, source_schema: str, source_table: str) -> str:
+    """Return the exact Kafka topic name used by Debezium and the CDC worker."""
+    return f"{topic_prefix}.{source_schema.upper()}.{source_table.upper()}".replace("#", "_")
+
+
 # ---------------------------------------------------------------------------
 # PostgreSQL
 # ---------------------------------------------------------------------------
@@ -379,21 +384,27 @@ def claim_cdc_migration(conn) -> Optional[dict]:
             "effective_key_columns_json",
         ]
         migration = dict(zip(keys, row))
+        topic = cdc_topic_name(
+            migration["topic_prefix"],
+            migration["source_schema"],
+            migration["source_table"],
+        )
 
         # Reserve: write our heartbeat immediately
         cur.execute("""
             INSERT INTO migration_cdc_state
                 (migration_id, consumer_group, topic,
                  total_lag, worker_id, worker_heartbeat, updated_at)
-            SELECT migration_id, consumer_group, topic_prefix,
+            SELECT migration_id, consumer_group, %s,
                    0, %s, NOW(), NOW()
             FROM   migrations
             WHERE  migration_id = %s
             ON CONFLICT (migration_id) DO UPDATE
                 SET worker_id        = EXCLUDED.worker_id,
+                    topic            = EXCLUDED.topic,
                     worker_heartbeat = NOW(),
                     updated_at       = NOW()
-        """, (WORKER_ID, migration["migration_id"]))
+        """, (topic, WORKER_ID, migration["migration_id"]))
 
     conn.commit()
     return migration
@@ -416,12 +427,16 @@ def cdc_checkin(conn, migration_id: str, total_lag: int,
                 (migration_id, consumer_group, topic,
                  total_lag, lag_by_partition,
                  rows_applied, worker_id, worker_heartbeat, updated_at)
-            SELECT migration_id, consumer_group, topic_prefix,
+            SELECT migration_id,
+                   consumer_group,
+                   REPLACE(COALESCE(topic_prefix, '') || '.' ||
+                           UPPER(source_schema) || '.' || UPPER(source_table), '#', '_'),
                    %s, %s::jsonb, %s, %s, NOW(), NOW()
             FROM   migrations
             WHERE  migration_id = %s
             ON CONFLICT (migration_id) DO UPDATE
                 SET total_lag        = EXCLUDED.total_lag,
+                    topic            = EXCLUDED.topic,
                     lag_by_partition = EXCLUDED.lag_by_partition,
                     rows_applied     = EXCLUDED.rows_applied,
                     worker_id        = EXCLUDED.worker_id,
