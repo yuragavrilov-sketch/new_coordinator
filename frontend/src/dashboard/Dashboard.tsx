@@ -14,6 +14,7 @@ import { type SchemaObject, type ObjectType, type MigrationEvent } from "./types
 import {
   type SchemaMigrationListItem,
   type MigrationPlanDetail,
+  type MigrationPlanCdcGroup,
   createSchemaMigration,
   startMigrationPlan,
 } from "./api";
@@ -76,10 +77,15 @@ export function Dashboard({
     activePlanId ? `/api/planner/plans/${activePlanId}` : null,
     { intervalMs: 5000 },
   );
+  const cdcGroupApi = useApi<MigrationPlanCdcGroup>(
+    selectedId ? `/api/schema-migrations/${selectedId}/cdc-group` : null,
+    { intervalMs: 5000 },
+  );
 
   const objects = objectsApi.data || [];
   const events  = eventsApi.data  || [];
   const tableObjects = useMemo(() => objects.filter(o => o.type === "TABLE"), [objects]);
+  const cdcGroup = planApi.data?.cdc_group || cdcGroupApi.data || null;
 
   useEffect(() => {
     setActivePlanId(planId ?? schema?.planId ?? null);
@@ -93,18 +99,21 @@ export function Dashboard({
       setActivePlanId(event.plan_id);
       objectsApi.reload();
       eventsApi.reload();
+      cdcGroupApi.reload();
       planApi.reload();
       return;
     }
 
-    if (event.type === "connector_group_status" && activePlanId) {
-      planApi.reload();
+    if (event.type === "connector_group_status") {
+      cdcGroupApi.reload();
+      if (activePlanId) planApi.reload();
       return;
     }
 
     if (event.type === "migration_phase" && activePlanId) {
       objectsApi.reload();
       eventsApi.reload();
+      cdcGroupApi.reload();
       planApi.reload();
     }
   }, [
@@ -113,6 +122,7 @@ export function Dashboard({
     activePlanId,
     objectsApi.reload,
     eventsApi.reload,
+    cdcGroupApi.reload,
     planApi.reload,
   ]);
 
@@ -343,11 +353,14 @@ export function Dashboard({
           schemaMigrationId={selectedId}
           tables={selectedTables}
           initialMode={planMode}
-          cdcGroup={planApi.data?.cdc_group || null}
-          cdcGroupLoading={planMode === "cdc" && !!activePlanId && planApi.loading && !planApi.data}
-          cdcGroupError={planMode === "cdc" && !!activePlanId && !planApi.data ? planApi.error : null}
+          cdcGroup={cdcGroup}
+          cdcGroupLoading={planMode === "cdc" && !cdcGroup && (cdcGroupApi.loading || (!!activePlanId && planApi.loading && !planApi.data))}
+          cdcGroupError={planMode === "cdc" ? (cdcGroupApi.error || (!!activePlanId && !planApi.data ? planApi.error : null)) : null}
           onClose={() => setPlanMode(null)}
-          onReloadCdcGroup={() => planApi.reload()}
+          onReloadCdcGroup={() => {
+            cdcGroupApi.reload();
+            planApi.reload();
+          }}
           onDone={async (planId, count, response) => {
             const target = planMode === "cdc" ? "CDC-коннектор" : "обычную пачку";
             let autoStartOk = true;
@@ -403,6 +416,7 @@ export function Dashboard({
             setPlanMode(null);
             setSelectedIds(new Set());
             setActivePlanId(planId);
+            cdcGroupApi.setData(response.cdc_group || null);
             onPlanChanged(planId);
             setToast(
               autoStartOk
@@ -411,6 +425,7 @@ export function Dashboard({
             );
             objectsApi.reload();
             eventsApi.reload();
+            cdcGroupApi.reload();
             planApi.reload();
             setTimeout(() => setToast(""), 5000);
           }}

@@ -357,6 +357,32 @@ def get_schema_migration(sm_id: str):
         conn.close()
 
 
+@bp.get("/api/schema-migrations/<sm_id>/cdc-group")
+def get_schema_migration_cdc_group(sm_id: str):
+    if not _db_ok():
+        return jsonify({"error": "DB unavailable"}), 503
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT sm.group_id, p.connector_group_id
+                FROM   schema_migrations sm
+                LEFT JOIN migration_plans p ON p.plan_id = sm.plan_id
+                WHERE  sm.schema_migration_id = %s
+            """, (sm_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Not found"}), 404
+            group_id = _resolve_cdc_connector_group_id(row[0], row[1], None)
+        return jsonify(_load_cdc_connector_summary(group_id))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        conn.close()
+
+
 @bp.get("/api/schema-migrations/<sm_id>/objects")
 def get_objects(sm_id: str):
     if not _db_ok():

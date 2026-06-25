@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from flask import Flask
+
 from routes import schema_migrations
 from routes import migrations
 from services import orchestrator
@@ -221,6 +223,56 @@ def test_schema_migration_does_not_queue_running_cdc_items_after_sync_error():
         "bad table.include.list",
     )
     assert schema_migrations._should_start_created_cdc_plan_batches("RUNNING", None)
+
+
+def test_schema_migration_cdc_group_endpoint_uses_schema_group_without_plan(monkeypatch):
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+        def fetchone(self):
+            return ("gid-schema", None)
+
+    class Conn:
+        def __init__(self):
+            self.cursor_obj = Cursor()
+            self.closed = False
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def close(self):
+            self.closed = True
+
+    conn = Conn()
+    monkeypatch.setitem(schema_migrations._state, "db_available", {"value": True})
+    monkeypatch.setitem(schema_migrations._state, "get_conn", lambda: conn)
+    monkeypatch.setattr(
+        schema_migrations,
+        "_load_cdc_connector_summary",
+        lambda group_id: {
+            "group_id": group_id,
+            "tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}],
+            "table_include_list": "TCBPAY.ALLORDERS",
+        },
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(schema_migrations.bp)
+
+    res = app.test_client().get("/api/schema-migrations/sm-1/cdc-group")
+
+    assert res.status_code == 200
+    assert res.get_json()["group_id"] == "gid-schema"
+    assert conn.cursor_obj.params == ("sm-1",)
+    assert conn.closed
 
 
 def test_schema_migration_records_stopped_connector_start_error_as_failed(monkeypatch):
