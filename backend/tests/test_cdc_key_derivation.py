@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from flask import Flask
 
 from routes import schema_migrations
@@ -773,6 +774,69 @@ def test_schema_migration_loads_created_plan_item_states_in_request_order():
             "error_text": None,
         },
     ]
+
+
+def test_schema_migration_prunes_cdc_group_tables_in_current_transaction():
+    calls = []
+
+    class Cursor:
+        def __init__(self):
+            self.fetchall_result = [
+                ("id-1", "TCBPAY", "ALLORDERS", "TCBPAY", "ALLORDERS"),
+                ("id-2", "TCBPAY", "OLDORDERS", "TCBPAY", "OLDORDERS"),
+            ]
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchall(self):
+            return self.fetchall_result
+
+        def fetchone(self):
+            return None
+
+    cur = Cursor()
+    removed = schema_migrations._prune_cdc_group_tables_tx(
+        cur,
+        "gid-1",
+        {"TCBPAY.ALLORDERS"},
+    )
+
+    assert removed == [{
+        "id": "id-2",
+        "source_schema": "TCBPAY",
+        "source_table": "OLDORDERS",
+        "target_schema": "TCBPAY",
+        "target_table": "OLDORDERS",
+    }]
+    sql = [call[1] for call in calls]
+    assert any("SELECT id, source_schema, source_table" in text for text in sql)
+    assert any("DELETE FROM group_tables" in text for text in sql)
+    assert calls[-1][2] == ("gid-1", "TCBPAY", "OLDORDERS")
+
+
+def test_schema_migration_prune_rejects_active_removed_cdc_table():
+    calls = []
+
+    class Cursor:
+        def execute(self, sql, params=None):
+            calls.append(("execute", " ".join(sql.split()), params))
+
+        def fetchall(self):
+            return [("id-2", "TCBPAY", "OLDORDERS", "TCBPAY", "OLDORDERS")]
+
+        def fetchone(self):
+            return ("mid-active", "CDC_APPLYING")
+
+    with pytest.raises(ValueError) as exc:
+        schema_migrations._prune_cdc_group_tables_tx(
+            Cursor(),
+            "gid-1",
+            {"TCBPAY.ALLORDERS"},
+        )
+
+    assert "active migration mid-active is in phase CDC_APPLYING" in str(exc.value)
+    assert not any("DELETE FROM group_tables" in call[1] for call in calls)
 
 
 def test_schema_migration_records_stopped_connector_start_error_as_failed(monkeypatch):

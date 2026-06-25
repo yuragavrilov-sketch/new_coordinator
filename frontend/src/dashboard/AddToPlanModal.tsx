@@ -64,6 +64,7 @@ export function AddToPlanModal({
   const [infoLoading, setInfoLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cdcRemoveBusy, setCdcRemoveBusy] = useState("");
+  const [replaceCdcPack, setReplaceCdcPack] = useState(false);
   const [hiddenCdcTableKeys, setHiddenCdcTableKeys] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState("");
 
@@ -82,11 +83,12 @@ export function AddToPlanModal({
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
   const connectorNewTables = tables.filter(t => !connectorTableKeys.has(rowKey(t)));
-  const cdcBulkRemoveBusy = cdcRemoveBusy === "__bulk__";
-  const projectedConnectorLabels = [
-    ...connectorTables.map(cdcTableLabel),
-    ...connectorNewTables.map(rowKey),
-  ];
+  const projectedConnectorLabels = replaceCdcPack
+    ? tables.map(rowKey)
+    : [
+        ...connectorTables.map(cdcTableLabel),
+        ...connectorNewTables.map(rowKey),
+      ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
@@ -199,6 +201,7 @@ export function AddToPlanModal({
   function setPackMode(next: "historical" | "cdc") {
     setMode(next);
     setErr("");
+    setReplaceCdcPack(false);
     if (next === "historical") {
       setStrategy("BULK_DIRECT");
       setWorkers(1);
@@ -232,47 +235,6 @@ export function AddToPlanModal({
       }
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
-    } finally {
-      setCdcRemoveBusy("");
-    }
-  }
-
-  async function removeOtherCdcTables() {
-    if (!cdcGroup || busy || cdcRemoveBusy || connectorOtherTables.length === 0) return;
-    const labels = connectorOtherTables.map(cdcTableLabel);
-    if (!window.confirm(
-      `Оставить в CDC-коннекторе только выбранные сейчас таблицы?\n\nБудут удалены из пачки: ${labels.join(", ")}.\nDebezium table.include.list будет обновлен.`,
-    )) return;
-    setCdcRemoveBusy("__bulk__");
-    setErr("");
-    try {
-      const res = await fetch(`/api/connector-groups/${cdcGroup.group_id}/tables/prune`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          keep_tables: tables.map(table => ({
-            source_schema: table.source_schema,
-            source_table: table.source_table,
-          })),
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-      const removedTables = Array.isArray(body.removed) ? body.removed : connectorOtherTables;
-      const removedLabels = removedTables.map(cdcTableLabel);
-      if (removedLabels.length > 0) {
-        setHiddenCdcTableKeys(prev => {
-          const next = new Set(prev);
-          for (const label of removedLabels) next.add(label);
-          return next;
-        });
-      }
-      await onReloadCdcGroup?.();
-      if (body.sync_error) {
-        setErr(`Таблицы убраны из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
-      }
     } finally {
       setCdcRemoveBusy("");
     }
@@ -339,6 +301,7 @@ export function AddToPlanModal({
         max_parallel_workers: workers,
         baseline_parallel_degree: baselinePd,
         stage_tablespace: usesStage ? stageTablespace.trim().toUpperCase() : undefined,
+        prune_cdc_pack: mode === "cdc" && replaceCdcPack && connectorOtherTables.length > 0,
       };
       const res = await addSchemaPlanItems(schemaMigrationId, payload);
       await onDone(res.plan_id, res.items.length, res);
@@ -507,21 +470,24 @@ export function AddToPlanModal({
                       <div style={{ color: t.amber.fg }}>
                         Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
                       </div>
-                      <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                        <button
-                          type="button"
-                          onClick={removeOtherCdcTables}
-                          disabled={!!cdcRemoveBusy || busy}
-                          style={{
-                            ...secondaryActionStyle(false),
-                            padding: "4px 9px",
-                            fontSize: 11,
-                            opacity: cdcBulkRemoveBusy ? 0.55 : 1,
-                          }}
-                        >
-                          {cdcBulkRemoveBusy ? "Очищаю пачку..." : "Оставить только выбранные"}
-                        </button>
-                      </div>
+                      <label style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "flex-start",
+                        color: t.text.secondary,
+                        cursor: busy || !!cdcRemoveBusy ? "default" : "pointer",
+                      }}>
+                        <input
+                          type="checkbox"
+                          checked={replaceCdcPack}
+                          disabled={busy || !!cdcRemoveBusy}
+                          onChange={e => setReplaceCdcPack(e.target.checked)}
+                          style={{ marginTop: 2 }}
+                        />
+                        <span>
+                          Заменить состав CDC-коннектора выбранными таблицами при добавлении. Лишние таблицы будут удалены из пачки в одной транзакции с созданием очереди; при ошибке пачка не изменится.
+                        </span>
+                      </label>
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (

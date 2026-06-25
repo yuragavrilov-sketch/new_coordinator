@@ -252,6 +252,7 @@ export interface AddPlanItemsPayload {
   max_parallel_workers: number;
   baseline_parallel_degree: number;
   stage_tablespace?: string;
+  prune_cdc_pack?: boolean;
 }
 
 export interface AddPlanItemsResp {
@@ -274,6 +275,7 @@ export interface AddPlanItemsResp {
   plan_start?: StartMigrationPlanResp | null;
   plan_starts?: StartMigrationPlanResp[] | null;
   plan_start_error?: string | null;
+  cdc_pruned_tables?: MigrationPlanCdcTable[];
 }
 
 export async function addSchemaPlanItems(

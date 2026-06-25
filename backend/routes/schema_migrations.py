@@ -238,6 +238,50 @@ def _active_cdc_migration_for_group_table(cur, group_id: str, source_schema: str
     return cur.fetchone()
 
 
+def _prune_cdc_group_tables_tx(cur, group_id: str, keep_tables: set[str]) -> list[dict]:
+    cur.execute("""
+        SELECT id, source_schema, source_table, target_schema, target_table
+        FROM   group_tables
+        WHERE  group_id = %s
+        ORDER BY source_schema, source_table
+    """, (group_id,))
+    rows = [
+        {
+            "id": str(row[0]),
+            "source_schema": row[1],
+            "source_table": row[2],
+            "target_schema": row[3],
+            "target_table": row[4],
+        }
+        for row in cur.fetchall()
+    ]
+    to_remove = [
+        row for row in rows
+        if f"{str(row['source_schema']).upper()}.{str(row['source_table']).upper()}" not in keep_tables
+    ]
+    for row in to_remove:
+        active = _active_cdc_migration_for_group_table(
+            cur,
+            group_id,
+            row["source_schema"],
+            row["source_table"],
+        )
+        if active:
+            active_mid, active_phase = active
+            raise ValueError(
+                f"Cannot remove {row['source_schema']}.{row['source_table']} from CDC connector: "
+                f"active migration {active_mid} is in phase {active_phase}"
+            )
+    for row in to_remove:
+        cur.execute("""
+            DELETE FROM group_tables
+            WHERE group_id = %s
+              AND UPPER(source_schema) = UPPER(%s)
+              AND UPPER(source_table) = UPPER(%s)
+        """, (group_id, row["source_schema"], row["source_table"]))
+    return to_remove
+
+
 def _resolve_cdc_connector_group_id(
     sm_group_id,
     plan_group_id,
@@ -289,6 +333,7 @@ def _build_add_plan_items_response_payload(
     plan_start: dict | None = None,
     plan_starts: list[dict] | None = None,
     plan_start_error: str | None = None,
+    cdc_pruned_tables: list[dict] | None = None,
 ) -> dict:
     return {
         "plan_id": plan_id,
@@ -296,6 +341,7 @@ def _build_add_plan_items_response_payload(
         "item_states": item_states or [],
         "connector_group_id": connector_group_id if strategy.has_cdc else None,
         "cdc_group": _load_cdc_connector_summary(connector_group_id) if strategy.has_cdc else None,
+        "cdc_pruned_tables": cdc_pruned_tables or [],
         "connector_start": connector_start,
         "connector_start_error": connector_start_error,
         "plan_start": plan_start,
@@ -647,6 +693,7 @@ def add_plan_items(sm_id: str):
     if strategy.uses_stage and not truncate_target:
         return jsonify({"error": "STAGE strategy requires truncate_target=true"}), 400
     connector_group_id = payload.get("connector_group_id") or None
+    prune_cdc_pack = bool(payload.get("prune_cdc_pack", False)) and strategy.has_cdc
 
     sequential = True if strategy.has_cdc else bool(payload.get("sequential", True))
     chunk_size = int(payload.get("chunk_size") or 1_000_000)
@@ -657,6 +704,7 @@ def add_plan_items(sm_id: str):
     conn = _state["get_conn"]()
     src_oconn = None
     connector_group_status = None
+    cdc_pruned_tables: list[dict] = []
     now = datetime.now(timezone.utc).isoformat()
     try:
         with conn.cursor() as cur:
@@ -753,6 +801,18 @@ def add_plan_items(sm_id: str):
                     SET    connector_group_id = COALESCE(connector_group_id, %s)
                     WHERE  plan_id = %s
                 """, (connector_group_id, plan_id))
+
+            if prune_cdc_pack:
+                keep_tables = {
+                    f"{src_schema}.{_requested_plan_table_name(table)}"
+                    for table in tables
+                    if _requested_plan_table_name(table)
+                }
+                cdc_pruned_tables = _prune_cdc_group_tables_tx(
+                    cur,
+                    connector_group_id,
+                    keep_tables,
+                )
 
             cur.execute("""
                 SELECT COALESCE(MAX(batch_order), 0)
@@ -986,6 +1046,7 @@ def add_plan_items(sm_id: str):
             plan_start=plan_start,
             plan_starts=plan_starts,
             plan_start_error=plan_start_error,
+            cdc_pruned_tables=cdc_pruned_tables,
         )), 201
     except ValueError as exc:
         conn.rollback()
