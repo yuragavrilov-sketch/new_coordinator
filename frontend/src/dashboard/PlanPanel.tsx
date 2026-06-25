@@ -384,6 +384,14 @@ function CdcConnectorCard({
     if (Array.isArray(raw)) return raw.length > 0;
     return String(raw || "[]") !== "[]";
   }).length;
+  const connectorPreview = connectorTables.slice(0, 6).map(tableLabel);
+  const connectorRest = Math.max(0, connectorTables.length - connectorPreview.length);
+  const hasRawConfig = Boolean(
+    group.table_include_list
+    || group.active_topic_prefix
+    || group.topic_prefix
+    || group.message_key_columns,
+  );
 
   return (
     <div style={{
@@ -423,6 +431,16 @@ function CdcConnectorCard({
         <span>CDC rows in plan: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{planItems.length}</strong></span>
         <span>Manual keys: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{keyColsCount}</strong></span>
       </div>
+      <div style={{ marginTop: 7, fontSize: 12, color: t.text.secondary, lineHeight: 1.45 }}>
+        {connectorPreview.length > 0 ? (
+          <>
+            Debezium читает: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{connectorPreview.join(", ")}</span>
+            {connectorRest > 0 && <span style={{ color: t.text.muted }}> +{connectorRest} еще</span>}
+          </>
+        ) : (
+          <span style={{ color: t.text.muted }}>В Debezium пока нет таблиц.</span>
+        )}
+      </div>
       {extraTables.length > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg }}>
           In connector, not in this plan: {extraTables.map(tableLabel).join(", ")}
@@ -433,14 +451,21 @@ function CdcConnectorCard({
           CDC rows are queued and will continue after connector status becomes RUNNING.
         </div>
       )}
-      {group.table_include_list && (
-        <MonoLine>table.include.list: {group.table_include_list}</MonoLine>
-      )}
-      {(group.active_topic_prefix || group.topic_prefix) && (
-        <MonoLine>topic.prefix: {group.active_topic_prefix || group.topic_prefix}</MonoLine>
-      )}
-      {group.message_key_columns && (
-        <MonoLine>message.key.columns: {group.message_key_columns}</MonoLine>
+      {hasRawConfig && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ cursor: "pointer", color: t.text.muted, fontSize: 11 }}>
+            Диагностика Debezium
+          </summary>
+          {group.table_include_list && (
+            <MonoLine>table.include.list: {group.table_include_list}</MonoLine>
+          )}
+          {(group.active_topic_prefix || group.topic_prefix) && (
+            <MonoLine>topic.prefix: {group.active_topic_prefix || group.topic_prefix}</MonoLine>
+          )}
+          {group.message_key_columns && (
+            <MonoLine>message.key.columns: {group.message_key_columns}</MonoLine>
+          )}
+        </details>
       )}
     </div>
   );
