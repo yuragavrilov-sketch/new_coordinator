@@ -14,7 +14,6 @@ from services.strategy import Strategy
 
 _ALLOWED_PHASES = {
     "COMPLETED",
-    "CDC_CATCHING_UP",
     "CDC_CAUGHT_UP",
     "STEADY_STATE",
 }

@@ -1063,7 +1063,7 @@ function shouldShowTriggerJob(item: MigrationPlanItem) {
   if (!item.migration_id) return false;
   const phase = String(item.phase || "").toUpperCase();
   if (isCdcItem(item)) {
-    return ["CDC_CATCHING_UP", "CDC_CAUGHT_UP", "STEADY_STATE"].includes(phase);
+    return ["CDC_CAUGHT_UP", "STEADY_STATE"].includes(phase);
   }
   return phase === "COMPLETED";
 }

@@ -116,7 +116,6 @@ export function MigrationDetailPanel({ migrationId, onClose, sseEvents = [] }: P
           {detail && (
             ((!isCdcMode(detail) && phase === "COMPLETED") ||
               (isCdcMode(detail) && (
-                phase === "CDC_CATCHING_UP" ||
                 phase === "CDC_CAUGHT_UP" ||
                 phase === "STEADY_STATE"
               ))) && (
