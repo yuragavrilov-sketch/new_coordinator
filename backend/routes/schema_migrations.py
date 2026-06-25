@@ -97,6 +97,37 @@ def _ensure_cdc_group_topics(group_id: str) -> list[dict]:
     return results
 
 
+def _is_missing_running_connector_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "marked RUNNING" in text and "missing in Kafka Connect" in text
+
+
+def _sync_and_request_cdc_connector_start(
+    connector_group_id: str,
+    connector_group_status: str | None,
+) -> dict:
+    """Sync Debezium config and request start after adding CDC tables.
+
+    Kafka Connect may no longer have a connector while coordinator state still
+    says RUNNING. In that case refresh marks the group STOPPED and raises; the
+    add-table flow should recover by requesting a fresh start.
+    """
+    from services.connector_groups import refresh_connector_tables, request_start
+
+    if connector_group_status == "RUNNING":
+        _ensure_cdc_group_topics(connector_group_id)
+    try:
+        refresh_connector_tables(connector_group_id)
+    except ValueError as exc:
+        if not _is_missing_running_connector_error(exc):
+            raise
+        print(
+            "[schema_migrations.add_plan_items] CDC connector missing in Kafka Connect; "
+            "requesting fresh start"
+        )
+    return request_start(connector_group_id)
+
+
 def _active_cdc_migration_for_group_table(cur, group_id: str, source_schema: str, source_table: str):
     cur.execute("""
         SELECT migration_id, phase
@@ -713,11 +744,10 @@ def add_plan_items(sm_id: str):
         plan_start_error = None
         if strategy.has_cdc:
             try:
-                from services.connector_groups import refresh_connector_tables, request_start
-                if connector_group_status == "RUNNING":
-                    _ensure_cdc_group_topics(connector_group_id)
-                refresh_connector_tables(connector_group_id)
-                connector_start = request_start(connector_group_id)
+                connector_start = _sync_and_request_cdc_connector_start(
+                    connector_group_id,
+                    connector_group_status,
+                )
                 _state["broadcast"]({
                     "type": "connector_group_status",
                     "group_id": connector_group_id,

@@ -22,6 +22,68 @@ def test_schema_migration_cdc_key_derivation_uses_unique_key():
     }) == ("UNIQUE_KEY", "UK", ["CODE", "DATE_ID"], False, True)
 
 
+def test_schema_migration_cdc_autostart_recovers_missing_running_connector(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_ensure_cdc_group_topics",
+        lambda group_id: calls.append(("topics", group_id)) or [],
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)) or (
+            (_ for _ in ()).throw(
+                ValueError("CDC connector cdc-main is marked RUNNING but is missing in Kafka Connect")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "request_start",
+        lambda group_id: calls.append(("start", group_id)) or {
+            "group_id": group_id,
+            "status": "TOPICS_CREATING",
+        },
+    )
+
+    result = schema_migrations._sync_and_request_cdc_connector_start("gid-1", "RUNNING")
+
+    assert result == {"group_id": "gid-1", "status": "TOPICS_CREATING"}
+    assert calls == [
+        ("topics", "gid-1"),
+        ("refresh", "gid-1"),
+        ("start", "gid-1"),
+    ]
+
+
+def test_schema_migration_cdc_autostart_keeps_refresh_errors_blocking(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)) or (
+            (_ for _ in ()).throw(ValueError("bad table.include.list"))
+        ),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "request_start",
+        lambda group_id: calls.append(("start", group_id)),
+    )
+
+    try:
+        schema_migrations._sync_and_request_cdc_connector_start("gid-1", "STOPPED")
+    except ValueError as exc:
+        assert "bad table.include.list" in str(exc)
+    else:
+        raise AssertionError("expected refresh error")
+
+    assert calls == [("refresh", "gid-1")]
+
+
 def test_orchestrator_source_key_derivation_returns_none_without_key():
     assert orchestrator._derive_source_key_from_info({
         "pk_columns": [],
