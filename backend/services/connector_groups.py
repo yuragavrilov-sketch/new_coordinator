@@ -473,15 +473,15 @@ def _build_table_include_list(group_id: str) -> str:
 
 
 def _build_key_columns(group_id: str) -> str:
-    """Build message.key.columns for tables without PK/UK.
+    """Build message.key.columns for tables whose key is not a source PK.
 
     Format: "SCHEMA.T1:col1,col2;SCHEMA.T2:colA,colB"
-    Tables WITH PK/UK are omitted — Debezium auto-detects their keys.
+    Tables with a source PK are omitted; UK/manual keys are sent explicitly.
     """
     tables = get_group_tables(group_id)
     parts = []
     for t in tables:
-        if t.get("source_pk_exists") or t.get("source_uk_exists"):
+        if t.get("source_pk_exists"):
             continue
         key_cols_json = t.get("effective_key_columns_json") or "[]"
         key_cols = json.loads(key_cols_json) if isinstance(key_cols_json, str) else key_cols_json

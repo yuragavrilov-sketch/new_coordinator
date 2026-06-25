@@ -111,7 +111,7 @@ def _group_table_include_list(tables: list[dict]) -> str:
 def _group_message_key_columns(tables: list[dict]) -> str:
     parts: list[str] = []
     for table in tables:
-        if table.get("source_pk_exists") or table.get("source_uk_exists"):
+        if table.get("source_pk_exists"):
             continue
         raw = table.get("effective_key_columns_json") or "[]"
         try:

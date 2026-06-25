@@ -1407,6 +1407,41 @@ def test_schema_migration_ensure_cdc_group_topics_raises_on_error(monkeypatch):
         raise AssertionError("expected CDC topic creation failure")
 
 
+def test_connector_group_key_columns_include_unique_keys(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group_tables",
+        lambda group_id: [
+            {
+                "source_schema": "TCBPAY",
+                "source_table": "ALLORDERS",
+                "source_pk_exists": False,
+                "source_uk_exists": True,
+                "effective_key_columns_json": '["ORDER_ID", "MERCHANT_ID"]',
+            },
+            {
+                "source_schema": "TCBPAY",
+                "source_table": "PAYMENTS",
+                "source_pk_exists": True,
+                "source_uk_exists": False,
+                "effective_key_columns_json": '["PAYMENT_ID"]',
+            },
+            {
+                "source_schema": "TCBPAY",
+                "source_table": "MANUAL_KEY_TABLE",
+                "source_pk_exists": False,
+                "source_uk_exists": False,
+                "effective_key_columns_json": ["ID"],
+            },
+        ],
+    )
+
+    assert (
+        connector_groups._build_key_columns("gid-1")
+        == "TCBPAY.ALLORDERS:ORDER_ID,MERCHANT_ID;TCBPAY.MANUAL_KEY_TABLE:ID"
+    )
+
+
 def test_connector_group_topic_creation_uses_active_run_topic_names(monkeypatch):
     from services import kafka_topics
 

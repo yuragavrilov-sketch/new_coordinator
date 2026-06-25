@@ -171,7 +171,7 @@ def test_group_table_include_list_is_whole_cdc_pack():
     )
 
 
-def test_group_message_key_columns_uses_only_tables_without_pk_or_uk():
+def test_group_message_key_columns_uses_non_pk_tables():
     tables = [
         {
             "source_schema": "TCBPAY",
@@ -183,13 +183,23 @@ def test_group_message_key_columns_uses_only_tables_without_pk_or_uk():
         {
             "source_schema": "TCBPAY",
             "source_table": "MERCHANTS",
+            "source_pk_exists": False,
+            "source_uk_exists": True,
+            "effective_key_columns_json": '["MERCHANT_ID"]',
+        },
+        {
+            "source_schema": "TCBPAY",
+            "source_table": "PAYMENTS",
             "source_pk_exists": True,
             "source_uk_exists": False,
             "effective_key_columns_json": '["ID"]',
         },
     ]
 
-    assert planner._group_message_key_columns(tables) == "TCBPAY.ALLORDERS:ID,MERCHANT_ID"
+    assert (
+        planner._group_message_key_columns(tables)
+        == "TCBPAY.ALLORDERS:ID,MERCHANT_ID;TCBPAY.MERCHANTS:MERCHANT_ID"
+    )
 
 
 def test_cdc_group_snapshot_uses_active_run_topic_names(monkeypatch):
