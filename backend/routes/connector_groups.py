@@ -166,41 +166,10 @@ def create_group_wizard():
         "status": "PENDING",
     })
 
-    # ── optionally create migrations (NEW) so they queue up for orchestrator ──
-    migrations_created: list[dict] = []
-    if body.get("create_migrations"):
-        try:
-            strategy = Strategy.parse(body.get("strategy") or "CDC_STAGE")
-        except ValueError as exc:
-            return jsonify({
-                "group": group_row, "tables": table_rows,
-                "migrations": [],
-                "migrations_error": f"Invalid strategy: {exc}",
-            }), 207
-        try:
-            from services.connector_groups import create_migrations_for_group_tables
-            migrations_created = create_migrations_for_group_tables(
-                gid, table_ids=None,
-                strategy=strategy,
-                stage_tablespace=body.get("stage_tablespace") or "PAYSTAGE",
-                truncate_target=bool(body.get("truncate_target", True)),
-                chunk_size=int(body.get("chunk_size") or 1_000_000),
-                max_parallel_workers=int(body.get("max_parallel_workers") or 1),
-                baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
-                baseline_batch_size=int(body.get("baseline_batch_size") or 500_000),
-                validate_hash_sample=bool(body.get("validate_hash_sample", False)),
-            )
-        except Exception as exc:
-            return jsonify({
-                "group": group_row, "tables": table_rows,
-                "migrations": [],
-                "migrations_error": str(exc),
-            }), 207
-
     return jsonify({
         "group":      group_row,
         "tables":     table_rows,
-        "migrations": migrations_created,
+        "migrations": [],
     }), 201
 
 
@@ -233,7 +202,6 @@ def add_group_tables(group_id: str):
         return jsonify(_legacy_cdc_migration_error()), 400
     from services.connector_groups import (
         add_tables, refresh_connector_tables,
-        create_migrations_for_group_tables,
     )
     try:
         rows = add_tables(group_id, tables)
@@ -245,33 +213,11 @@ def add_group_tables(group_id: str):
     except Exception as exc:
         return jsonify({"error": f"CDC connector config sync failed: {exc}"}), 409
 
-    # ── optionally create migrations for the new tables ──────────────────
-    migrations_created: list[dict] = []
-    migrations_error: str | None = None
-    if body.get("create_migrations"):
-        try:
-            strategy = Strategy.parse(body.get("strategy") or "CDC_STAGE")
-            new_ids = [r["id"] for r in rows]
-            migrations_created = create_migrations_for_group_tables(
-                group_id, table_ids=new_ids,
-                strategy=strategy,
-                stage_tablespace=body.get("stage_tablespace") or "PAYSTAGE",
-                truncate_target=bool(body.get("truncate_target", True)),
-                chunk_size=int(body.get("chunk_size") or 1_000_000),
-                max_parallel_workers=int(body.get("max_parallel_workers") or 1),
-                baseline_parallel_degree=int(body.get("baseline_parallel_degree") or 4),
-                baseline_batch_size=int(body.get("baseline_batch_size") or 500_000),
-                validate_hash_sample=bool(body.get("validate_hash_sample", False)),
-            )
-        except Exception as exc:
-            migrations_error = str(exc)
-
-    status_code = 207 if migrations_error else 201
     return jsonify({
         "tables":           rows,
-        "migrations":       migrations_created,
-        "migrations_error": migrations_error,
-    }), status_code
+        "migrations":       [],
+        "migrations_error": None,
+    }), 201
 
 
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
