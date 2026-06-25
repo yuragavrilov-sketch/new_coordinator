@@ -87,6 +87,14 @@ def _plan_item_status_for_phase(phase: str | None) -> str | None:
     return None
 
 
+def _refresh_queue_positions_best_effort() -> None:
+    try:
+        from services import orchestrator
+        orchestrator._update_queue_positions()
+    except Exception as exc:
+        print(f"[planner] queue position refresh warning: {exc}")
+
+
 def _group_table_include_list(tables: list[dict]) -> str:
     entries: list[str] = []
     for table in tables:
@@ -254,6 +262,7 @@ def _start_next_plan_batch(
             """, (now, plan_id))
 
         conn.commit()
+        _refresh_queue_positions_best_effort()
 
         broadcast = _state["broadcast"]
         for mid in started_ids:

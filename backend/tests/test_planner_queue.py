@@ -96,6 +96,18 @@ def test_plan_item_status_for_terminal_phase():
     assert planner._plan_item_status_for_phase("CANCELLED") == "CANCELLED"
 
 
+def test_queue_position_refresh_is_best_effort(monkeypatch):
+    from services import orchestrator
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_update_queue_positions",
+        lambda: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+
+    planner._refresh_queue_positions_best_effort()
+
+
 def test_group_table_include_list_is_whole_cdc_pack():
     tables = [
         {"source_schema": "tcbpay", "source_table": "allorders"},
