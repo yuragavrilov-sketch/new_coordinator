@@ -422,6 +422,31 @@ def _sync_group_table_key(m: dict, key_fields: dict) -> None:
         print(f"[orchestrator] refresh_connector_tables warning: {exc}")
 
 
+def _sync_cdc_runtime_context(mid: str, m: dict, group: dict) -> dict:
+    """Keep CDC migration topic/consumer fields aligned with its connector group."""
+    source_schema = (m.get("source_schema") or "").strip().upper()
+    source_table = (m.get("source_table") or "").strip().upper()
+    if not source_schema or not source_table:
+        return m
+
+    prefix = group.get("consumer_group_prefix") or group.get("topic_prefix") or ""
+    fields = {
+        "connector_name": connector_groups_svc._active_connector_name(group),
+        "topic_prefix": connector_groups_svc._active_topic_prefix(group),
+        "consumer_group": f"{prefix}_{source_schema}_{source_table}",
+    }
+    changes = {
+        key: value
+        for key, value in fields.items()
+        if value and (m.get(key) or "") != value
+    }
+    if not changes:
+        return m
+
+    _update(mid, changes)
+    return {**m, **changes}
+
+
 def _try_infer_cdc_key(mid: str, m: dict) -> dict | None:
     source_schema = (m.get("source_schema") or "").strip().upper()
     source_table = (m.get("source_table") or "").strip().upper()
@@ -1254,6 +1279,7 @@ def _handle_new(mid: str, m: dict) -> None:
             _update(mid, {"queue_position": None})
             _update_queue_positions()
             return
+        m = _sync_cdc_runtime_context(mid, m, group)
 
     # Queue gate (same as legacy)
     conn = _state["get_conn"]()

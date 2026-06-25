@@ -37,3 +37,37 @@ def test_orchestrator_source_key_derivation_serializes_pk():
     assert result["source_pk_exists"] is True
     assert result["effective_key_type"] == "PRIMARY_KEY"
     assert json.loads(result["effective_key_columns_json"]) == ["ID"]
+
+
+def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
+    updates = {}
+    monkeypatch.setattr(
+        orchestrator,
+        "_update",
+        lambda migration_id, fields: updates.update({"migration_id": migration_id, **fields}),
+    )
+
+    result = orchestrator._sync_cdc_runtime_context(
+        "mid-1",
+        {
+            "source_schema": "TCBPAY",
+            "source_table": "ALLORDERS",
+            "connector_name": "",
+            "topic_prefix": "",
+            "consumer_group": "",
+        },
+        {
+            "connector_name": "sm_tcbpay_pay_connector",
+            "topic_prefix": "sm.tcbpay.pay",
+            "consumer_group_prefix": "sm.tcbpay.pay",
+            "run_id": "r123ab",
+        },
+    )
+
+    assert updates == {
+        "migration_id": "mid-1",
+        "connector_name": "sm_tcbpay_pay_connector_r123ab",
+        "topic_prefix": "sm.tcbpay.pay.r123ab",
+        "consumer_group": "sm.tcbpay.pay_TCBPAY_ALLORDERS",
+    }
+    assert result["topic_prefix"] == "sm.tcbpay.pay.r123ab"
