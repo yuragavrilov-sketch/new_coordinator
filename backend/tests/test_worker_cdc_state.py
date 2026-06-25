@@ -100,6 +100,26 @@ def test_claim_cdc_migration_persists_exact_worker_topic(monkeypatch):
     assert "topic            = EXCLUDED.topic" in reserve_sql
 
 
+def test_claim_cdc_migration_excludes_active_ids_without_heartbeat_refresh(monkeypatch):
+    conn = ConnStub(row=None)
+
+    migration = worker_common.claim_cdc_migration(
+        conn,
+        exclude_migration_ids=["11111111-1111-1111-1111-111111111111"],
+    )
+
+    assert migration is None
+    assert conn.rolled_back is True
+    assert conn.committed is False
+    assert len(conn.cur.executed) == 1
+    select_sql, select_params = conn.cur.executed[0]
+    assert "m.migration_id = ANY(%s::uuid[])" in select_sql
+    assert select_params == (
+        worker_common.CDC_HEARTBEAT_STALE_MINUTES,
+        ["11111111-1111-1111-1111-111111111111"],
+    )
+
+
 def test_cdc_checkin_recomputes_topic_from_migration_columns(monkeypatch):
     monkeypatch.setattr(worker_common, "WORKER_ID", "worker-1")
     conn = ConnStub()

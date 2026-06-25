@@ -732,7 +732,7 @@ def cdc_manager(stop_event: threading.Event) -> None:
 
             # Claim a new CDC migration if available
             try:
-                migration = db.claim_cdc_migration(pg)
+                migration = db.claim_cdc_migration(pg, exclude_migration_ids=list(active))
                 if migration:
                     mid = migration["migration_id"]
                     if mid not in active:

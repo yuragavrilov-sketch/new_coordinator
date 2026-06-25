@@ -347,14 +347,23 @@ def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
 # CDC state
 # ---------------------------------------------------------------------------
 
-def claim_cdc_migration(conn) -> Optional[dict]:
+def claim_cdc_migration(conn, exclude_migration_ids: Optional[list[str]] = None) -> Optional[dict]:
     """
     Claim a CDC migration that has no active worker (heartbeat stale / absent).
     Immediately writes our heartbeat to prevent double-claiming.
+    exclude_migration_ids prevents this manager from refreshing heartbeat for
+    a CDC thread it already owns but that stopped checking in.
     Returns migration dict or None.
     """
+    exclude_ids = [str(mid) for mid in (exclude_migration_ids or []) if mid]
+    exclude_clause = ""
+    params: list = [CDC_HEARTBEAT_STALE_MINUTES]
+    if exclude_ids:
+        exclude_clause = "AND NOT (m.migration_id = ANY(%s::uuid[]))"
+        params.append(exclude_ids)
+
     with conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(f"""
             SELECT m.migration_id,
                    m.target_connection_id, m.target_schema, m.target_table,
                    m.source_schema, m.source_table,
@@ -367,10 +376,11 @@ def claim_cdc_migration(conn) -> Optional[dict]:
                      cs.worker_heartbeat IS NULL
                   OR cs.worker_heartbeat < NOW() - make_interval(mins => %s)
               )
+              {exclude_clause}
             ORDER BY m.state_changed_at
             LIMIT 1
             FOR UPDATE OF m SKIP LOCKED
-        """, (CDC_HEARTBEAT_STALE_MINUTES,))
+        """, tuple(params))
         row = cur.fetchone()
         if row is None:
             conn.rollback()
