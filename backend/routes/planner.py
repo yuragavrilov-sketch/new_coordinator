@@ -479,9 +479,13 @@ def get_plan(plan_id):
                        m.total_rows,
                        m.error_text,
                        m.queue_position,
-                       m.state_changed_at
+                       m.state_changed_at,
+                       cs.total_lag AS cdc_total_lag,
+                       cs.rows_applied AS cdc_rows_applied,
+                       cs.worker_heartbeat AS cdc_worker_heartbeat
                 FROM migration_plan_items i
                 LEFT JOIN migrations m ON m.migration_id = i.migration_id
+                LEFT JOIN migration_cdc_state cs ON cs.migration_id = m.migration_id
                 WHERE i.plan_id = %s
                 ORDER BY i.batch_order, i.sort_order
             """, (plan_id,))

@@ -172,6 +172,9 @@ export interface MigrationPlanItem {
   error_text?:      string | null;
   queue_position?:  number | null;
   state_changed_at?: string | null;
+  cdc_total_lag?:   number | null;
+  cdc_rows_applied?: number | null;
+  cdc_worker_heartbeat?: string | null;
 }
 
 export interface MigrationPlanCdcTable {

@@ -712,7 +712,14 @@ function PlanRow({ item, cdcGroupStatus }: { item: MigrationPlanItem; cdcGroupSt
       <Badge tone={visual === "done" ? "ok" : visual === "running" ? "run" : visual === "failed" ? "bad" : "idle"}>
         {status}
       </Badge>
-      <div style={{ fontFamily: t.font.mono, color: t.text.muted, textAlign: "right" }}>
+      <div style={{
+        fontFamily: t.font.mono,
+        color: t.text.muted,
+        textAlign: "right",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}>
         {progressText}
       </div>
     </div>
@@ -730,6 +737,17 @@ function itemProgressText(item: MigrationPlanItem, progress: number | undefined,
   }
   if (isCdcItem(item) && phase === "NEW") {
     return "следующая";
+  }
+  if (isCdcItem(item) && ["CDC_APPLYING", "CDC_CATCHING_UP", "STEADY_STATE"].includes(phase)) {
+    const rows = item.cdc_rows_applied ?? null;
+    const lag = item.cdc_total_lag ?? null;
+    if (rows !== null || lag !== null) {
+      const parts = [];
+      if (rows !== null) parts.push(`cdc ${rows}`);
+      if (lag !== null) parts.push(`lag ${lag}`);
+      return parts.join(" · ");
+    }
+    return "cdc active";
   }
   return progress === undefined ? "rows n/a" : `${progress.toFixed(0)}%`;
 }
