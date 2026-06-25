@@ -535,11 +535,6 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(
         orchestrator.connector_groups_svc,
-        "do_create_topics",
-        lambda group_id: calls.append(("topics", group_id)) or [{"topic_name": "t1", "status": "ok"}],
-    )
-    monkeypatch.setattr(
-        orchestrator.connector_groups_svc,
         "do_start_connector",
         lambda group_id: calls.append(("start", group_id)) or {"name": "cdc-1"},
     )
@@ -569,7 +564,6 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     orchestrator._handle_group_connector_starting("gid-1")
 
     assert calls == [
-        ("topics", "gid-1"),
         ("start", "gid-1"),
         ("refresh", "gid-1"),
         ("transition", "gid-1", "RUNNING"),
@@ -579,7 +573,7 @@ def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     ]
 
 
-def test_orchestrator_does_not_start_connector_when_topic_refresh_fails(monkeypatch):
+def test_orchestrator_marks_group_failed_when_connector_start_fails(monkeypatch):
     calls = []
 
     class ImmediateThread:
@@ -592,15 +586,10 @@ def test_orchestrator_does_not_start_connector_when_topic_refresh_fails(monkeypa
     monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(
         orchestrator.connector_groups_svc,
-        "do_create_topics",
-        lambda group_id: calls.append(("topics", group_id)) or [
-            {"topic_name": "t1", "status": "error", "error": "boom"}
-        ],
-    )
-    monkeypatch.setattr(
-        orchestrator.connector_groups_svc,
         "do_start_connector",
-        lambda group_id: calls.append(("start", group_id)) or {"name": "cdc-1"},
+        lambda group_id: calls.append(("start", group_id)) or (
+            (_ for _ in ()).throw(RuntimeError("connect failed"))
+        ),
     )
     monkeypatch.setattr(
         orchestrator.connector_groups_svc,
@@ -613,7 +602,7 @@ def test_orchestrator_does_not_start_connector_when_topic_refresh_fails(monkeypa
     orchestrator._handle_group_connector_starting("gid-1")
 
     assert calls == [
-        ("topics", "gid-1"),
+        ("start", "gid-1"),
         ("transition", "gid-1", "FAILED"),
         ("broadcast", "FAILED"),
     ]

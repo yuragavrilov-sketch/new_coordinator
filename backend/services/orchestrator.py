@@ -1837,18 +1837,6 @@ def _handle_group_connector_starting(group_id: str) -> None:
 
     def _run():
         try:
-            results = connector_groups_svc.do_create_topics(group_id)
-            errors = [r for r in results if r.get("status") == "error"]
-            if errors:
-                msg = "; ".join(f"{r['topic_name']}: {r.get('error','?')}" for r in errors)
-                connector_groups_svc.transition_group(
-                    group_id, "FAILED", f"Ошибка создания топиков: {msg}")
-                _broadcast({
-                    "type": "connector_group_status",
-                    "group_id": group_id, "status": "FAILED",
-                })
-                return
-
             result = connector_groups_svc.do_start_connector(group_id)
             connector_groups_svc.refresh_connector_tables(group_id)
             connector_groups_svc.transition_group(
