@@ -202,6 +202,21 @@ def create_migration():
     if initial_phase not in _VALID_PHASES:
         return jsonify({"error": f"Invalid initial_phase: {initial_phase}"}), 400
 
+    try:
+        strategy = Strategy.parse(body.get("strategy"))
+    except ValueError as exc:
+        return jsonify({"error": f"Invalid strategy: {exc}"}), 400
+    if strategy.has_cdc:
+        return jsonify({"error": _legacy_cdc_creation_error()}), 400
+
+    # ── truncate_target: default TRUE; STAGE forces TRUE ──
+    truncate_target = bool(body.get("truncate_target", True))
+    if strategy.uses_stage and truncate_target is False:
+        return jsonify({
+            "error": "STAGE-стратегия требует TRUNCATE target (поведение неизменяемо). "
+                     "Используйте DIRECT, если нужно сохранить существующие данные."
+        }), 400
+
     mid = str(uuid.uuid4())
     now = datetime.utcnow()
 
@@ -209,22 +224,6 @@ def create_migration():
         conn = _state["get_conn"]()
         try:
             with conn.cursor() as cur:
-                # ── Strategy: single enum field replaces mode + strategy ──
-                try:
-                    strategy = Strategy.parse(body.get("strategy"))
-                except ValueError as exc:
-                    return jsonify({"error": f"Invalid strategy: {exc}"}), 400
-                if strategy.has_cdc:
-                    return jsonify({"error": _legacy_cdc_creation_error()}), 400
-
-                # ── truncate_target: default TRUE; STAGE forces TRUE ──
-                truncate_target = bool(body.get("truncate_target", True))
-                if strategy.uses_stage and truncate_target is False:
-                    return jsonify({
-                        "error": "STAGE-стратегия требует TRUNCATE target (поведение неизменяемо). "
-                                 "Используйте DIRECT, если нужно сохранить существующие данные."
-                    }), 400
-
                 # group_id обязателен только для CDC-стратегий — BULK его не использует.
                 group_id = body.get("group_id") or None
                 connector_name = ""
