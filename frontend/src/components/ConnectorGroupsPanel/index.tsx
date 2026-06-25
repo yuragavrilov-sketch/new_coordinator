@@ -18,6 +18,7 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
   const [topicCounts,   setTopicCounts]   = useState<Map<string, TopicCount>>(new Map());
   const [topicLoading,  setTopicLoading]  = useState(false);
   const [history,       setHistory]       = useState<GroupHistoryEntry[]>([]);
+  const [actionMsg,     setActionMsg]     = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/connector-groups")
@@ -84,8 +85,42 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     }
   }, [sseEvents, expanded, load, loadHistory, loadTopicCounts]);
 
-  const startGroup  = (gid: string) => fetch(`/api/connector-groups/${gid}/start`,  { method: "POST" }).then(load).catch(() => {});
-  const stopGroup   = (gid: string) => fetch(`/api/connector-groups/${gid}/stop`,   { method: "POST" }).then(load).catch(() => {});
+  const startGroup = async (gid: string) => {
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/connector-groups/${gid}/start`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
+        return;
+      }
+      const startedCount = (body.plan_starts || []).reduce(
+        (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
+        0,
+      );
+      const status = String(body.status || "").toUpperCase();
+      const prefix = status === "RUNNING"
+        ? "CDC-коннектор RUNNING"
+        : status
+          ? `Запуск CDC-коннектора: ${status}`
+          : "Запуск CDC-коннектора запрошен";
+      if (body.plan_start_error) {
+        setActionMsg({ tone: "bad", text: `${prefix}, но очередь не продолжена: ${body.plan_start_error}` });
+      } else {
+        const rowText = status === "RUNNING"
+          ? "запущено CDC строк"
+          : "CDC строк переведено в ожидание коннектора";
+        setActionMsg({
+          tone: "ok",
+          text: startedCount ? `${prefix}, ${rowText}: ${startedCount}` : prefix,
+        });
+      }
+      load();
+    } catch (e) {
+      setActionMsg({ tone: "bad", text: `Сеть: ${String(e)}` });
+    }
+  };
+  const stopGroup   = (gid: string) => { setActionMsg(null); fetch(`/api/connector-groups/${gid}/stop`,   { method: "POST" }).then(load).catch(() => {}); };
   const createTopics = (gid: string) => fetch(`/api/connector-groups/${gid}/create-topics`, { method: "POST" }).then(() => loadTopicCounts(gid)).catch(() => {});
 
   const removeTable = async (gid: string, table: GroupTable) => {
@@ -176,6 +211,19 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
           CDC-коннекторы
         </h2>
       </div>
+      {actionMsg && (
+        <div style={{
+          marginBottom: 10,
+          padding: "7px 10px",
+          borderRadius: t.radius.sm,
+          background: actionMsg.tone === "ok" ? t.green.bg : `${t.red.border}22`,
+          border: `1px solid ${actionMsg.tone === "ok" ? t.green.dim : t.red.border}`,
+          color: actionMsg.tone === "ok" ? t.green.fg : t.red.fg,
+          fontSize: 12,
+        }}>
+          {actionMsg.text}
+        </div>
+      )}
 
       {groups.length === 0 && (
         <div style={{ color: t.text.disabled, padding: 24, textAlign: "center" }}>
