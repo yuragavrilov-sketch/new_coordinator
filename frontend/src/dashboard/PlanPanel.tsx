@@ -865,6 +865,11 @@ function CdcConnectorCard({
           CDC-строки ждут запуска коннектора и продолжат работу после статуса RUNNING.
         </div>
       )}
+      {waitingWorkerCdc > 0 && (
+        <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg, lineHeight: 1.4 }}>
+          {waitingWorkerCdc} CDC-строк готовы к apply и ждут universal worker. Если счетчик не уменьшается, проверьте процесс worker.py и подключение worker к state DB/Kafka.
+        </div>
+      )}
       {pendingDraftCdc > 0 && (
         <div style={{ marginTop: 7, fontSize: 12, color: t.amber.fg, lineHeight: 1.4 }}>
           Есть CDC-строки, которые еще не переведены в NEW. Обычно это значит, что Debezium не синхронизировался при добавлении; нажмите "Синхронизировать" или "Запустить" после проверки ошибки коннектора.
