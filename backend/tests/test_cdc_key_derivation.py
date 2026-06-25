@@ -61,6 +61,22 @@ def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
 
+def test_orchestrator_keeps_plan_running_when_no_pending_but_active_items():
+    assert orchestrator._plan_status_without_pending(
+        active_count=1,
+        failed_count=0,
+        cancelled_count=0,
+    ) == "RUNNING"
+
+
+def test_orchestrator_closes_plan_when_no_pending_or_active_items():
+    assert orchestrator._plan_status_without_pending(
+        active_count=0,
+        failed_count=0,
+        cancelled_count=0,
+    ) == "DONE"
+
+
 def test_orchestrator_syncs_cdc_runtime_context_from_group(monkeypatch):
     updates = {}
     monkeypatch.setattr(

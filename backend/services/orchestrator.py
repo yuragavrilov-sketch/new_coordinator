@@ -256,10 +256,26 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
             pending = cur.fetchone()
             if not pending:
                 cur.execute("""
-                    UPDATE migration_plans
-                    SET    status = 'DONE'
-                    WHERE  plan_id = %s
+                    SELECT
+                        COUNT(*) FILTER (
+                            WHERE status NOT IN ('DONE', 'FAILED', 'CANCELLED')
+                        ) AS active_count,
+                        COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_count,
+                        COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled_count
+                    FROM migration_plan_items
+                    WHERE plan_id = %s
                 """, (plan_id,))
+                active_count, failed_count, cancelled_count = cur.fetchone()
+                plan_status = _plan_status_without_pending(
+                    active_count or 0,
+                    failed_count or 0,
+                    cancelled_count or 0,
+                )
+                cur.execute("""
+                    UPDATE migration_plans
+                    SET    status = %s
+                    WHERE  plan_id = %s
+                """, (plan_status, plan_id))
                 conn.commit()
                 return
 
@@ -372,6 +388,16 @@ def _plan_item_status_for_phase(phase: str | None) -> str | None:
     if phase and phase != "DRAFT":
         return "RUNNING"
     return None
+
+
+def _plan_status_without_pending(active_count: int, failed_count: int, cancelled_count: int) -> str:
+    if active_count > 0:
+        return "RUNNING"
+    if failed_count > 0:
+        return "FAILED"
+    if cancelled_count > 0:
+        return "CANCELLED"
+    return "DONE"
 
 
 def _configs() -> dict:
