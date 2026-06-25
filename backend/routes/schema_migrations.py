@@ -83,6 +83,20 @@ def _kick_cdc_group_best_effort(group_id: str | None) -> None:
         print(f"[schema_migrations] CDC queue kick warning: {exc}")
 
 
+def _ensure_cdc_group_topics(group_id: str) -> list[dict]:
+    from services.connector_groups import create_group_topics
+
+    results = create_group_topics(group_id)
+    errors = [r for r in results if r.get("status") == "error"]
+    if errors:
+        msg = "; ".join(
+            f"{r.get('topic_name', '?')}: {r.get('error', '?')}"
+            for r in errors
+        )
+        raise ValueError(f"CDC topic creation failed: {msg}")
+    return results
+
+
 def _active_cdc_migration_for_group_table(cur, group_id: str, source_schema: str, source_table: str):
     cur.execute("""
         SELECT migration_id, phase
@@ -396,6 +410,7 @@ def add_plan_items(sm_id: str):
 
     conn = _state["get_conn"]()
     src_oconn = None
+    connector_group_status = None
     now = datetime.now(timezone.utc).isoformat()
     try:
         with conn.cursor() as cur:
@@ -453,7 +468,7 @@ def add_plan_items(sm_id: str):
                 group_row = cur.fetchone()
                 if not group_row:
                     return jsonify({"error": "connector group not found"}), 400
-                _group_status, group_topic_prefix, group_run_id = group_row
+                connector_group_status, group_topic_prefix, group_run_id = group_row
                 active_topic_prefix = (
                     f"{group_topic_prefix}.{group_run_id}"
                     if group_run_id else group_topic_prefix
@@ -699,6 +714,8 @@ def add_plan_items(sm_id: str):
         if strategy.has_cdc:
             try:
                 from services.connector_groups import refresh_connector_tables, request_start
+                if connector_group_status == "RUNNING":
+                    _ensure_cdc_group_topics(connector_group_id)
                 refresh_connector_tables(connector_group_id)
                 connector_start = request_start(connector_group_id)
                 _state["broadcast"]({

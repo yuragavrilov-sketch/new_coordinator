@@ -113,6 +113,38 @@ def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     ]
 
 
+def test_schema_migration_ensures_cdc_group_topics(monkeypatch):
+    from services import connector_groups
+
+    monkeypatch.setattr(
+        connector_groups,
+        "create_group_topics",
+        lambda group_id: [{"topic_name": "topic-1", "status": "ok"}],
+    )
+
+    assert schema_migrations._ensure_cdc_group_topics("gid-1") == [
+        {"topic_name": "topic-1", "status": "ok"},
+    ]
+
+
+def test_schema_migration_ensure_cdc_group_topics_raises_on_error(monkeypatch):
+    from services import connector_groups
+
+    monkeypatch.setattr(
+        connector_groups,
+        "create_group_topics",
+        lambda group_id: [{"topic_name": "topic-1", "status": "error", "error": "boom"}],
+    )
+
+    try:
+        schema_migrations._ensure_cdc_group_topics("gid-1")
+    except ValueError as exc:
+        assert "CDC topic creation failed" in str(exc)
+        assert "topic-1: boom" in str(exc)
+    else:
+        raise AssertionError("expected CDC topic creation failure")
+
+
 class CursorStub:
     def __init__(self, row):
         self.row = row
