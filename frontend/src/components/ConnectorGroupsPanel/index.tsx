@@ -7,7 +7,6 @@ import { STATUS_COLORS, actionBtn } from "./helpers";
 import { GroupTablesTable } from "./GroupTablesTable";
 import { GroupHistory } from "./GroupHistory";
 import { DebeziumConfigModal } from "./DebeziumConfigModal";
-import { MigrateModal } from "./MigrateModal";
 
 export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[] }) {
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
@@ -19,7 +18,6 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
   const [topicCounts,   setTopicCounts]   = useState<Map<string, TopicCount>>(new Map());
   const [topicLoading,  setTopicLoading]  = useState(false);
   const [history,       setHistory]       = useState<GroupHistoryEntry[]>([]);
-  const [migrateModal,  setMigrateModal]  = useState<{ groupId: string; table: GroupTable } | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/connector-groups")
@@ -155,14 +153,6 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
       .finally(() => setConfigLoading(false));
   };
 
-  const onMigrationCreated = (gid: string) => {
-    setMigrateModal(null);
-    fetch(`/api/connector-groups/${gid}`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(setDetail)
-      .catch(() => {});
-  };
-
   // "SCHEMA.TABLE" → most-recent-active migration in this group
   const tableMigrationMap = new Map<string, MigrationSummary>();
   if (detail?.migrations) {
@@ -286,7 +276,6 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
                   tables={detail.tables ?? []}
                   topicCounts={topicCounts}
                   tableMigrationMap={tableMigrationMap}
-                  onMigrate={(table) => setMigrateModal({ groupId: g.group_id, table })}
                   onRemove={(table) => removeTable(g.group_id, table)}
                 />
 
@@ -326,15 +315,6 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
           </div>
         );
       })}
-
-      {migrateModal && (
-        <MigrateModal
-          groupId={migrateModal.groupId}
-          table={migrateModal.table}
-          onClose={() => setMigrateModal(null)}
-          onCreated={() => onMigrationCreated(migrateModal.groupId)}
-        />
-      )}
 
       {configModal && (
         <DebeziumConfigModal

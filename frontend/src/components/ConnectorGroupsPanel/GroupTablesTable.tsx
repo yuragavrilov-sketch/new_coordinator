@@ -7,7 +7,6 @@ interface Props {
   tables:           GroupTable[];
   topicCounts:      Map<string, TopicCount>;
   tableMigrationMap: Map<string, MigrationSummary>;
-  onMigrate:        (table: GroupTable) => void;
   onRemove:         (table: GroupTable) => void;
 }
 
@@ -23,7 +22,7 @@ const KEY_FG: Record<string, string> = {
 };
 
 export function GroupTablesTable({
-  tables, topicCounts, tableMigrationMap, onMigrate, onRemove,
+  tables, topicCounts, tableMigrationMap, onRemove,
 }: Props) {
   if (tables.length === 0) {
     return <div style={{ color: t.text.disabled, fontSize: t.size.sm }}>Нет таблиц в CDC-коннекторе</div>;
@@ -101,17 +100,17 @@ export function GroupTablesTable({
                     </span>
                   );
                 })() : (
-                  <button
-                    onClick={() => onMigrate(tbl)}
+                  <span
                     style={{
-                      background: t.green.bg, border: `1px solid ${t.green.dim}`,
+                      display: "inline-block",
+                      background: t.bg.s2, border: `1px solid ${t.border.subtle}`,
                       borderRadius: t.radius.sm, color: t.green.fg,
                       padding: "1px 8px", fontSize: t.size.xs,
-                      cursor: "pointer", fontWeight: 600,
+                      fontWeight: 600,
                     }}
                   >
-                    Migrate
-                  </button>
+                    РІ РєРѕРЅРЅРµРєС‚РѕСЂРµ
+                  </span>
                 )}
               </td>
               <td style={{ padding: "4px 8px", textAlign: "right" }}>
