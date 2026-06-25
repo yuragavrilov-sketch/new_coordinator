@@ -1732,3 +1732,37 @@ def test_orchestrator_kicks_first_new_cdc_migration_for_group(monkeypatch):
     assert "m.phase = 'NEW'" in query
     assert "LEFT(COALESCE(m.strategy, ''), 4) = 'CDC_'" in query
     assert "LIMIT  1" in query
+
+
+def test_orchestrator_keeps_new_cdc_migration_waiting_until_group_running(monkeypatch):
+    calls = []
+    migration = {
+        "migration_id": "mid-1",
+        "group_id": "gid-1",
+        "phase": "NEW",
+        "strategy": "CDC_DIRECT",
+        "source_pk_exists": True,
+        "source_uk_exists": False,
+        "effective_key_columns_json": "[]",
+    }
+
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "get_group",
+        lambda group_id: calls.append(("get-group", group_id)) or {
+            "group_id": group_id,
+            "status": "TOPICS_CREATING",
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_update", lambda mid, values: calls.append(("update", mid, values)))
+    monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
+    monkeypatch.setattr(orchestrator, "_fail", lambda *args, **kwargs: calls.append(("fail", args, kwargs)))
+    monkeypatch.setattr(orchestrator, "_mark_in_prog", lambda mid: calls.append(("mark", mid)))
+
+    orchestrator._handle_new("mid-1", migration)
+
+    assert calls == [
+        ("get-group", "gid-1"),
+        ("update", "mid-1", {"queue_position": None}),
+        ("queue",),
+    ]
