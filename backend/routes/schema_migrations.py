@@ -83,6 +83,20 @@ def _kick_cdc_group_best_effort(group_id: str | None) -> None:
         print(f"[schema_migrations] CDC queue kick warning: {exc}")
 
 
+def _active_cdc_migration_for_group_table(cur, group_id: str, source_schema: str, source_table: str):
+    cur.execute("""
+        SELECT migration_id, phase
+        FROM   migrations
+        WHERE  group_id = %s
+          AND  UPPER(source_schema) = UPPER(%s)
+          AND  UPPER(source_table) = UPPER(%s)
+          AND  LEFT(COALESCE(strategy, ''), 4) = 'CDC_'
+          AND  COALESCE(phase, '') NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')
+        LIMIT  1
+    """, (group_id, source_schema, source_table))
+    return cur.fetchone()
+
+
 def _resolve_cdc_connector_group_id(
     sm_group_id,
     plan_group_id,
@@ -529,6 +543,15 @@ def add_plan_items(sm_id: str):
                 source_pk_exists = False
                 source_uk_exists = False
                 if strategy.has_cdc:
+                    active = _active_cdc_migration_for_group_table(
+                        cur, connector_group_id, src_schema, table_name,
+                    )
+                    if active:
+                        active_mid, active_phase = active
+                        raise ValueError(
+                            f"CDC table {src_schema}.{table_name} already has active migration "
+                            f"in this connector pack ({active_mid}, {active_phase or 'no phase'})."
+                        )
                     if src_oconn is None:
                         src_oconn = _source_oracle_conn()
                     from db.oracle_browser import get_table_info

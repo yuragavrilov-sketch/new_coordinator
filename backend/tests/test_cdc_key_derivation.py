@@ -113,6 +113,38 @@ def test_schema_migration_kicks_cdc_group_after_queue_start(monkeypatch):
     ]
 
 
+class CursorStub:
+    def __init__(self, row):
+        self.row = row
+        self.executed = []
+
+    def execute(self, sql, params):
+        self.executed.append((sql, params))
+
+    def fetchone(self):
+        return self.row
+
+
+def test_schema_migration_active_cdc_table_lookup_finds_non_terminal():
+    cur = CursorStub(("mid-1", "NEW"))
+
+    assert schema_migrations._active_cdc_migration_for_group_table(
+        cur, "gid-1", "tcbpay", "allorders",
+    ) == ("mid-1", "NEW")
+    sql, params = cur.executed[0]
+    assert params == ("gid-1", "tcbpay", "allorders")
+    assert "LEFT(COALESCE(strategy, ''), 4) = 'CDC_'" in sql
+    assert "COALESCE(phase, '') NOT IN" in sql
+
+
+def test_schema_migration_active_cdc_table_lookup_allows_absent():
+    cur = CursorStub(None)
+
+    assert schema_migrations._active_cdc_migration_for_group_table(
+        cur, "gid-1", "TCBPAY", "ALLORDERS",
+    ) is None
+
+
 def test_schema_migration_reuses_plan_cdc_group_when_schema_group_is_empty():
     assert schema_migrations._resolve_cdc_connector_group_id(
         sm_group_id=None,
