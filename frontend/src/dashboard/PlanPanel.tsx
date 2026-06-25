@@ -100,13 +100,13 @@ export function PlanPanel({
         throw new Error(body.error || `HTTP ${res.status}`);
       }
       onReload();
+      const status = String(body.status || group.status || "").toUpperCase();
+      const syncText = status && status !== "RUNNING"
+        ? `CDC-коннектор ${status}; Debezium синхронизируется после запуска`
+        : "Debezium синхронизирован";
       if (body.plan_start_error) {
-        setCdcActionErr(`Debezium синхронизирован, но CDC очередь не продолжена: ${body.plan_start_error}`);
+        setCdcActionErr(`${syncText}, но CDC очередь не продолжена: ${body.plan_start_error}`);
       } else {
-        const status = String(body.status || group.status || "").toUpperCase();
-        const syncText = status && status !== "RUNNING"
-          ? `CDC-коннектор ${status}; Debezium синхронизируется после запуска`
-          : "Debezium синхронизирован";
         const startedCount = (body.plan_starts || []).reduce(
           (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
           0,
