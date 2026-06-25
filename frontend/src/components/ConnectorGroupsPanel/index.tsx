@@ -8,6 +8,14 @@ import { GroupTablesTable } from "./GroupTablesTable";
 import { GroupHistory } from "./GroupHistory";
 import { DebeziumConfigModal } from "./DebeziumConfigModal";
 
+interface CdcContinuationResp {
+  status?: string;
+  error?: string;
+  plan_starts?: Array<{ started?: unknown[] }>;
+  plan_start_error?: string | null;
+  cdc_queue_kicked?: boolean;
+}
+
 export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[] }) {
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [loading,       setLoading]       = useState(true);
@@ -96,7 +104,7 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     loadHistory(gid);
   };
 
-  const continuationMessage = (body: any, prefix: string, runningVerb: string, waitingVerb: string) => {
+  const continuationMessage = (body: CdcContinuationResp, prefix: string, runningVerb: string, waitingVerb: string) => {
     const startedCount = (body.plan_starts || []).reduce(
       (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
       0,
@@ -108,7 +116,11 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     }
     return {
       tone: "ok" as const,
-      text: startedCount ? `${prefix}, ${rowText}: ${startedCount}` : prefix,
+      text: startedCount
+        ? `${prefix}, ${rowText}: ${startedCount}`
+        : body.cdc_queue_kicked
+          ? `${prefix}, очередь CDC продолжена`
+          : prefix,
     };
   };
 
@@ -116,7 +128,7 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     setActionMsg(null);
     try {
       const res = await fetch(`/api/connector-groups/${gid}/start`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({})) as CdcContinuationResp;
       if (!res.ok) {
         setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
         return;
@@ -142,7 +154,7 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     setActionMsg(null);
     try {
       const res = await fetch(`/api/connector-groups/${gid}/refresh-tables`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
+      const body = await res.json().catch(() => ({})) as CdcContinuationResp;
       if (!res.ok) {
         setActionMsg({ tone: "bad", text: body?.error || `HTTP ${res.status}` });
         return;

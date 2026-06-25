@@ -2,7 +2,13 @@ import React, { useMemo } from "react";
 import { t } from "../theme";
 import { ProgressBar } from "../components/ui";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
-import type { MigrationPlanCdcGroup, MigrationPlanCdcTable, MigrationPlanDetail, MigrationPlanItem } from "./api";
+import type {
+  MigrationPlanCdcGroup,
+  MigrationPlanCdcTable,
+  MigrationPlanDetail,
+  MigrationPlanItem,
+  StartMigrationPlanResp,
+} from "./api";
 
 interface Props {
   plan: MigrationPlanDetail | null;
@@ -41,6 +47,14 @@ const ACTIVE_WORK_PHASES = new Set([
   "CDC_CAUGHT_UP",
 ]);
 
+interface CdcConnectorActionResp {
+  status?: string;
+  error?: string;
+  plan_starts?: StartMigrationPlanResp[];
+  plan_start_error?: string | null;
+  cdc_queue_kicked?: boolean;
+}
+
 export function PlanPanel({
   plan,
   loading,
@@ -71,11 +85,10 @@ export function PlanPanel({
     setCdcActionInfo("");
     try {
       const res = await fetch(`/api/connector-groups/${group.group_id}/refresh-tables`, { method: "POST" });
+      const body = await res.json().catch(() => ({})) as CdcConnectorActionResp;
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      const body = await res.json().catch(() => ({}));
       onReload();
       if (body.plan_start_error) {
         setCdcActionErr(`Debezium синхронизирован, но CDC очередь не продолжена: ${body.plan_start_error}`);
@@ -103,11 +116,10 @@ export function PlanPanel({
     setCdcActionInfo("");
     try {
       const res = await fetch(`/api/connector-groups/${group.group_id}/start`, { method: "POST" });
+      const body = await res.json().catch(() => ({})) as CdcConnectorActionResp;
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      const body = await res.json().catch(() => ({}));
       onReload();
       const connectorStatus = String(body.status || "").toUpperCase();
       const connectorText = connectorStatus === "RUNNING"
