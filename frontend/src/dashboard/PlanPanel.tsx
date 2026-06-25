@@ -105,6 +105,13 @@ export function PlanPanel({
   const [cdcSyncStatus, setCdcSyncStatus] = React.useState<DebeziumSyncStatus | null>(null);
   const [cdcSyncStatusErr, setCdcSyncStatusErr] = React.useState("");
   const [cdcSyncStatusLoading, setCdcSyncStatusLoading] = React.useState(false);
+  const cdcSyncFingerprint = [
+    effectiveCdcGroup?.group_id || "",
+    effectiveCdcGroup?.status || "",
+    effectiveCdcGroup?.run_id || "",
+    effectiveCdcGroup?.table_include_list || "",
+    effectiveCdcGroup?.message_key_columns || "",
+  ].join("|");
 
   const loadDebeziumSyncStatus = React.useCallback((groupId: string | null | undefined) => {
     if (!groupId) {
@@ -131,7 +138,7 @@ export function PlanPanel({
 
   React.useEffect(() => {
     loadDebeziumSyncStatus(effectiveCdcGroup?.group_id);
-  }, [effectiveCdcGroup?.group_id, loadDebeziumSyncStatus]);
+  }, [cdcSyncFingerprint, effectiveCdcGroup?.group_id, loadDebeziumSyncStatus]);
 
   async function syncCdcGroup(group: MigrationPlanCdcGroup) {
     setCdcActionBusy("sync");
