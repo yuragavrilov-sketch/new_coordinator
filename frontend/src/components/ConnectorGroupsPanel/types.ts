@@ -1,5 +1,3 @@
-import { Strategy } from "../../types/migration";
-
 export interface TopicCount {
   topic_name: string;
   count:      number;
@@ -21,15 +19,4 @@ export interface GroupHistoryEntry {
   to_status:   string;
   message:     string | null;
   created_at:  string;
-}
-
-export interface MigrateParams {
-  strategy:                 Strategy;
-  truncate_target:          boolean;
-  chunk_size:               number;
-  max_parallel_workers:     number;
-  baseline_parallel_degree: number;
-  baseline_batch_size:      number;
-  stage_tablespace:         string;
-  validate_hash_sample:     boolean;
 }

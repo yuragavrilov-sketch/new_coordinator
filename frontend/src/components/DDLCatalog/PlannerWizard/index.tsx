@@ -144,10 +144,12 @@ export function PlannerWizard({ selectedTables, srcSchema, tgtSchema, onClose }:
   };
 
   const setPlanMode = (mode: "historical" | "cdc") => {
+    if (mode === "cdc") {
+      setExecuteError('CDC добавляется через экран "Эта миграция" в единый CDC-коннектор.');
+      return;
+    }
     setPlanModeState(mode);
-    const nextDefaults: PlanDefaults = mode === "historical"
-      ? { ...defaults, strategy: "BULK_DIRECT", workers: 1, truncate_target: true }
-      : { ...defaults, strategy: "CDC_STAGE", workers: Math.max(defaults.workers, 4), truncate_target: true };
+    const nextDefaults: PlanDefaults = { ...defaults, strategy: "BULK_DIRECT", workers: 1, truncate_target: true };
     setDefaults(nextDefaults);
     if (mode === "historical") setSelectedGroup("");
     setTableSettings(prev => {
