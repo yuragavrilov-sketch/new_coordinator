@@ -16,6 +16,19 @@ interface CdcContinuationResp {
   cdc_queue_kicked?: boolean;
 }
 
+interface DebeziumSyncStatus {
+  connector_name: string;
+  exists: boolean;
+  in_sync: boolean;
+  desired_table_include_list: string;
+  actual_table_include_list: string | null;
+  desired_message_key_columns: string;
+  actual_message_key_columns: string | null;
+  missing_tables: string[];
+  extra_tables: string[];
+  key_columns_match: boolean;
+}
+
 export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[] }) {
   const [groups,        setGroups]        = useState<ConnectorGroup[]>([]);
   const [loading,       setLoading]       = useState(true);
@@ -27,6 +40,9 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
   const [topicLoading,  setTopicLoading]  = useState(false);
   const [history,       setHistory]       = useState<GroupHistoryEntry[]>([]);
   const [actionMsg,     setActionMsg]     = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [syncStatus,    setSyncStatus]    = useState<DebeziumSyncStatus | null>(null);
+  const [syncStatusErr, setSyncStatusErr] = useState("");
+  const [syncStatusLoading, setSyncStatusLoading] = useState(false);
 
   const load = useCallback(() => {
     fetch("/api/connector-groups")
@@ -42,14 +58,35 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
     return () => clearInterval(id);
   }, [load]);
 
+  const loadDebeziumSyncStatus = useCallback((gid: string) => {
+    setSyncStatus(null);
+    setSyncStatusErr("");
+    setSyncStatusLoading(true);
+    fetch(`/api/connector-groups/${gid}/debezium-sync-status`)
+      .then(async r => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error || `HTTP ${r.status}`);
+        return body as DebeziumSyncStatus;
+      })
+      .then(setSyncStatus)
+      .catch(e => setSyncStatusErr(String(e instanceof Error ? e.message : e)))
+      .finally(() => setSyncStatusLoading(false));
+  }, []);
+
   const toggleExpand = (gid: string) => {
     if (expanded === gid) {
       setExpanded(null); setDetail(null); setTopicCounts(new Map()); setHistory([]);
+      setSyncStatus(null); setSyncStatusErr(""); setSyncStatusLoading(false);
     } else {
       setExpanded(gid);
       fetch(`/api/connector-groups/${gid}`)
         .then(r => r.ok ? r.json() : Promise.reject())
-        .then(d => { setDetail(d); loadTopicCounts(gid); loadHistory(gid); })
+        .then(d => {
+          setDetail(d);
+          loadTopicCounts(gid);
+          loadHistory(gid);
+          loadDebeziumSyncStatus(gid);
+        })
         .catch(() => setDetail(null));
     }
   };
@@ -90,8 +127,9 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
         .catch(() => setDetail(null));
       loadTopicCounts(expanded);
       loadHistory(expanded);
+      loadDebeziumSyncStatus(expanded);
     }
-  }, [sseEvents, expanded, load, loadHistory, loadTopicCounts]);
+  }, [sseEvents, expanded, load, loadHistory, loadTopicCounts, loadDebeziumSyncStatus]);
 
   const reloadGroupDetail = (gid: string) => {
     load();
@@ -102,6 +140,7 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
       .catch(() => setDetail(null));
     loadTopicCounts(gid);
     loadHistory(gid);
+    loadDebeziumSyncStatus(gid);
   };
 
   const continuationMessage = (body: CdcContinuationResp, prefix: string, runningVerb: string, waitingVerb: string) => {
@@ -399,6 +438,69 @@ export function ConnectorGroupsPanel({ sseEvents = [] }: { sseEvents?: SSEEvent[
                       <div style={{ marginTop: 3, fontFamily: t.font.mono, color: t.text.primary }}>
                         message.key.columns: {detail.message_key_columns}
                       </div>
+                    )}
+                  </div>
+                )}
+                {(syncStatusLoading || syncStatusErr || syncStatus) && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: "7px 9px",
+                    border: `1px solid ${
+                      syncStatusErr
+                        ? t.red.border
+                        : syncStatus?.in_sync
+                          ? t.green.dim
+                          : t.amber.dim
+                    }`,
+                    borderRadius: t.radius.sm,
+                    background: syncStatusErr
+                      ? `${t.red.border}22`
+                      : syncStatus?.in_sync
+                        ? t.green.bg
+                        : t.amber.bg,
+                    color: syncStatusErr
+                      ? t.red.fg
+                      : syncStatus?.in_sync
+                        ? t.green.fg
+                        : t.amber.fg,
+                    fontSize: t.size.sm,
+                    lineHeight: 1.45,
+                    overflowWrap: "anywhere",
+                  }}>
+                    {syncStatusLoading && <div>Проверяю фактический config Kafka Connect...</div>}
+                    {syncStatusErr && <div>Kafka Connect config не прочитан: {syncStatusErr}</div>}
+                    {syncStatus && (
+                      <>
+                        <div>
+                          Kafka Connect config: <strong>{syncStatus.exists ? (syncStatus.in_sync ? "совпадает" : "есть расхождение") : "коннектор не найден"}</strong>
+                          {" "}({syncStatus.connector_name})
+                        </div>
+                        {!syncStatus.exists && (
+                          <div style={{ marginTop: 3 }}>
+                            Коннектор будет создан из текущей CDC-пачки при запуске.
+                          </div>
+                        )}
+                        {syncStatus.missing_tables.length > 0 && (
+                          <div style={{ marginTop: 3 }}>
+                            Нет в Kafka Connect: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{syncStatus.missing_tables.join(", ")}</span>
+                          </div>
+                        )}
+                        {syncStatus.extra_tables.length > 0 && (
+                          <div style={{ marginTop: 3 }}>
+                            Лишние в Kafka Connect: <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>{syncStatus.extra_tables.join(", ")}</span>
+                          </div>
+                        )}
+                        {!syncStatus.key_columns_match && (
+                          <div style={{ marginTop: 3 }}>
+                            Расходятся CDC key columns. Нажмите Sync Debezium после проверки состава пачки.
+                          </div>
+                        )}
+                        {syncStatus.actual_table_include_list && (
+                          <div style={{ marginTop: 4, fontFamily: t.font.mono, color: t.text.primary }}>
+                            actual table.include.list: {syncStatus.actual_table_include_list}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

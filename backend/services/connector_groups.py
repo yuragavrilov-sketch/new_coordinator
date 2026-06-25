@@ -432,6 +432,15 @@ def _build_key_columns(group_id: str) -> str:
     return ";".join(parts)
 
 
+def _split_include_list(value: str | None) -> list[str]:
+    entries = []
+    for part in str(value or "").split(","):
+        entry = part.strip().upper()
+        if entry and entry not in entries:
+            entries.append(entry)
+    return entries
+
+
 def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
     """Build topic name matching Debezium convention: {prefix}.{SCHEMA}.{TABLE} with # → _."""
     return f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
@@ -1009,6 +1018,53 @@ def refresh_connector_tables(group_id: str) -> None:
         table_include_list=table_list,
         key_columns=key_columns,
     )
+
+
+def get_debezium_sync_status(group_id: str) -> dict:
+    """Compare desired connector table config from state DB with Kafka Connect."""
+    group = get_group(group_id)
+    if not group:
+        raise ValueError(f"Р“СЂСѓРїРїР° {group_id} РЅРµ РЅР°Р№РґРµРЅР°")
+
+    connector_name = _active_connector_name(group)
+    desired_table_list = _build_table_include_list(group_id)
+    desired_key_columns = _build_key_columns(group_id)
+    desired_tables = _split_include_list(desired_table_list)
+
+    actual_config = debezium.get_connector_config(connector_name)
+    if actual_config is None:
+        return {
+            "connector_name": connector_name,
+            "exists": False,
+            "in_sync": False,
+            "desired_table_include_list": desired_table_list,
+            "actual_table_include_list": None,
+            "desired_message_key_columns": desired_key_columns,
+            "actual_message_key_columns": None,
+            "missing_tables": desired_tables,
+            "extra_tables": [],
+            "key_columns_match": desired_key_columns == "",
+        }
+
+    actual_table_list = str(actual_config.get("table.include.list") or "")
+    actual_key_columns = str(actual_config.get("message.key.columns") or "")
+    actual_tables = _split_include_list(actual_table_list)
+    missing_tables = [entry for entry in desired_tables if entry not in actual_tables]
+    extra_tables = [entry for entry in actual_tables if entry not in desired_tables]
+    key_columns_match = desired_key_columns.strip() == actual_key_columns.strip()
+
+    return {
+        "connector_name": connector_name,
+        "exists": True,
+        "in_sync": not missing_tables and not extra_tables and key_columns_match,
+        "desired_table_include_list": desired_table_list,
+        "actual_table_include_list": actual_table_list,
+        "desired_message_key_columns": desired_key_columns,
+        "actual_message_key_columns": actual_key_columns,
+        "missing_tables": missing_tables,
+        "extra_tables": extra_tables,
+        "key_columns_match": key_columns_match,
+    }
 
 
 def get_connector_status(group_id: str) -> str:

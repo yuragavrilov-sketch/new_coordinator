@@ -172,3 +172,78 @@ def test_topic_count_consumer_uses_supported_timeout_configs(monkeypatch):
         "request_timeout_ms": 5000,
         "connections_max_idle_ms": 8000,
     }
+
+
+def test_debezium_sync_status_reports_extra_actual_tables(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.main",
+            "run_id": None,
+        },
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_build_table_include_list",
+        lambda group_id: "TCBPAY.ALLORDERS",
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_build_key_columns",
+        lambda group_id: "",
+    )
+    monkeypatch.setattr(
+        connector_groups.debezium,
+        "get_connector_config",
+        lambda connector_name: {
+            "table.include.list": "TCBPAY.ALLORDERS,TCBPAY.MERCHANTS#ORDERS",
+        },
+    )
+
+    result = connector_groups.get_debezium_sync_status("gid-1")
+
+    assert result["connector_name"] == "cdc-main"
+    assert result["exists"] is True
+    assert result["in_sync"] is False
+    assert result["missing_tables"] == []
+    assert result["extra_tables"] == ["TCBPAY.MERCHANTS#ORDERS"]
+
+
+def test_debezium_sync_status_reports_missing_connector(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.main",
+            "run_id": "run1",
+        },
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_build_table_include_list",
+        lambda group_id: "TCBPAY.ALLORDERS",
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_build_key_columns",
+        lambda group_id: "TCBPAY.ALLORDERS:ID",
+    )
+    monkeypatch.setattr(
+        connector_groups.debezium,
+        "get_connector_config",
+        lambda connector_name: None,
+    )
+
+    result = connector_groups.get_debezium_sync_status("gid-1")
+
+    assert result["connector_name"] == "cdc-main_run1"
+    assert result["exists"] is False
+    assert result["in_sync"] is False
+    assert result["missing_tables"] == ["TCBPAY.ALLORDERS"]
+    assert result["actual_table_include_list"] is None
+    assert result["key_columns_match"] is False

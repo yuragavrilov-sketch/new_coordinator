@@ -94,6 +94,25 @@ def list_connectors() -> list[str]:
     return resp.json()
 
 
+def get_connector_config(connector_name: str) -> dict | None:
+    """Return connector config from Kafka Connect, or None when absent."""
+    try:
+        resp = requests.get(
+            f"{_base_url()}/connectors/{connector_name}/config",
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        raise DebeziumError(f"Kafka Connect РЅРµРґРѕСЃС‚СѓРїРµРЅ: {exc}") from exc
+
+    if resp.status_code == 404:
+        return None
+    if not resp.ok:
+        raise DebeziumError(
+            f"РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ РєРѕРЅС„РёРі РєРѕРЅРЅРµРєС‚РѕСЂР° (HTTP {resp.status_code}): {resp.text[:200]}"
+        )
+    return resp.json()
+
+
 # ---------------------------------------------------------------------------
 # Group connector API (one connector for multiple tables)
 # ---------------------------------------------------------------------------

@@ -160,6 +160,35 @@ def test_get_connector_group_includes_persisted_debezium_lists(monkeypatch):
     assert [t["source_table"] for t in body["tables"]] == ["ALLORDERS", "MERCHANTS#ORDERS"]
 
 
+def test_debezium_sync_status_route_returns_comparison(monkeypatch):
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "get_debezium_sync_status",
+        lambda group_id: {
+            "connector_name": "cdc-main",
+            "exists": True,
+            "in_sync": False,
+            "desired_table_include_list": "TCBPAY.ALLORDERS",
+            "actual_table_include_list": "TCBPAY.ALLORDERS,TCBPAY.MERCHANTS#ORDERS",
+            "desired_message_key_columns": "",
+            "actual_message_key_columns": "",
+            "missing_tables": [],
+            "extra_tables": ["TCBPAY.MERCHANTS#ORDERS"],
+            "key_columns_match": True,
+        },
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().get("/api/connector-groups/gid-1/debezium-sync-status")
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["in_sync"] is False
+    assert body["extra_tables"] == ["TCBPAY.MERCHANTS#ORDERS"]
+
+
 def test_connector_group_wizard_rejects_direct_membership_edits():
     app = Flask(__name__)
     app.register_blueprint(connector_groups.bp)

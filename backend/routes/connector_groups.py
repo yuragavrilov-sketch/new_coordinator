@@ -240,6 +240,18 @@ def debezium_config(group_id: str):
     return jsonify(cfg)
 
 
+@bp.get("/api/connector-groups/<group_id>/debezium-sync-status")
+def debezium_sync_status(group_id: str):
+    """Compare desired state DB connector config with actual Kafka Connect config."""
+    from services.connector_groups import get_debezium_sync_status
+    try:
+        return jsonify(get_debezium_sync_status(group_id))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
 # ── CDC readiness check ──────────────────────────────────────────────────────
 
 @bp.post("/api/connector-groups/check-readiness")
