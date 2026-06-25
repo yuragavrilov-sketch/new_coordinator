@@ -207,6 +207,87 @@ def test_schema_migration_ensure_cdc_group_topics_raises_on_error(monkeypatch):
         raise AssertionError("expected CDC topic creation failure")
 
 
+def test_connector_group_topic_creation_uses_active_run_topic_names(monkeypatch):
+    from services import kafka_topics
+
+    created_topics = []
+
+    class CursorStub:
+        description = [
+            ("id",),
+            ("group_id",),
+            ("source_schema",),
+            ("source_table",),
+            ("target_schema",),
+            ("target_table",),
+            ("effective_key_type",),
+            ("effective_key_columns_json",),
+            ("source_pk_exists",),
+            ("source_uk_exists",),
+            ("topic_name",),
+            ("created_at",),
+        ]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, *_args):
+            pass
+
+        def fetchall(self):
+            return [(
+                "row-1",
+                "gid-1",
+                "TCBPAY",
+                "ALLORDERS",
+                "TCBPAY",
+                "ALLORDERS",
+                "PRIMARY_KEY",
+                '["ID"]',
+                True,
+                False,
+                "stale.topic.TCBPAY.ALLORDERS",
+                None,
+            )]
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "topic_prefix": "base.topic",
+            "run_id": "r123ab",
+        },
+    )
+    monkeypatch.setitem(connector_groups._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(connector_groups._state, "row_to_dict", lambda cur, row: {
+        desc[0]: value for desc, value in zip(cur.description, row)
+    })
+    monkeypatch.setitem(connector_groups._state, "load_configs", lambda: {"kafka": {"bootstrap_servers": "k:9092"}})
+    monkeypatch.setattr(
+        kafka_topics,
+        "create_topic",
+        lambda bootstrap_servers, topic_name: created_topics.append((bootstrap_servers, topic_name)),
+    )
+
+    assert connector_groups.create_group_topics("gid-1") == [
+        {"topic_name": "base.topic.r123ab.TCBPAY.ALLORDERS", "status": "ok"},
+    ]
+    assert created_topics == [
+        (["k:9092"], "base.topic.r123ab.TCBPAY.ALLORDERS"),
+    ]
+
+
 class CursorStub:
     def __init__(self, row):
         self.row = row
