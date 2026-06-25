@@ -493,6 +493,10 @@ export function Dashboard({
               if (connectorCount !== undefined) {
                 startNote += ` · Debezium tables: ${connectorCount}`;
               }
+              const prunedCount = response.cdc_pruned_tables?.length || 0;
+              if (prunedCount > 0) {
+                startNote += ` · убрано из CDC: ${prunedCount}`;
+              }
               if (connectorStatus) {
                 startNote += ` · коннектор: ${connectorStatus}`;
               }
