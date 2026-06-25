@@ -171,8 +171,8 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
     if (!form.source_table)            e.source_table   = "Выберите таблицу";
     if (!form.target_schema)           e.target_schema  = "Выберите схему";
     if (!form.target_table)            e.target_table   = "Выберите таблицу";
-    if (hasCdc(form.strategy) && !form.group_id)
-      e.group_id = "Выберите CDC-коннектор";
+    if (hasCdc(form.strategy))
+      e.strategy = "CDC добавляется через экран \"Эта миграция\" и единую CDC-пачку";
     if (usesStage(form.strategy) && !form.stage_table_name.trim())
       e.stage_table_name = "Обязательное поле";
     if (form.chunk_size <= 0)          e.chunk_size = "Должно быть > 0";
@@ -335,7 +335,21 @@ export function CreateMigrationModal({ onClose, onCreated, prefill }: Props) {
               onChange={(s) => setF({ strategy: s })}
               truncateTarget={form.truncate_target}
               onTruncateChange={(b) => setF({ truncate_target: b })}
+              cdcDisabledReason="CDC добавляется через экран &quot;Эта миграция&quot; и единую CDC-пачку"
             />
+            {fieldErrs.strategy && (
+              <div style={{
+                marginTop: 8,
+                padding: "9px 12px",
+                borderRadius: t.radius.md,
+                background: `${t.red.border}22`,
+                border: `1px solid ${t.red.border}`,
+                color: t.red.fg,
+                fontSize: t.size.sm,
+              }}>
+                {fieldErrs.strategy}
+              </div>
+            )}
             {!hasCdc(form.strategy) && (
               <div style={{
                 marginTop: 8,
