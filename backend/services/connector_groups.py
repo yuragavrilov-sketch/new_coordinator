@@ -329,13 +329,34 @@ def get_group_tables(group_id: str) -> list[dict]:
     return rows
 
 
+def _active_migration_for_group_table(cur, group_id: str, source_schema: str, source_table: str):
+    cur.execute("""
+        SELECT migration_id, phase
+        FROM   migrations
+        WHERE  group_id = %s
+          AND  UPPER(source_schema) = UPPER(%s)
+          AND  UPPER(source_table) = UPPER(%s)
+          AND  COALESCE(phase, '') NOT IN ('CANCELLED', 'FAILED', 'COMPLETED')
+        LIMIT  1
+    """, (group_id, source_schema, source_table))
+    return cur.fetchone()
+
+
 def remove_table(group_id: str, source_schema: str, source_table: str) -> None:
     conn = _conn()
     try:
         with conn.cursor() as cur:
+            active = _active_migration_for_group_table(cur, group_id, source_schema, source_table)
+            if active:
+                raise ValueError(
+                    f"Cannot remove {source_schema}.{source_table} from CDC connector: "
+                    f"active migration {active[0]} is in phase {active[1]}"
+                )
             cur.execute("""
                 DELETE FROM group_tables
-                WHERE group_id = %s AND source_schema = %s AND source_table = %s
+                WHERE group_id = %s
+                  AND UPPER(source_schema) = UPPER(%s)
+                  AND UPPER(source_table) = UPPER(%s)
             """, (group_id, source_schema, source_table))
         conn.commit()
     finally:

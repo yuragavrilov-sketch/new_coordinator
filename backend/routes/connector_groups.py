@@ -263,7 +263,10 @@ def add_group_tables(group_id: str):
 @bp.delete("/api/connector-groups/<group_id>/tables/<source_schema>/<source_table>")
 def remove_group_table(group_id: str, source_schema: str, source_table: str):
     from services.connector_groups import remove_table, refresh_connector_tables
-    remove_table(group_id, source_schema, source_table)
+    try:
+        remove_table(group_id, source_schema, source_table)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     try:
         refresh_connector_tables(group_id)
     except Exception as exc:
