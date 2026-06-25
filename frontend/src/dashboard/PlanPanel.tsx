@@ -85,16 +85,25 @@ export function PlanPanel({
       }
       const body = await res.json().catch(() => ({}));
       onReload();
+      const connectorStatus = String(body.status || "").toUpperCase();
+      const connectorText = connectorStatus === "RUNNING"
+        ? "CDC-коннектор RUNNING"
+        : connectorStatus
+          ? `Запуск CDC-коннектора: ${connectorStatus}`
+          : "Запуск CDC-коннектора запрошен";
       if (body.plan_start_error) {
-        setCdcActionErr(`CDC-коннектор запущен, но очередь не продолжена: ${body.plan_start_error}`);
+        setCdcActionErr(`${connectorText}, но очередь не продолжена: ${body.plan_start_error}`);
       } else {
         const startedCount = (body.plan_starts || []).reduce(
           (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
           0,
         );
+        const rowText = connectorStatus === "RUNNING"
+          ? "запущено CDC строк"
+          : "CDC строк переведено в ожидание коннектора";
         setCdcActionInfo(startedCount
-          ? `CDC-коннектор запущен, запущено CDC строк: ${startedCount}`
-          : "CDC-коннектор запущен");
+          ? `${connectorText}, ${rowText}: ${startedCount}`
+          : connectorText);
       }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
