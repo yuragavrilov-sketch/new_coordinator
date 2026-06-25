@@ -31,11 +31,20 @@ interface Props {
   tables: BulkTable[];
   initialMode?: "historical" | "cdc";
   cdcGroup?: MigrationPlanCdcGroup | null;
+  cdcGroupLoading?: boolean;
   onClose: () => void;
   onDone: (planId: number, count: number, response: AddPlanItemsResp) => void | Promise<void>;
 }
 
-export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "historical", cdcGroup, onClose, onDone }: Props) {
+export function AddToPlanModal({
+  schemaMigrationId,
+  tables,
+  initialMode = "historical",
+  cdcGroup,
+  cdcGroupLoading = false,
+  onClose,
+  onDone,
+}: Props) {
   const [mode, setMode] = useState<"historical" | "cdc">(initialMode);
   const [strategy, setStrategy] = useState<AddPlanItemsPayload["strategy"]>(
     initialMode === "cdc" ? "CDC_DIRECT" : "BULK_DIRECT",
@@ -72,6 +81,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
   ];
   const projectedPreview = projectedConnectorLabels.slice(0, 8);
   const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
+  const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading));
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -179,6 +189,10 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     setErr("");
     try {
       if (mode === "cdc") {
+        if (cdcGroupLoading) {
+          setErr("Дождитесь загрузки состава CDC-коннектора.");
+          return;
+        }
         if (infoLoading) {
           setErr("Дождитесь загрузки ключей таблиц.");
           return;
@@ -326,7 +340,18 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
 
           {mode === "cdc" && (
             <Section title="CDC-коннектор">
-              {cdcGroup ? (
+              {cdcGroupLoading ? (
+                <div style={{
+                  padding: "9px 10px",
+                  border: `1px solid ${t.border.subtle}`,
+                  borderRadius: t.radius.sm,
+                  background: t.bg.s1,
+                  color: t.text.muted,
+                  fontSize: 12,
+                }}>
+                  Загружаю текущий состав CDC-коннектора...
+                </div>
+              ) : cdcGroup ? (
                 <div style={{
                   display: "grid",
                   gap: 8,
@@ -585,7 +610,7 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
 
         <div style={S.footer}>
           <button onClick={onClose} disabled={busy} style={secondaryActionStyle(busy)}>Отмена</button>
-          <button onClick={submit} disabled={busy || (mode === "cdc" && infoLoading)} style={primaryActionStyle(busy || (mode === "cdc" && infoLoading))}>
+          <button onClick={submit} disabled={submitDisabled} style={primaryActionStyle(submitDisabled)}>
             {busy ? "Добавление..." : mode === "cdc" ? "Добавить в CDC-коннектор" : "Добавить в обычную пачку"}
           </button>
         </div>
