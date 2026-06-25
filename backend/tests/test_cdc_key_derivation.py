@@ -509,6 +509,63 @@ def test_connector_group_topic_creation_uses_active_run_topic_names(monkeypatch)
     ]
 
 
+def test_connector_group_request_start_syncs_persisted_topic_names(monkeypatch):
+    calls = []
+
+    class CursorStub:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("execute", params))
+
+    class ConnStub:
+        def cursor(self):
+            return CursorStub()
+
+        def commit(self):
+            calls.append(("commit",))
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "status": "PENDING",
+            "source_connection_id": "oracle_source",
+            "topic_prefix": "base.topic",
+        },
+    )
+    monkeypatch.setattr(connector_groups, "_build_table_include_list", lambda group_id: "TCBPAY.ALLORDERS")
+    monkeypatch.setattr(connector_groups, "_oracle_cfg", lambda source_connection_id: {"host": "oracle"})
+    monkeypatch.setattr(connector_groups, "_gen_run_id", lambda: "r123ab")
+    monkeypatch.setattr(connector_groups, "_conn", lambda: ConnStub())
+    monkeypatch.setattr(
+        connector_groups,
+        "_sync_persisted_topic_names",
+        lambda cur, group_id, prefix: calls.append(("sync", group_id, prefix)),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "transition_group",
+        lambda group_id, status, message=None: calls.append(("transition", group_id, status, message)),
+    )
+
+    assert connector_groups.request_start("gid-1") == {
+        "group_id": "gid-1",
+        "status": "TOPICS_CREATING",
+        "run_id": "r123ab",
+    }
+    assert ("sync", "gid-1", "base.topic.r123ab") in calls
+    assert any(call[:3] == ("transition", "gid-1", "TOPICS_CREATING") for call in calls)
+
+
 class CursorStub:
     def __init__(self, row):
         self.row = row

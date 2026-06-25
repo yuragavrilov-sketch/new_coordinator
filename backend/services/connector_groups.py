@@ -437,6 +437,18 @@ def _topic_name(topic_prefix: str, schema: str, table: str) -> str:
     return f"{topic_prefix}.{schema.upper()}.{table.upper()}".replace("#", "_")
 
 
+def _sync_persisted_topic_names(cur, group_id: str, topic_prefix: str) -> None:
+    cur.execute("""
+        UPDATE group_tables
+        SET    topic_name = REPLACE(
+                   %s || '.' || UPPER(source_schema) || '.' || UPPER(source_table),
+                   '#',
+                   '_'
+               )
+        WHERE  group_id = %s
+    """, (topic_prefix, group_id))
+
+
 def _build_topic_names(group_id: str) -> list[str]:
     """Generate topic names from group's topic_prefix + table names."""
     tables = get_group_tables(group_id)
@@ -894,6 +906,11 @@ def request_start(group_id: str) -> dict:
                 UPDATE connector_groups SET run_id = %s, updated_at = NOW()
                 WHERE group_id = %s
             """, (run_id, group_id))
+            _sync_persisted_topic_names(
+                cur,
+                group_id,
+                f"{group['topic_prefix']}.{run_id}",
+            )
         conn.commit()
     finally:
         conn.close()
