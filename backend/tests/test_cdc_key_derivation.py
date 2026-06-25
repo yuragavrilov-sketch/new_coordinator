@@ -725,6 +725,59 @@ def test_schema_migration_autostart_contract_starts_connector_and_plan(monkeypat
     ]
 
 
+def test_schema_migration_autostart_queues_items_when_stopped_connector_start_fails(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        schema_migrations,
+        "_sync_and_request_cdc_connector_start",
+        lambda *_args: (_ for _ in ()).throw(ValueError("Oracle source is not configured")),
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_record_cdc_connector_start_error",
+        lambda group_id, status, error: calls.append(("record", group_id, status, error)) or "FAILED",
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_start_created_cdc_plan_batches",
+        lambda plan_id, created: calls.append(("plan", plan_id, created)) or [
+            {"batch": created[0]["batch_order"], "started": [created[0]["migration_id"]]},
+        ],
+    )
+    monkeypatch.setattr(
+        schema_migrations,
+        "_kick_cdc_group_best_effort",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+    monkeypatch.setitem(
+        schema_migrations._state,
+        "broadcast",
+        lambda event: calls.append(("broadcast", event["type"], event["status"])),
+    )
+
+    result = schema_migrations._autostart_created_cdc_items(
+        "gid-1",
+        "STOPPED",
+        42,
+        [{"migration_id": "mid-1", "batch_order": 2}],
+    )
+
+    assert result == {
+        "connector_start": None,
+        "connector_start_error": "Oracle source is not configured",
+        "plan_start": {"batch": 2, "started": ["mid-1"]},
+        "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
+        "plan_start_error": None,
+    }
+    assert calls == [
+        ("record", "gid-1", "STOPPED", "Oracle source is not configured"),
+        ("broadcast", "connector_group_status", "FAILED"),
+        ("plan", 42, [{"migration_id": "mid-1", "batch_order": 2}]),
+        ("kick", "gid-1"),
+    ]
+
+
 def test_schema_migration_autostart_running_sync_error_does_not_start_plan(monkeypatch):
     calls = []
 
