@@ -2140,3 +2140,112 @@ def test_orchestrator_keeps_new_cdc_migration_waiting_until_group_running(monkey
         ("update", "mid-1", {"queue_position": None}),
         ("queue",),
     ]
+
+
+def test_orchestrator_starts_new_cdc_migration_when_group_running(monkeypatch):
+    calls = []
+    migration = {
+        "migration_id": "mid-1",
+        "group_id": "gid-1",
+        "phase": "NEW",
+        "strategy": "CDC_DIRECT",
+        "source_connection_id": "oracle_source",
+        "target_connection_id": "oracle_target",
+        "source_schema": "TCBPAY",
+        "source_table": "ALLORDERS",
+        "target_schema": "TCBPAY",
+        "target_table": "ALLORDERS",
+        "stage_table_name": "STG_TCBPAY_ALLORDERS",
+        "stage_tablespace": "",
+        "source_pk_exists": True,
+        "source_uk_exists": False,
+        "effective_key_columns_json": "[]",
+        "truncate_target": True,
+    }
+
+    class CursorStub:
+        def __init__(self, rows):
+            self.rows = list(rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append(("query", " ".join(sql.split()), params))
+
+        def fetchone(self):
+            return self.rows.pop(0) if self.rows else None
+
+    class ConnStub:
+        def __init__(self):
+            self.cursors = [
+                CursorStub([None]),          # no heavy slot busy
+                CursorStub([("mid-1",)]),    # this migration is first runnable NEW
+            ]
+
+        def cursor(self):
+            return self.cursors.pop(0)
+
+        def close(self):
+            calls.append(("close",))
+
+    class ImmediateThread:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        orchestrator.connector_groups_svc,
+        "get_group",
+        lambda group_id: calls.append(("get-group", group_id)) or {
+            "group_id": group_id,
+            "status": "RUNNING",
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.topic",
+            "consumer_group_prefix": "cdc.consumer",
+            "run_id": "r123ab",
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_sync_cdc_runtime_context",
+        lambda mid, m, group: calls.append(("runtime", mid, group["run_id"])) or {
+            **m,
+            "connector_name": "cdc-main_r123ab",
+            "topic_prefix": "cdc.topic.r123ab",
+            "consumer_group": "cdc.consumer_TCBPAY_ALLORDERS",
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_update", lambda mid, values: calls.append(("update", mid, values)))
+    monkeypatch.setattr(orchestrator.oracle_scn, "check_supplemental_logging", lambda *_args: True)
+    monkeypatch.setattr(orchestrator, "_oracle_cfg", lambda conn_id: {"conn_id": conn_id})
+    monkeypatch.setattr(
+        orchestrator,
+        "_prepare_target_for_direct_load",
+        lambda mid, m, dst_cfg, msg_parts: calls.append(("prepare-target", mid, dst_cfg["conn_id"])) or msg_parts.append("target prepared"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_safe_transition",
+        lambda mid, expected, to_phase, message=None, **_kwargs: calls.append(("transition", mid, expected, to_phase, message)),
+    )
+    orchestrator._in_progress.clear()
+
+    orchestrator._handle_new("mid-1", migration)
+
+    assert ("runtime", "mid-1", "r123ab") in calls
+    assert ("update", "mid-1", {"queue_position": None}) in calls
+    assert ("prepare-target", "mid-1", "oracle_target") in calls
+    assert any(
+        call[0] == "transition"
+        and call[1:4] == ("mid-1", "NEW", "TOPIC_CREATING")
+        and "create Kafka topic" in (call[4] or "")
+        for call in calls
+    )
