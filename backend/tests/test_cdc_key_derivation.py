@@ -1492,6 +1492,72 @@ def test_orchestrator_skips_trigger_job_when_cdc_catchup_phase_changed(monkeypat
     assert calls == [("transition", "mid-cdc", "CDC_CAUGHT_UP", "STEADY_STATE")]
 
 
+def test_orchestrator_broadcasts_created_pending_trigger_job(monkeypatch):
+    calls = []
+
+    class ConnStub:
+        def close(self):
+            calls.append(("close",))
+
+    job = {
+        "job_id": "job-1",
+        "migration_id": "mid-cdc",
+        "state": "PENDING",
+        "enabled_count": 0,
+        "created": True,
+    }
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event)))
+    monkeypatch.setattr(
+        orchestrator.target_trigger_jobs,
+        "ensure_pending_job",
+        lambda conn, mid, requested_by=None: calls.append(("ensure", mid, requested_by)) or job,
+    )
+
+    orchestrator._ensure_trigger_job("mid-cdc", requested_by="orchestrator")
+
+    assert calls[0] == ("ensure", "mid-cdc", "orchestrator")
+    assert calls[1][0] == "broadcast"
+    assert calls[1][1]["type"] == "target_trigger_job"
+    assert calls[1][1]["migration_id"] == "mid-cdc"
+    assert calls[1][1]["job_id"] == "job-1"
+    assert calls[1][1]["state"] == "PENDING"
+    assert calls[2] == ("close",)
+
+
+def test_orchestrator_skips_existing_trigger_job_broadcast(monkeypatch):
+    calls = []
+
+    class ConnStub:
+        def close(self):
+            calls.append(("close",))
+
+    job = {
+        "job_id": "job-1",
+        "migration_id": "mid-cdc",
+        "state": "PENDING",
+        "enabled_count": 0,
+        "created": False,
+    }
+
+    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(orchestrator._state, "broadcast", lambda event: calls.append(("broadcast", event)))
+    monkeypatch.setattr(
+        orchestrator.target_trigger_jobs,
+        "ensure_pending_job",
+        lambda conn, mid, requested_by=None: calls.append(("ensure", mid, requested_by)) or job,
+    )
+
+    result = orchestrator.create_trigger_job("mid-cdc", requested_by="user")
+
+    assert result == job
+    assert calls == [
+        ("ensure", "mid-cdc", "user"),
+        ("close",),
+    ]
+
+
 def test_orchestrator_refreshes_queue_when_group_becomes_running(monkeypatch):
     calls = []
 

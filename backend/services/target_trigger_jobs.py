@@ -77,6 +77,7 @@ def ensure_pending_job(conn, migration_id: str, requested_by: str | None = None)
         existing = cur.fetchone()
         if existing:
             job = _clean_job(row_to_dict(cur, existing))
+            job["created"] = False
             conn.commit()
             return job
 
@@ -87,6 +88,7 @@ def ensure_pending_job(conn, migration_id: str, requested_by: str | None = None)
                       error_text, requested_by, created_at, started_at, completed_at
         """, (migration_id, requested_by))
         job = _clean_job(row_to_dict(cur, cur.fetchone()))
+        job["created"] = True
         conn.commit()
         return job
 
@@ -129,6 +131,15 @@ def run_job_async(
         conn.commit()
     finally:
         conn.close()
+
+    broadcast_fn({
+        "type": "target_trigger_job",
+        "migration_id": migration_id,
+        "job_id": job_id,
+        "state": "RUNNING",
+        "enabled_count": job.get("enabled_count") or 0,
+        "ts": datetime.utcnow().isoformat() + "Z",
+    })
 
     def _run() -> None:
         _execute_job(

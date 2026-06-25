@@ -709,13 +709,30 @@ def _prepare_target_for_direct_load(mid: str, m: dict, dst_cfg: dict, message_pa
 def _ensure_trigger_job(mid: str, requested_by: str = "orchestrator") -> None:
     conn = _state["get_conn"]()
     try:
-        target_trigger_jobs.ensure_pending_job(conn, mid, requested_by=requested_by)
+        job = target_trigger_jobs.ensure_pending_job(conn, mid, requested_by=requested_by)
+        _broadcast_trigger_job_created(job)
     except ValueError as exc:
         print(f"[orchestrator] {mid}: trigger job not created: {exc}")
     except Exception as exc:
         print(f"[orchestrator] {mid}: trigger job create warning: {exc}")
     finally:
         conn.close()
+
+
+def _broadcast_trigger_job_created(job: dict) -> None:
+    if not job.get("created"):
+        return
+    try:
+        _broadcast({
+            "type": "target_trigger_job",
+            "migration_id": job["migration_id"],
+            "job_id": job["job_id"],
+            "state": job["state"],
+            "enabled_count": job.get("enabled_count") or 0,
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+    except Exception as exc:
+        print(f"[orchestrator] trigger job broadcast warning: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -1157,13 +1174,15 @@ def list_trigger_jobs(migration_id: str) -> list[dict]:
 def create_trigger_job(migration_id: str, requested_by: str | None = None) -> dict:
     conn = _state["get_conn"]()
     try:
-        return target_trigger_jobs.ensure_pending_job(
+        job = target_trigger_jobs.ensure_pending_job(
             conn,
             migration_id,
             requested_by=requested_by or "user",
         )
     finally:
         conn.close()
+    _broadcast_trigger_job_created(job)
+    return job
 
 
 def run_trigger_job(migration_id: str, job_id: str) -> dict:
