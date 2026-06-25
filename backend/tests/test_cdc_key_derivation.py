@@ -61,6 +61,10 @@ def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
 
+def test_orchestrator_index_enable_phase_holds_load_slot():
+    assert "INDEXES_ENABLING" in orchestrator._HEAVY_PHASES
+
+
 def test_orchestrator_keeps_plan_running_when_no_pending_but_active_items():
     assert orchestrator._plan_status_without_pending(
         active_count=1,

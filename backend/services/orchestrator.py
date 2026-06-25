@@ -50,6 +50,7 @@ _HEAVY_PHASES = frozenset({
     "STAGE_VALIDATING", "STAGE_VALIDATED",
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING",
+    "INDEXES_ENABLING",
 })
 
 # Track migrations running in a dedicated thread (long-running phases)
