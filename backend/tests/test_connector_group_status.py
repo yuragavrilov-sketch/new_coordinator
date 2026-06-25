@@ -36,6 +36,43 @@ def test_status_poll_writes_real_status_for_stable_group():
     ) == ("FAILED", "FAILED")
 
 
+def test_refresh_connector_tables_marks_missing_running_connector_stopped(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "get_group",
+        lambda group_id: {
+            "group_id": group_id,
+            "status": "RUNNING",
+            "connector_name": "cdc-main",
+            "topic_prefix": "cdc.topic",
+            "run_id": None,
+        },
+    )
+    monkeypatch.setattr(
+        connector_groups.debezium,
+        "get_connector_status",
+        lambda connector_name: "NOT_FOUND",
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "update_group_status",
+        lambda group_id, status, error_text=None: calls.append((group_id, status, error_text)),
+    )
+
+    try:
+        connector_groups.refresh_connector_tables("gid-1")
+    except ValueError as exc:
+        assert "marked RUNNING but is missing" in str(exc)
+    else:
+        raise AssertionError("expected missing Kafka Connect connector error")
+
+    assert calls == [
+        ("gid-1", "STOPPED", "CDC connector cdc-main is missing in Kafka Connect"),
+    ]
+
+
 class CursorStub:
     def __init__(self, row):
         self.row = row

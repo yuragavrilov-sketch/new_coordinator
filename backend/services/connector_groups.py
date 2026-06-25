@@ -950,6 +950,11 @@ def refresh_connector_tables(group_id: str) -> None:
     status = debezium.get_connector_status(connector_name)
     if status == "NOT_FOUND":
         if group.get("status") == "RUNNING":
+            update_group_status(
+                group_id,
+                "STOPPED",
+                f"CDC connector {connector_name} is missing in Kafka Connect",
+            )
             raise ValueError(
                 f"CDC connector {connector_name} is marked RUNNING but is missing in Kafka Connect"
             )
