@@ -41,10 +41,12 @@ export function PlanPanel({
   }, [plan]);
   const [cdcActionBusy, setCdcActionBusy] = React.useState("");
   const [cdcActionErr, setCdcActionErr] = React.useState("");
+  const [cdcActionInfo, setCdcActionInfo] = React.useState("");
 
   async function syncCdcGroup(group: MigrationPlanCdcGroup) {
     setCdcActionBusy("sync");
     setCdcActionErr("");
+    setCdcActionInfo("");
     try {
       const res = await fetch(`/api/connector-groups/${group.group_id}/refresh-tables`, { method: "POST" });
       if (!res.ok) {
@@ -53,8 +55,16 @@ export function PlanPanel({
       }
       const body = await res.json().catch(() => ({}));
       onReload();
-      if (body.sync_error) {
-        setCdcActionErr(`Таблица убрана из пачки, но Debezium не синхронизирован: ${body.sync_error}`);
+      if (body.plan_start_error) {
+        setCdcActionErr(`Debezium синхронизирован, но CDC очередь не продолжена: ${body.plan_start_error}`);
+      } else {
+        const startedCount = (body.plan_starts || []).reduce(
+          (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
+          0,
+        );
+        setCdcActionInfo(startedCount
+          ? `Debezium синхронизирован, запущено CDC строк: ${startedCount}`
+          : "Debezium синхронизирован");
       }
     } catch (e) {
       setCdcActionErr(e instanceof Error ? e.message : String(e));
@@ -66,6 +76,7 @@ export function PlanPanel({
   async function startCdcGroup(group: MigrationPlanCdcGroup) {
     setCdcActionBusy("start");
     setCdcActionErr("");
+    setCdcActionInfo("");
     try {
       const res = await fetch(`/api/connector-groups/${group.group_id}/start`, { method: "POST" });
       if (!res.ok) {
@@ -85,6 +96,7 @@ export function PlanPanel({
     if (!window.confirm(`Убрать ${label} из CDC-коннектора? Debezium table.include.list будет обновлен.`)) return;
     setCdcActionBusy(label);
     setCdcActionErr("");
+    setCdcActionInfo("");
     try {
       const res = await fetch(
         `/api/connector-groups/${group.group_id}/tables/${encodeURIComponent(table.source_schema)}/${encodeURIComponent(table.source_table)}`,
@@ -137,6 +149,15 @@ export function PlanPanel({
             color: t.red.fg, fontSize: 12,
           }}>
             {cdcActionErr}
+          </div>
+        )}
+        {cdcActionInfo && (
+          <div style={{
+            marginTop: 10, padding: "7px 10px", borderRadius: t.radius.sm,
+            background: t.green.bg, border: `1px solid ${t.green.dim}`,
+            color: t.green.fg, fontSize: 12,
+          }}>
+            {cdcActionInfo}
           </div>
         )}
       </Shell>
@@ -222,6 +243,15 @@ export function PlanPanel({
           color: t.red.fg, fontSize: 12,
         }}>
           {cdcActionErr}
+        </div>
+      )}
+      {cdcActionInfo && (
+        <div style={{
+          marginBottom: 10, padding: "7px 10px", borderRadius: t.radius.sm,
+          background: t.green.bg, border: `1px solid ${t.green.dim}`,
+          color: t.green.fg, fontSize: 12,
+        }}>
+          {cdcActionInfo}
         </div>
       )}
 

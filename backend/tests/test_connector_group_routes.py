@@ -1,6 +1,8 @@
 from flask import Flask
 
 from routes import connector_groups
+from routes import planner
+from services import orchestrator
 from services import connector_groups as connector_groups_svc
 
 
@@ -121,4 +123,81 @@ def test_add_group_tables_reports_existing_without_sync(monkeypatch):
     }
     assert calls == [
         ("add", "gid-1", [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]),
+    ]
+
+
+def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups_svc,
+        "refresh_connector_tables",
+        lambda group_id: calls.append(("refresh", group_id)),
+    )
+    monkeypatch.setattr(
+        connector_groups,
+        "_start_pending_cdc_plan_batches_for_group",
+        lambda group_id: calls.append(("start-pending", group_id)) or [
+            {"batch": 4, "started": ["mid-1"]},
+        ],
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(connector_groups.bp)
+
+    res = app.test_client().post("/api/connector-groups/gid-1/refresh-tables")
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "ok": True,
+        "plan_starts": [{"batch": 4, "started": ["mid-1"]}],
+        "plan_start_error": None,
+    }
+    assert calls == [
+        ("refresh", "gid-1"),
+        ("start-pending", "gid-1"),
+    ]
+
+
+def test_start_pending_cdc_plan_batches_kicks_group(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        connector_groups,
+        "_pending_cdc_plan_batches_for_group",
+        lambda group_id: calls.append(("load", group_id)) or [(42, 2), (42, 3)],
+    )
+    monkeypatch.setattr(
+        planner,
+        "_start_next_plan_batch",
+        lambda plan_id, **kwargs: calls.append(("start", plan_id, kwargs)) or {
+            "batch": kwargs["batch_order"],
+            "started": [f"mid-{kwargs['batch_order']}"],
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_update_queue_positions", lambda: calls.append(("queue",)))
+    monkeypatch.setattr(
+        orchestrator,
+        "_kick_new_migrations_for_group",
+        lambda group_id: calls.append(("kick", group_id)),
+    )
+
+    assert connector_groups._start_pending_cdc_plan_batches_for_group("gid-1") == [
+        {"batch": 2, "started": ["mid-2"]},
+        {"batch": 3, "started": ["mid-3"]},
+    ]
+    assert calls == [
+        ("load", "gid-1"),
+        ("start", 42, {
+            "actor": "SYSTEM",
+            "batch_order": 2,
+            "allow_cdc_queue_when_blocked": True,
+        }),
+        ("start", 42, {
+            "actor": "SYSTEM",
+            "batch_order": 3,
+            "allow_cdc_queue_when_blocked": True,
+        }),
+        ("queue",),
+        ("kick", "gid-1"),
     ]

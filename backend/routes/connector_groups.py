@@ -41,6 +41,43 @@ def _legacy_cdc_migration_error() -> dict:
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
 
+def _pending_cdc_plan_batches_for_group(group_id: str) -> list[tuple[int, int]]:
+    conn = _state["get_conn"]()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT i.plan_id, i.batch_order
+                FROM   migration_plan_items i
+                JOIN   migrations m ON m.migration_id = i.migration_id
+                WHERE  m.group_id = %s
+                  AND  i.status = 'PENDING'
+                  AND  m.phase = 'DRAFT'
+                  AND  LEFT(COALESCE(m.strategy, ''), 4) = 'CDC_'
+                ORDER BY i.plan_id, i.batch_order
+            """, (group_id,))
+            return [(int(row[0]), int(row[1])) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _start_pending_cdc_plan_batches_for_group(group_id: str) -> list[dict]:
+    from routes.planner import _start_next_plan_batch
+    from services import orchestrator
+
+    starts = []
+    for plan_id, batch_order in _pending_cdc_plan_batches_for_group(group_id):
+        starts.append(_start_next_plan_batch(
+            plan_id,
+            actor="SYSTEM",
+            batch_order=batch_order,
+            allow_cdc_queue_when_blocked=True,
+        ))
+    if starts:
+        orchestrator._update_queue_positions()
+        orchestrator._kick_new_migrations_for_group(group_id)
+    return starts
+
+
 @bp.get("/api/connector-groups")
 def list_groups():
     from services.connector_groups import list_groups as svc_list
@@ -378,7 +415,17 @@ def refresh_tables(group_id: str):
         refresh_connector_tables(group_id)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
-    return jsonify({"ok": True})
+    plan_starts = []
+    plan_start_error = None
+    try:
+        plan_starts = _start_pending_cdc_plan_batches_for_group(group_id)
+    except Exception as exc:
+        plan_start_error = str(exc)
+    return jsonify({
+        "ok": True,
+        "plan_starts": plan_starts,
+        "plan_start_error": plan_start_error,
+    })
 
 
 # ── Create migration from group table ─────────────────────────────────────────
