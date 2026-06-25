@@ -62,8 +62,16 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
     [tables],
   );
   const connectorTables = cdcGroup?.tables || [];
+  const connectorTableKeys = new Set(connectorTables.map(cdcTableKey));
   const connectorSelectedTables = connectorTables.filter(t => selectedKeys.has(cdcTableKey(t)));
   const connectorOtherTables = connectorTables.filter(t => !selectedKeys.has(cdcTableKey(t)));
+  const connectorNewTables = tables.filter(t => !connectorTableKeys.has(rowKey(t)));
+  const projectedConnectorLabels = [
+    ...connectorTables.map(cdcTableLabel),
+    ...connectorNewTables.map(rowKey),
+  ];
+  const projectedPreview = projectedConnectorLabels.slice(0, 8);
+  const projectedRest = Math.max(0, projectedConnectorLabels.length - projectedPreview.length);
 
   function rowKey(x: BulkTable) {
     return `${x.source_schema.toUpperCase()}.${x.source_table.toUpperCase()}`;
@@ -332,6 +340,14 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <span>Статус: <strong style={{ color: t.text.primary }}>{cdcGroup.status}</strong></span>
                     <span>Таблиц в Debezium: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorTables.length}</strong></span>
+                    <span>Новых после сохранения: <strong style={{ color: t.text.primary, fontFamily: t.font.mono }}>{connectorNewTables.length}</strong></span>
+                  </div>
+                  <div style={{ color: t.text.secondary }}>
+                    После сохранения Debezium будет читать весь состав CDC-пачки:{" "}
+                    <span style={{ fontFamily: t.font.mono, color: t.text.primary }}>
+                      {projectedPreview.length > 0 ? projectedPreview.join(", ") : "пока нет таблиц"}
+                    </span>
+                    {projectedRest > 0 && <span style={{ color: t.text.muted }}> +{projectedRest} еще</span>}
                   </div>
                   {connectorSelectedTables.length > 0 && (
                     <div style={{ color: t.amber.fg }}>
@@ -339,8 +355,8 @@ export function AddToPlanModal({ schemaMigrationId, tables, initialMode = "histo
                     </div>
                   )}
                   {connectorOtherTables.length > 0 && (
-                    <div>
-                      Остальные таблицы коннектора: {connectorOtherTables.map(cdcTableLabel).join(", ")}
+                    <div style={{ color: t.amber.fg }}>
+                      Это не новый пустой коннектор: выбранные таблицы добавятся к уже существующим: {connectorOtherTables.map(cdcTableLabel).join(", ")}
                     </div>
                   )}
                   {cdcGroup.table_include_list && (
