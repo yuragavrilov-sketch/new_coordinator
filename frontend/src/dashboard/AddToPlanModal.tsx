@@ -106,11 +106,24 @@ export function AddToPlanModal({
   const connectorOtherRest = Math.max(0, connectorOtherTables.length - connectorOtherPreview.length);
   const projectedConnectorCount = projectedConnectorLabels.length;
   const projectedIncludeList = projectedConnectorLabels.join(",");
-  const cdcSubmitLabel = shouldPruneCdcPack
+  const cdcBaseSubmitLabel = shouldPruneCdcPack
     ? `Оставить ${tables.length} в CDC-коннекторе и добавить в очередь`
     : projectedConnectorCount > tables.length
       ? `Добавить ${tables.length} в очередь, синхронизировать ${projectedConnectorCount} в Debezium`
       : `Добавить ${tables.length} в CDC-коннектор`;
+  const cdcRuntimeLoading = mode === "cdc" && (workerStatusApi.loading || servicesMetricsApi.loading);
+  const cdcRuntimeKnown = mode === "cdc" && !!workerStatusApi.data && !!servicesMetricsApi.data && !cdcRuntimeLoading;
+  const cdcRuntimeIssues = cdcRuntimeKnown ? [
+    workerStatusApi.data?.cdc_ready === true ? "" : "Worker",
+    servicesMetricsApi.data?.oracle_source?.ok === true ? "" : "Oracle source",
+    servicesMetricsApi.data?.oracle_target?.ok === true ? "" : "Oracle target",
+    servicesMetricsApi.data?.kafka?.ok === true ? "" : "Kafka",
+    servicesMetricsApi.data?.kafka_connect?.ok === true ? "" : "Kafka Connect",
+  ].filter(Boolean) : [];
+  const cdcRuntimeWillWait = cdcRuntimeKnown && cdcRuntimeIssues.length > 0;
+  const cdcSubmitLabel = cdcRuntimeWillWait
+    ? "Добавить в CDC-пачку: будет ждать runtime"
+    : cdcBaseSubmitLabel;
   const submitDisabled = busy || (mode === "cdc" && (infoLoading || cdcGroupLoading || !!cdcGroupError));
 
   function rowKey(x: BulkTable) {
@@ -606,6 +619,20 @@ export function AddToPlanModal({
               }}>
                 Зеленый статус означает, что после добавления таблицы coordinator сможет стартовать коннектор и worker сможет забрать CDC apply. Если есть красный статус, строка может остаться в ожидании до исправления runtime.
               </div>
+              {cdcRuntimeWillWait && (
+                <div style={{
+                  marginTop: 8,
+                  padding: "7px 9px",
+                  borderRadius: t.radius.sm,
+                  border: `1px solid ${t.amber.dim}`,
+                  background: t.amber.bg,
+                  color: t.amber.fg,
+                  fontSize: 12,
+                  lineHeight: 1.4,
+                }}>
+                  При сохранении таблица добавится в CDC-пачку и очередь, но перенос не начнется до готовности: {cdcRuntimeIssues.join(", ")}.
+                </div>
+              )}
             </Section>
           )}
 
