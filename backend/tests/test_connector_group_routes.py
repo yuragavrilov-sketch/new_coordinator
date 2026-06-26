@@ -314,6 +314,11 @@ def test_refresh_tables_starts_pending_cdc_batches_after_sync(monkeypatch):
         "plan_starts": [{"batch": 4, "started": ["mid-1"]}],
         "plan_start_error": None,
         "cdc_queue_kicked": True,
+        "cdc_next_action": {
+            "level": "ok",
+            "code": "QUEUED",
+            "message": "CDC-строки поставлены в очередь: 1.",
+        },
     }
     assert calls == [
         ("refresh", "gid-1"),
@@ -363,6 +368,11 @@ def test_start_group_starts_pending_cdc_batches_after_request_start(monkeypatch)
         "plan_starts": [{"batch": 2, "started": ["mid-1"]}],
         "plan_start_error": None,
         "cdc_queue_kicked": True,
+        "cdc_next_action": {
+            "level": "ok",
+            "code": "QUEUED",
+            "message": "CDC-строки поставлены в очередь: 1.",
+        },
     }
     assert calls == [
         ("request-start", "gid-1"),
@@ -427,6 +437,11 @@ def test_start_group_kicks_existing_new_cdc_when_already_running(monkeypatch):
         "plan_starts": [],
         "plan_start_error": None,
         "cdc_queue_kicked": True,
+        "cdc_next_action": {
+            "level": "ok",
+            "code": "QUEUE_KICKED",
+            "message": "CDC-очередь проверена и продолжена.",
+        },
     }
     assert calls == [
         ("request-start", "gid-1"),
@@ -482,6 +497,11 @@ def test_refresh_tables_kicks_existing_new_cdc_when_group_running(monkeypatch):
         "plan_starts": [],
         "plan_start_error": None,
         "cdc_queue_kicked": True,
+        "cdc_next_action": {
+            "level": "ok",
+            "code": "QUEUE_KICKED",
+            "message": "CDC-очередь проверена и продолжена.",
+        },
     }
     assert calls == [
         ("refresh", "gid-1"),
@@ -519,6 +539,19 @@ def test_kick_existing_new_cdc_returns_false_when_no_new_rows(monkeypatch):
         ("get-group", "gid-1"),
         ("has-new", "gid-1"),
     ]
+
+
+def test_connector_group_next_action_reports_plan_start_error():
+    assert connector_groups._build_cdc_group_next_action(
+        status="RUNNING",
+        plan_starts=[],
+        plan_start_error="state db busy",
+        cdc_queue_kicked=False,
+    ) == {
+        "level": "error",
+        "code": "PLAN_START_FAILED",
+        "message": "CDC-коннектор обработан, но очередь не продолжена: state db busy",
+    }
 
 
 def test_has_existing_new_cdc_rows_filters_by_group_phase_and_strategy(monkeypatch):

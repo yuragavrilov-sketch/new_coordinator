@@ -137,6 +137,65 @@ def _kick_group_lifecycle_best_effort(group_id: str) -> bool:
         return False
 
 
+def _build_cdc_group_next_action(
+    *,
+    status: str | None,
+    plan_starts: list[dict],
+    plan_start_error: str | None,
+    cdc_queue_kicked: bool,
+) -> dict:
+    normalized = str(status or "").upper()
+    started_count = sum(len(item.get("started") or []) for item in plan_starts)
+
+    if plan_start_error:
+        return {
+            "level": "error",
+            "code": "PLAN_START_FAILED",
+            "message": f"CDC-коннектор обработан, но очередь не продолжена: {plan_start_error}",
+        }
+    if started_count:
+        if normalized == "RUNNING":
+            return {
+                "level": "ok",
+                "code": "QUEUED",
+                "message": f"CDC-строки поставлены в очередь: {started_count}.",
+            }
+        return {
+            "level": "warn",
+            "code": "WAITING_CONNECTOR",
+            "message": f"CDC-строки ждут CDC-коннектор ({normalized or 'UNKNOWN'}): {started_count}.",
+        }
+    if cdc_queue_kicked:
+        return {
+            "level": "ok",
+            "code": "QUEUE_KICKED",
+            "message": "CDC-очередь проверена и продолжена.",
+        }
+    if normalized in ("TOPICS_CREATING", "CONNECTOR_STARTING"):
+        return {
+            "level": "warn",
+            "code": "WAITING_CONNECTOR",
+            "message": f"CDC-коннектор запускается ({normalized}); строки продолжат работу после RUNNING.",
+        }
+    if normalized == "FAILED":
+        return {
+            "level": "error",
+            "code": "CONNECTOR_FAILED",
+            "message": "CDC-коннектор в FAILED; исправьте ошибку и запустите его снова.",
+        }
+    if normalized == "RUNNING":
+        return {
+            "level": "info",
+            "code": "NO_PENDING_CDC_ROWS",
+            "message": "CDC-коннектор RUNNING; новых CDC-строк для запуска не найдено.",
+        }
+    return {
+        "level": "info",
+        "code": "NO_PENDING_CDC_ROWS",
+        "message": "Новых CDC-строк для запуска не найдено.",
+    }
+
+
 @bp.get("/api/connector-groups")
 def list_groups():
     from services.connector_groups import list_groups as svc_list
@@ -369,6 +428,12 @@ def start_group(group_id: str):
     result["plan_starts"] = plan_starts
     result["plan_start_error"] = plan_start_error
     result["cdc_queue_kicked"] = cdc_queue_kicked
+    result["cdc_next_action"] = _build_cdc_group_next_action(
+        status=result.get("status"),
+        plan_starts=plan_starts,
+        plan_start_error=plan_start_error,
+        cdc_queue_kicked=cdc_queue_kicked,
+    )
     return jsonify(result)
 
 
@@ -429,6 +494,12 @@ def refresh_tables(group_id: str):
         "plan_starts": plan_starts,
         "plan_start_error": plan_start_error,
         "cdc_queue_kicked": cdc_queue_kicked,
+        "cdc_next_action": _build_cdc_group_next_action(
+            status=group.get("status"),
+            plan_starts=plan_starts,
+            plan_start_error=plan_start_error,
+            cdc_queue_kicked=cdc_queue_kicked,
+        ),
     })
 
 

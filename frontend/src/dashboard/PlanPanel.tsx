@@ -11,6 +11,7 @@ import type {
   MigrationPlanItem,
   StartMigrationPlanResp,
   WorkerStatus,
+  CdcNextAction,
 } from "./api";
 
 interface Props {
@@ -57,6 +58,7 @@ interface CdcConnectorActionResp {
   plan_starts?: StartMigrationPlanResp[];
   plan_start_error?: string | null;
   cdc_queue_kicked?: boolean;
+  cdc_next_action?: CdcNextAction | null;
 }
 
 interface DebeziumSyncStatus {
@@ -164,6 +166,9 @@ export function PlanPanel({
         : "Debezium синхронизирован";
       if (body.plan_start_error) {
         setCdcActionErr(`${syncText}, но CDC очередь не продолжена: ${body.plan_start_error}`);
+      } else if (body.cdc_next_action?.message) {
+        if (body.cdc_next_action.level === "error") setCdcActionErr(body.cdc_next_action.message);
+        else setCdcActionInfo(body.cdc_next_action.message);
       } else {
         const startedCount = (body.plan_starts || []).reduce(
           (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
@@ -202,6 +207,9 @@ export function PlanPanel({
           : "Запуск CDC-коннектора запрошен";
       if (body.plan_start_error) {
         setCdcActionErr(`${connectorText}, но очередь не продолжена: ${body.plan_start_error}`);
+      } else if (body.cdc_next_action?.message) {
+        if (body.cdc_next_action.level === "error") setCdcActionErr(body.cdc_next_action.message);
+        else setCdcActionInfo(body.cdc_next_action.message);
       } else {
         const startedCount = (body.plan_starts || []).reduce(
           (sum: number, item: { started?: unknown[] }) => sum + (item.started?.length || 0),
