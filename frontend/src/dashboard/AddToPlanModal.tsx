@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from "react";
 import { t } from "../theme";
 import { S } from "../components/CreateMigrationModal/styles";
 import { Section, Field } from "../components/CreateMigrationModal/ui";
+import { useApi } from "../hooks/useApi";
 import { primaryActionStyle, secondaryActionStyle } from "./buttonStyles";
 import {
   addSchemaPlanItems,
   type AddPlanItemsPayload,
   type AddPlanItemsResp,
   type MigrationPlanCdcGroup,
+  type ServicesMetrics,
+  type WorkerStatus,
 } from "./api";
 
 interface BulkTable {
@@ -66,6 +69,14 @@ export function AddToPlanModal({
   const [busy, setBusy] = useState(false);
   const [cdcPackAction, setCdcPackAction] = useState<CdcPackAction>("append");
   const [err, setErr] = useState("");
+  const workerStatusApi = useApi<WorkerStatus>(
+    mode === "cdc" ? "/api/workers/status" : null,
+    { intervalMs: 10000, enabled: mode === "cdc" },
+  );
+  const servicesMetricsApi = useApi<ServicesMetrics>(
+    mode === "cdc" ? "/api/services/metrics" : null,
+    { intervalMs: 10000, enabled: mode === "cdc" },
+  );
 
   const usesStage = strategy.endsWith("_STAGE");
   const tablesKey = useMemo(
@@ -545,6 +556,60 @@ export function AddToPlanModal({
           )}
 
           {mode === "cdc" && (
+            <Section title="Готовность запуска CDC">
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+                gap: 8,
+              }}>
+                <RuntimeTile
+                  label="Worker"
+                  ok={workerStatusApi.data?.cdc_ready === true}
+                  loading={workerStatusApi.loading}
+                  error={workerStatusApi.error || (!workerStatusApi.loading && workerStatusApi.data && !workerStatusApi.data.cdc_ready ? "CDC worker offline" : "")}
+                  detail={workerStatusApi.data ? `${workerStatusApi.data.active_count} online` : ""}
+                />
+                <RuntimeTile
+                  label="Oracle source"
+                  ok={servicesMetricsApi.data?.oracle_source?.ok === true}
+                  loading={servicesMetricsApi.loading}
+                  error={servicesMetricsApi.error || servicesMetricsApi.data?.oracle_source?.error || ""}
+                  detail={servicesMetricsApi.data?.oracle_source?.host || ""}
+                />
+                <RuntimeTile
+                  label="Oracle target"
+                  ok={servicesMetricsApi.data?.oracle_target?.ok === true}
+                  loading={servicesMetricsApi.loading}
+                  error={servicesMetricsApi.error || servicesMetricsApi.data?.oracle_target?.error || ""}
+                  detail={servicesMetricsApi.data?.oracle_target?.host || ""}
+                />
+                <RuntimeTile
+                  label="Kafka"
+                  ok={servicesMetricsApi.data?.kafka?.ok === true}
+                  loading={servicesMetricsApi.loading}
+                  error={servicesMetricsApi.error || servicesMetricsApi.data?.kafka?.error || ""}
+                  detail={servicesMetricsApi.data?.kafka?.bootstrap || ""}
+                />
+                <RuntimeTile
+                  label="Kafka Connect"
+                  ok={servicesMetricsApi.data?.kafka_connect?.ok === true}
+                  loading={servicesMetricsApi.loading}
+                  error={servicesMetricsApi.error || servicesMetricsApi.data?.kafka_connect?.error || ""}
+                  detail={servicesMetricsApi.data?.kafka_connect?.url || ""}
+                />
+              </div>
+              <div style={{
+                marginTop: 8,
+                fontSize: 12,
+                lineHeight: 1.45,
+                color: t.text.muted,
+              }}>
+                Зеленый статус означает, что после добавления таблицы coordinator сможет стартовать коннектор и worker сможет забрать CDC apply. Если есть красный статус, строка может остаться в ожидании до исправления runtime.
+              </div>
+            </Section>
+          )}
+
+          {mode === "cdc" && (
             <Section title="Ключи CDC">
               <div style={{ display: "grid", gap: 8 }}>
                 {infoLoading && (
@@ -746,6 +811,54 @@ export function AddToPlanModal({
             {busy ? "Добавление..." : mode === "cdc" ? cdcSubmitLabel : "Добавить в обычную пачку"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function RuntimeTile({
+  label,
+  ok,
+  loading,
+  error,
+  detail,
+}: {
+  label: string;
+  ok: boolean;
+  loading: boolean;
+  error?: string;
+  detail?: string;
+}) {
+  const tone = loading ? null : ok ? t.green : t.red;
+  const value = loading ? "..." : ok ? "OK" : "нет";
+  return (
+    <div style={{
+      minWidth: 0,
+      padding: "8px 9px",
+      borderRadius: t.radius.sm,
+      border: `1px solid ${tone ? tone.dim : t.border.subtle}`,
+      background: tone ? tone.bg : t.bg.s1,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: t.text.primary, fontWeight: 700 }}>{label}</span>
+        <span style={{
+          fontSize: 11,
+          fontFamily: t.font.mono,
+          color: tone ? tone.fg : t.text.muted,
+          fontWeight: 700,
+        }}>
+          {value}
+        </span>
+      </div>
+      <div style={{
+        marginTop: 4,
+        fontSize: 11,
+        color: ok ? t.text.muted : t.red.fg,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      }}>
+        {loading ? "проверка..." : ok ? (detail || "ready") : (error || "not ready")}
       </div>
     </div>
   );

@@ -223,6 +223,42 @@ export interface WorkerStatus {
   stale_after_seconds: number;
 }
 
+export interface OracleServiceMetric {
+  ok: boolean;
+  error?: string;
+  host?: string;
+  service_name?: string;
+  version?: string;
+  rtt_ms?: number;
+}
+
+export interface KafkaServiceMetric {
+  ok: boolean;
+  error?: string;
+  bootstrap?: string;
+  brokers?: number;
+  topics?: number;
+  cluster_id?: string | null;
+  rtt_ms?: number;
+}
+
+export interface KafkaConnectServiceMetric {
+  ok: boolean;
+  error?: string;
+  url?: string;
+  version?: string;
+  cluster_id?: string;
+  connectors?: { total: number; running: number; failed: number; paused: number; unassigned: number };
+  rtt_ms?: number;
+}
+
+export interface ServicesMetrics {
+  oracle_source: OracleServiceMetric;
+  oracle_target: OracleServiceMetric;
+  kafka: KafkaServiceMetric;
+  kafka_connect: KafkaConnectServiceMetric;
+}
+
 export async function getWorkerStatus(): Promise<WorkerStatus> {
   const r = await fetch("/api/workers/status");
   if (!r.ok) {
