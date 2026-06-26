@@ -324,6 +324,12 @@ export interface AddPlanItemsPayload {
   prune_cdc_pack?: boolean;
 }
 
+export interface CdcNextAction {
+  level: "ok" | "info" | "warn" | "error";
+  code: string;
+  message: string;
+}
+
 export interface AddPlanItemsResp {
   plan_id: number;
   items: Array<{ item_id: number; table: string; migration_id: string; batch_order: number }>;
@@ -347,6 +353,7 @@ export interface AddPlanItemsResp {
   plan_start_error?: string | null;
   cdc_queue_kicked?: boolean;
   cdc_pruned_tables?: MigrationPlanCdcPrunedTable[];
+  cdc_next_action?: CdcNextAction | null;
 }
 
 export async function addSchemaPlanItems(

@@ -362,6 +362,14 @@ def _build_add_plan_items_response_payload(
     cdc_queue_kicked: bool = False,
     cdc_pruned_tables: list[dict] | None = None,
 ) -> dict:
+    cdc_next_action = _build_cdc_next_action(
+        strategy=strategy,
+        item_states=item_states or [],
+        connector_start=connector_start,
+        connector_start_error=connector_start_error,
+        plan_start_error=plan_start_error,
+        cdc_queue_kicked=cdc_queue_kicked,
+    )
     return {
         "plan_id": plan_id,
         "items": created,
@@ -375,6 +383,119 @@ def _build_add_plan_items_response_payload(
         "plan_starts": plan_starts or [],
         "plan_start_error": plan_start_error,
         "cdc_queue_kicked": cdc_queue_kicked,
+        "cdc_next_action": cdc_next_action,
+    }
+
+
+def _build_cdc_next_action(
+    *,
+    strategy: Strategy,
+    item_states: list[dict],
+    connector_start: dict | None,
+    connector_start_error: str | None,
+    plan_start_error: str | None,
+    cdc_queue_kicked: bool,
+) -> dict | None:
+    if not strategy.has_cdc:
+        return None
+
+    if plan_start_error:
+        return {
+            "level": "error",
+            "code": "PLAN_START_FAILED",
+            "message": f"CDC-строки созданы, но очередь не запущена: {plan_start_error}",
+        }
+
+    phases = [str(item.get("phase") or "").upper() for item in item_states]
+    statuses = [str(item.get("status") or "").upper() for item in item_states]
+    has_worker_wait = any(
+        phase in ("CDC_APPLY_STARTING", "CDC_APPLYING")
+        and not item.get("cdc_worker_heartbeat")
+        for item, phase in zip(item_states, phases)
+    )
+    has_apply = any(
+        phase == "CDC_CATCHING_UP"
+        or (
+            phase in ("CDC_APPLY_STARTING", "CDC_APPLYING")
+            and bool(item.get("cdc_worker_heartbeat"))
+        )
+        for item, phase in zip(item_states, phases)
+    )
+    has_new = any(status == "RUNNING" and phase == "NEW" for status, phase in zip(statuses, phases))
+    has_queued = any(
+        status == "RUNNING"
+        and phase == "NEW"
+        and item.get("queue_position") is not None
+        for item, status, phase in zip(item_states, statuses, phases)
+    )
+    has_draft = any(status == "PENDING" or phase == "DRAFT" for status, phase in zip(statuses, phases))
+
+    if connector_start_error:
+        if has_new or has_queued:
+            return {
+                "level": "warn",
+                "code": "CONNECTOR_START_FAILED_WAITING",
+                "message": (
+                    "CDC-строки добавлены в очередь ожидания. "
+                    f"Исправьте CDC-коннектор и запустите его: {connector_start_error}"
+                ),
+            }
+        return {
+            "level": "error",
+            "code": "CONNECTOR_SYNC_FAILED",
+            "message": (
+                "CDC-строки сохранены, но не запущены. "
+                f"Синхронизируйте Debezium: {connector_start_error}"
+            ),
+        }
+
+    connector_status = str((connector_start or {}).get("status") or "").upper()
+    if has_apply:
+        return {
+            "level": "ok",
+            "code": "CDC_APPLY_STARTED",
+            "message": "CDC apply уже запущен.",
+        }
+    if has_worker_wait:
+        return {
+            "level": "warn",
+            "code": "WAITING_WORKER",
+            "message": "CDC-строки готовы к apply и ждут universal worker.",
+        }
+    if has_queued:
+        return {
+            "level": "ok",
+            "code": "QUEUED",
+            "message": "CDC-строки поставлены в очередь.",
+        }
+    if has_new and connector_status and connector_status != "RUNNING":
+        return {
+            "level": "warn",
+            "code": "WAITING_CONNECTOR",
+            "message": f"CDC-строки ждут CDC-коннектор ({connector_status}).",
+        }
+    if has_new:
+        return {
+            "level": "ok",
+            "code": "STARTING",
+            "message": "CDC-строки запущены и ожидают назначения worker.",
+        }
+    if has_draft:
+        return {
+            "level": "warn",
+            "code": "DRAFT",
+            "message": "CDC-строки созданы, но еще не переведены в запуск.",
+        }
+    if cdc_queue_kicked:
+        return {
+            "level": "ok",
+            "code": "QUEUE_KICKED",
+            "message": "CDC-очередь проверена.",
+        }
+    return {
+        "level": "info",
+        "code": "ADDED",
+        "message": "CDC-таблицы добавлены в пачку.",
     }
 
 

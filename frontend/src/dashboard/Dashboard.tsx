@@ -516,6 +516,14 @@ export function Dashboard({
               if (connectorStatus) {
                 startNote += ` · коннектор: ${connectorStatus}`;
               }
+              if (response.cdc_next_action?.message) {
+                const nextAction = response.cdc_next_action;
+                if ((nextAction.level === "warn" || nextAction.level === "error") && !connectorStartError) {
+                  setPlanErr(nextAction.message);
+                } else if (!startNote.includes(nextAction.message)) {
+                  startNote += ` · ${nextAction.message}`;
+                }
+              }
               if (connectorStartError) {
                 const actionText = normalizedConnectorStatus === "RUNNING"
                   ? "Таблицы сохранены в CDC-пачке, но строка не запущена: сначала синхронизируйте Debezium."

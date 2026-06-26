@@ -1022,6 +1022,11 @@ def test_schema_migration_add_items_response_includes_cdc_autostart_snapshot(mon
     assert payload["cdc_group"]["table_include_list"] == "TCBPAY.ALLORDERS"
     assert payload["connector_start"]["status"] == "RUNNING"
     assert payload["plan_starts"] == [{"batch": 3, "started": ["mid-1"]}]
+    assert payload["cdc_next_action"] == {
+        "level": "ok",
+        "code": "STARTING",
+        "message": "CDC-строки запущены и ожидают назначения worker.",
+    }
 
 
 def test_schema_migration_add_items_response_omits_cdc_snapshot_for_bulk(monkeypatch):
@@ -1043,7 +1048,77 @@ def test_schema_migration_add_items_response_omits_cdc_snapshot_for_bulk(monkeyp
     assert payload["cdc_group"] is None
     assert payload["item_states"] == []
     assert payload["plan_starts"] == []
+    assert payload["cdc_next_action"] is None
     assert calls == []
+
+
+def test_schema_migration_cdc_next_action_reports_queued():
+    result = schema_migrations._build_cdc_next_action(
+        strategy=schema_migrations.Strategy.CDC_DIRECT,
+        item_states=[{
+            "status": "RUNNING",
+            "phase": "NEW",
+            "queue_position": 3,
+            "cdc_worker_heartbeat": None,
+        }],
+        connector_start={"status": "RUNNING"},
+        connector_start_error=None,
+        plan_start_error=None,
+        cdc_queue_kicked=True,
+    )
+
+    assert result == {
+        "level": "ok",
+        "code": "QUEUED",
+        "message": "CDC-строки поставлены в очередь.",
+    }
+
+
+def test_schema_migration_cdc_next_action_reports_waiting_worker():
+    result = schema_migrations._build_cdc_next_action(
+        strategy=schema_migrations.Strategy.CDC_DIRECT,
+        item_states=[{
+            "status": "RUNNING",
+            "phase": "CDC_APPLYING",
+            "queue_position": None,
+            "cdc_worker_heartbeat": None,
+        }],
+        connector_start={"status": "RUNNING"},
+        connector_start_error=None,
+        plan_start_error=None,
+        cdc_queue_kicked=True,
+    )
+
+    assert result == {
+        "level": "warn",
+        "code": "WAITING_WORKER",
+        "message": "CDC-строки готовы к apply и ждут universal worker.",
+    }
+
+
+def test_schema_migration_cdc_next_action_reports_connector_error_with_waiting_rows():
+    result = schema_migrations._build_cdc_next_action(
+        strategy=schema_migrations.Strategy.CDC_DIRECT,
+        item_states=[{
+            "status": "RUNNING",
+            "phase": "NEW",
+            "queue_position": None,
+            "cdc_worker_heartbeat": None,
+        }],
+        connector_start=None,
+        connector_start_error="Oracle source is not configured",
+        plan_start_error=None,
+        cdc_queue_kicked=True,
+    )
+
+    assert result == {
+        "level": "warn",
+        "code": "CONNECTOR_START_FAILED_WAITING",
+        "message": (
+            "CDC-строки добавлены в очередь ожидания. "
+            "Исправьте CDC-коннектор и запустите его: Oracle source is not configured"
+        ),
+    }
 
 
 def test_schema_migration_loads_created_plan_item_states_in_request_order():
