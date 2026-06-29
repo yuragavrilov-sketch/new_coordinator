@@ -726,6 +726,70 @@ def fail_ddl_apply_job(conn, job_id: str, error_text: str) -> None:
     conn.commit()
 
 
+# ---------------------------------------------------------------------------
+# Index-enable jobs
+# ---------------------------------------------------------------------------
+
+def claim_index_enable_job(conn):
+    """Claim one PENDING index-enable job (FOR UPDATE SKIP LOCKED).
+
+    Returns a dict with the job + target migration fields, or None.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            WITH candidate AS (
+                SELECT j.job_id
+                FROM   index_enable_jobs j
+                WHERE  j.state = 'PENDING'
+                ORDER BY j.created_at ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE index_enable_jobs j
+            SET    state = 'CLAIMED', worker_id = %s, claimed_at = NOW()
+            FROM   migrations m
+            WHERE  j.job_id = (SELECT job_id FROM candidate)
+              AND  m.migration_id = j.migration_id
+            RETURNING j.job_id, j.migration_id,
+                      m.target_connection_id, m.target_schema, m.target_table, m.strategy
+        """, (WORKER_ID,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        job_id, migration_id, tgt_conn_id, tgt_schema, tgt_table, strategy = row
+    conn.commit()
+    return {
+        "job_id":                str(job_id),
+        "migration_id":          str(migration_id),
+        "target_connection_id":  tgt_conn_id,
+        "target_schema":         tgt_schema,
+        "target_table":          tgt_table,
+        "strategy":              (strategy or "").upper(),
+    }
+
+
+def complete_index_enable_job(conn, job_id: str, result: dict) -> None:
+    import json
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE index_enable_jobs
+            SET    state = 'DONE', result_json = %s::jsonb, completed_at = NOW()
+            WHERE  job_id = %s AND worker_id = %s
+        """, (json.dumps(result), job_id, WORKER_ID))
+    conn.commit()
+
+
+def fail_index_enable_job(conn, job_id: str, error_text: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE index_enable_jobs
+            SET    state = 'FAILED', error_text = %s, completed_at = NOW()
+            WHERE  job_id = %s AND worker_id = %s
+        """, (error_text[:4000], job_id, WORKER_ID))
+    conn.commit()
+
+
 def log_sm_event(
     conn, sm_id: str, event_type: str,
     *,
