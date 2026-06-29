@@ -80,3 +80,46 @@ def test_fail_is_guarded_by_worker_id():
     assert "worker_id = %s" in sql
     assert worker_common.WORKER_ID in params
     assert conn.committed
+
+
+def test_enable_table_objects_skips_partitioned_indexes(monkeypatch):
+    import oracle_ddl
+
+    executed = []
+
+    class _Cur:
+        def __init__(self, fetch):
+            self._fetch = fetch
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, sql, params=None):
+            executed.append(sql)
+        def fetchall(self):
+            return self._fetch
+        def fetchone(self):
+            return None
+
+    # Force the helper that lists indexes to return one partitioned UNUSABLE idx.
+    monkeypatch.setattr(
+        oracle_ddl, "_list_indexes",
+        lambda conn, s, t: [
+            {"name": "PIDX", "status": "UNUSABLE", "partitioned": True},
+            {"name": "NIDX", "status": "UNUSABLE", "partitioned": False},
+        ],
+    )
+    monkeypatch.setattr(oracle_ddl, "_list_constraints", lambda conn, s, t: [])
+    monkeypatch.setattr(oracle_ddl, "set_table_logging", lambda *a, **k: None)
+    monkeypatch.setattr(oracle_ddl, "is_temporary_table", lambda *a, **k: False)
+
+    class _Conn:
+        def cursor(self):
+            return _Cur([])
+        def commit(self):
+            pass
+
+    result = oracle_ddl.enable_table_objects(_Conn(), "TGT", "ORDERS")
+    assert "NIDX" in result["enabled"]["indexes"]
+    assert "PIDX" not in result["enabled"]["indexes"]
+    assert not any("PIDX" in s for s in executed)
