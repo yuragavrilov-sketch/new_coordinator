@@ -176,7 +176,11 @@ def claim_chunk(conn) -> Optional[dict]:
                   ) ASC,
                   m.state_changed_at ASC,
                   c.chunk_seq ASC
-                FOR UPDATE OF c SKIP LOCKED
+                -- Lock the migration row too: this serializes concurrent claims
+                -- for the SAME migration (others SKIP LOCKED past its chunks),
+                -- so the parallelism-cap COUNT above is evaluated one claim at a
+                -- time and max_parallel_workers can't be transiently exceeded.
+                FOR UPDATE OF c, m SKIP LOCKED
                 LIMIT 1
             )
             UPDATE migration_chunks

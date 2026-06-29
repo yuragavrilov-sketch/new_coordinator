@@ -80,13 +80,17 @@ class _PooledConn:
     def close(self):
         pool = object.__getattribute__(self, "_pool")
         conn = object.__getattribute__(self, "_conn")
+        discard = False
         try:
             # Ensure no open transaction is left in the pool
             if not conn.closed:
                 conn.rollback()
         except Exception:
-            pass
-        pool.putconn(conn)
+            # rollback failed (e.g. server dropped the connection) — the conn is
+            # broken. Returning it to the pool would hand the next caller a dead
+            # connection; discard it so the pool opens a fresh one instead.
+            discard = True
+        pool.putconn(conn, close=discard)
 
 
 def get_conn() -> _PooledConn:
@@ -136,6 +140,12 @@ def _init_schema_legacy() -> None:
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # Serialize concurrent schema init across processes/workers. The
+            # whole init runs in one transaction (single commit at the end), so
+            # this xact-scoped lock is held until then — a second worker waits
+            # rather than racing the one-time DROP/ADD CONSTRAINT upgrade below
+            # and aborting its init transaction on "constraint does not exist".
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext('cdc_state_db_init'))")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS service_configs (
                     service_name VARCHAR(50) PRIMARY KEY,
