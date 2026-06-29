@@ -80,6 +80,24 @@ def _lane_is_free(candidate_lane: str,
     )
 
 
+def _is_lane_head(candidate_id: str, candidate_lane: str,
+                  runnable_new: list[tuple[str, str | None]]) -> bool:
+    """True iff *candidate_id* is the oldest runnable-NEW migration in its OWN lane.
+
+    runnable_new: (migration_id, strategy) for every NEW migration that is
+    runnable (non-CDC, or CDC whose connector group is RUNNING), ordered
+    oldest-first.
+
+    The head-of-line election must be per-lane: a blocked older migration in the
+    OTHER lane (e.g. a CDC migration waiting on a busy CDC lane) must not stop a
+    non-CDC migration whose own lane is free from starting.
+    """
+    for mid, strat in runnable_new:
+        if _migration_lane(strat) == candidate_lane:
+            return mid == candidate_id
+    return False
+
+
 # Track migrations running in a dedicated thread (long-running phases)
 _in_progress: set[str] = set()
 _in_progress_lock = threading.Lock()
@@ -1495,7 +1513,7 @@ def _handle_new(mid: str, m: dict) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT m.migration_id
+                SELECT m.migration_id, m.strategy
                 FROM   migrations m
                 LEFT JOIN connector_groups cg ON cg.group_id = m.group_id
                 WHERE  m.phase = 'NEW'
@@ -1504,13 +1522,16 @@ def _handle_new(mid: str, m: dict) -> None:
                         OR cg.status = 'RUNNING'
                   )
                 ORDER BY m.state_changed_at ASC
-                LIMIT 1
             """)
-            first = cur.fetchone()
+            runnable_new = cur.fetchall()
     finally:
         conn.close()
 
-    if first and first[0] != mid:
+    # Per-lane head-of-line election: defer only to an OLDER runnable NEW in our
+    # OWN lane. A global election would let a blocked older CDC migration (stuck
+    # on a busy CDC lane) head-of-line-block a non-CDC migration whose lane is
+    # free — defeating cross-lane parallelism.
+    if not _is_lane_head(mid, candidate_lane, runnable_new):
         _update_queue_positions()
         return
 

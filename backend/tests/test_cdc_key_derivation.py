@@ -2486,17 +2486,25 @@ def test_orchestrator_starts_new_cdc_migration_when_group_running(monkeypatch):
             return rows
 
     class ConnStub:
-        def __init__(self):
-            self.cursors = [
-                CursorStub([]),              # no blocking migrations in same lane
-                CursorStub([("mid-1",)]),    # this migration is first runnable NEW
-            ]
+        def __init__(self, cur):
+            self._cur = cur
 
         def cursor(self):
-            return self.cursors.pop(0)
+            return self._cur
+
+        def commit(self):
+            calls.append(("commit",))
 
         def close(self):
             calls.append(("close",))
+
+    # Two get_conn() calls on the start path: the lane gate, then the per-lane
+    # head-of-line election (which now SELECTs (migration_id, strategy) and
+    # fetchall()s them).
+    conns = [
+        ConnStub(CursorStub([])),                          # lane gate: no same-lane blockers
+        ConnStub(CursorStub([("mid-1", "CDC_DIRECT")])),   # election: candidate heads the CDC lane
+    ]
 
     class ImmediateThread:
         def __init__(self, target, **_kwargs):
@@ -2505,7 +2513,10 @@ def test_orchestrator_starts_new_cdc_migration_when_group_running(monkeypatch):
         def start(self):
             self.target()
 
-    monkeypatch.setitem(orchestrator._state, "get_conn", lambda: ConnStub())
+    monkeypatch.setitem(
+        orchestrator._state, "get_conn",
+        lambda: conns.pop(0) if conns else ConnStub(CursorStub([])),
+    )
     monkeypatch.setattr(orchestrator.threading, "Thread", ImmediateThread)
     monkeypatch.setattr(
         orchestrator.connector_groups_svc,

@@ -45,3 +45,31 @@ def test_lane_free_when_other_cdc_is_in_indexes_enabling():
 def test_lane_free_when_no_other_migrations():
     assert orch._lane_is_free("CDC", [])
     assert orch._lane_is_free("BULK", [])
+
+
+# --- head-of-line election must be per-lane, not global -----------------------
+
+def test_non_cdc_is_lane_head_despite_older_blocked_cdc():
+    # Regression: an older runnable-NEW CDC migration (blocked elsewhere by a
+    # busy CDC lane) must NOT block a non-CDC migration whose own lane is free.
+    runnable_new = [("cdc-old", "CDC_STAGE"), ("bulk-new", "BULK_DIRECT")]
+    assert orch._is_lane_head("bulk-new", "BULK", runnable_new)
+    # The CDC one is still the head of its OWN lane.
+    assert orch._is_lane_head("cdc-old", "CDC", runnable_new)
+
+
+def test_older_same_lane_blocks_head():
+    runnable_new = [("bulk-old", "BULK_STAGE"), ("bulk-new", "BULK_DIRECT")]
+    assert not orch._is_lane_head("bulk-new", "BULK", runnable_new)
+    assert orch._is_lane_head("bulk-old", "BULK", runnable_new)
+
+
+def test_lane_head_when_only_candidate_in_lane():
+    runnable_new = [("cdc-1", "CDC_STAGE"), ("bulk-1", "BULK_DIRECT")]
+    assert orch._is_lane_head("bulk-1", "BULK", runnable_new)
+    assert orch._is_lane_head("cdc-1", "CDC", runnable_new)
+
+
+def test_not_lane_head_when_absent_from_runnable_set():
+    # Candidate not in the runnable set (e.g. not actually runnable) → not head.
+    assert not orch._is_lane_head("ghost", "BULK", [("bulk-1", "BULK_STAGE")])
