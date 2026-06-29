@@ -131,8 +131,9 @@ def _tick() -> None:
     get_conn = _state["get_conn"]
     conn = get_conn()
     try:
-        # Reset stale chunks first
+        # Reset stale chunks and stale index-enable jobs first
         job_queue.reset_stale_chunks(conn)
+        index_enable_jobs.reset_stale_jobs(conn)
 
         migrations = get_active_migrations(conn)
     finally:
@@ -1241,7 +1242,20 @@ def trigger_indexes_enabling(migration_id: str) -> None:
         raise ValueError(
             f"Migration is in phase {phase}, expected INDEXES_ENABLING"
         )
-    _handle_indexes_enabling(migration_id, m)
+
+    # Re-queue a worker job and clear the prior error so a new failure can be
+    # surfaced again (the handler guards on error_code to avoid history spam).
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE migrations SET error_code = NULL, error_text = NULL "
+                "WHERE migration_id = %s",
+                (migration_id,))
+        conn.commit()
+        index_enable_jobs.ensure_pending_job(conn, migration_id)
+    finally:
+        conn.close()
 
 
 def list_trigger_jobs(migration_id: str) -> list[dict]:

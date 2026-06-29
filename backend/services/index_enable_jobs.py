@@ -39,7 +39,7 @@ def reset_stale_jobs(conn, stale_minutes: int = 15) -> int:
             UPDATE index_enable_jobs
             SET    state = 'PENDING', worker_id = NULL, claimed_at = NULL, started_at = NULL
             WHERE  state IN ('CLAIMED', 'RUNNING')
-              AND  claimed_at < NOW() - (%s || ' minutes')::interval
+              AND  claimed_at < NOW() - make_interval(mins => %s)
         """, (stale_minutes,))
         n = cur.rowcount
     conn.commit()
