@@ -249,6 +249,27 @@ def _init_schema_legacy() -> None:
                     ON migrations(state_changed_at DESC)
             """)
 
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS index_enable_jobs (
+                    job_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    migration_id  UUID NOT NULL
+                                  REFERENCES migrations(migration_id) ON DELETE CASCADE,
+                    state         VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+                    worker_id     VARCHAR(200),
+                    result_json   JSONB,
+                    error_text    TEXT,
+                    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    claimed_at    TIMESTAMPTZ,
+                    started_at    TIMESTAMPTZ,
+                    completed_at  TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_iej_active
+                    ON index_enable_jobs (migration_id)
+                    WHERE state IN ('PENDING', 'CLAIMED', 'RUNNING')
+            """)
+
             # ── Column migrations on migrations table (idempotent) ────────────
             for col_sql in [
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS total_rows                BIGINT",
