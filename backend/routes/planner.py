@@ -27,6 +27,106 @@ def _is_cdc_plan_item(mode, strategy):
     )
 
 
+def _plan_item_lane(mode, strategy) -> str:
+    """The parallelism lane a plan item belongs to: 'CDC' or 'BULK'.
+
+    Mirrors the orchestrator's lane split (strategy LIKE 'CDC_%'). The two lanes
+    advance independently; within a lane batches run strictly in order, width 1.
+    """
+    return "CDC" if _is_cdc_plan_item(mode, strategy) else "BULK"
+
+
+def _lanes_ready_to_promote(items) -> dict:
+    """Decide, per lane, which batch may enter NEW right now.
+
+    items: iterable of (lane, batch_order, status) for every plan item, where
+    status is one of PENDING / RUNNING / DONE / FAILED / CANCELLED.
+
+    A lane is busy while it holds a RUNNING item (its current batch is still in
+    flight). When a lane is free it promotes the lowest batch_order that still
+    has a PENDING item IN THAT LANE — preserving batch order within the lane.
+    Lanes never gate each other, so a non-CDC batch starts in parallel with a
+    running CDC batch (and vice versa).
+
+    Returns {lane: batch_order} for each lane that is free and has pending work.
+    """
+    result: dict = {}
+    for lane in {lane for lane, _, _ in items}:
+        lane_items = [(b, s) for (l, b, s) in items if l == lane]
+        if any(s == "RUNNING" for _, s in lane_items):
+            continue  # lane busy — current batch still in flight
+        pending = [b for b, s in lane_items if s == "PENDING"]
+        if pending:
+            result[lane] = min(pending)
+    return result
+
+
+def _promote_ready_lane_batches(cur, plan_id, now, actor: str = "SYSTEM"):
+    """Promote each lane's next ready batch (DRAFT→NEW) within an open cursor.
+
+    Used both at plan start and on auto-advance: the two lanes progress
+    independently, each pulling its lowest pending batch when it is free. The
+    caller owns the transaction (commit/rollback) and post-commit broadcast.
+
+    Returns (started_migration_ids, started_cdc_group_ids).
+    """
+    cur.execute("""
+        SELECT i.item_id, i.migration_id, i.batch_order, i.mode,
+               m.strategy, i.status, m.phase, m.group_id
+        FROM   migration_plan_items i
+        LEFT JOIN migrations m ON m.migration_id = i.migration_id
+        WHERE  i.plan_id = %s
+        ORDER  BY i.batch_order, i.sort_order, i.item_id
+    """, (plan_id,))
+    rows = cur.fetchall()
+
+    triples = []
+    by_lane_batch: dict = {}
+    for item_id, mid, batch_order, mode, strategy, status, phase, group_id in rows:
+        lane = _plan_item_lane(mode, strategy)
+        triples.append((lane, batch_order, status))
+        by_lane_batch.setdefault((lane, batch_order), []).append(
+            (item_id, mid, phase, group_id, strategy))
+
+    ready = _lanes_ready_to_promote(triples)
+
+    started_ids: list[str] = []
+    started_cdc_group_ids: set = set()
+    for lane, batch_order in ready.items():
+        for item_id, mid, phase, group_id, strategy in by_lane_batch.get((lane, batch_order), []):
+            mid = str(mid)
+            cur.execute("""
+                UPDATE migrations
+                SET    phase = 'NEW', state_changed_at = %s, updated_at = %s
+                WHERE  migration_id = %s AND phase = 'DRAFT'
+            """, (now, now, mid))
+            if cur.rowcount <= 0:
+                # Migration already moved on (or has no DRAFT row) — keep the
+                # plan item in step with the real phase instead of promoting.
+                item_status = _plan_item_status_for_phase(phase)
+                if item_status:
+                    cur.execute("""
+                        UPDATE migration_plan_items SET status = %s
+                        WHERE  item_id = %s AND status = 'PENDING'
+                    """, (item_status, item_id))
+                continue
+
+            cur.execute("""
+                INSERT INTO migration_state_history
+                    (migration_id, from_phase, to_phase, message, actor_type)
+                VALUES (%s, 'DRAFT', 'NEW', %s, %s)
+            """, (mid, f"Started by planner (lane {lane}, batch {batch_order})", actor))
+            cur.execute("""
+                UPDATE migration_plan_items SET status = 'RUNNING'
+                WHERE  item_id = %s
+            """, (item_id,))
+            started_ids.append(mid)
+            if str(strategy or "").startswith("CDC_") and group_id:
+                started_cdc_group_ids.add(str(group_id))
+
+    return started_ids, started_cdc_group_ids
+
+
 def _legacy_payload_has_cdc(batches, defaults) -> bool:
     defaults = defaults or {}
     for batch in batches or []:
@@ -52,18 +152,24 @@ def _legacy_cdc_error_response():
 
 
 def _can_start_plan_batch(running_items, pending_items) -> bool:
-    """Allow overlapping starts only when both running and pending items are CDC."""
+    """Lane-aware gate for overlapping a pending batch with running work.
+
+    Lanes are independent, so cross-lane overlap is always allowed (a non-CDC
+    batch may start while CDC runs, and vice versa). The only block is a second
+    non-CDC batch while a non-CDC batch is already running — the non-CDC lane
+    has width 1, so its batches stay strictly ordered.
+    """
     if not running_items:
         return True
     running_has_non_cdc = any(
         not _is_cdc_plan_item(mode, strategy)
         for mode, strategy in running_items
     )
-    pending_is_cdc = bool(pending_items) and all(
-        _is_cdc_plan_item(mode, strategy)
+    pending_has_non_cdc = any(
+        not _is_cdc_plan_item(mode, strategy)
         for mode, strategy in pending_items
     )
-    return pending_is_cdc and not running_has_non_cdc
+    return not (pending_has_non_cdc and running_has_non_cdc)
 
 
 def _can_force_queue_cdc_batch(batch_order, pending_items) -> bool:
@@ -189,19 +295,34 @@ def _start_next_plan_batch(
                 raise ValueError(f"Cannot start plan in status {plan['status']}")
 
             if batch_order is None:
+                # Plan start / generic advance: start each lane's next ready
+                # batch independently (non-CDC runs in parallel with CDC).
+                now = datetime.now(timezone.utc).isoformat()
+                started_ids, _ = _promote_ready_lane_batches(cur, plan_id, now, actor)
+                if not started_ids:
+                    cur.execute("""
+                        SELECT 1 FROM migration_plan_items
+                        WHERE plan_id = %s AND status = 'PENDING' LIMIT 1
+                    """, (plan_id,))
+                    if not cur.fetchone():
+                        raise ValueError("No pending batches")
                 cur.execute("""
-                    SELECT DISTINCT batch_order
-                    FROM migration_plan_items
-                    WHERE plan_id = %s AND status = 'PENDING'
-                    ORDER BY batch_order
-                    LIMIT 1
-                """, (plan_id,))
-                batch_row = cur.fetchone()
-                if not batch_row:
-                    raise ValueError("No pending batches")
-                next_batch = batch_row[0]
-            else:
-                next_batch = int(batch_order)
+                    UPDATE migration_plans
+                    SET    status = 'RUNNING', started_at = COALESCE(started_at, %s)
+                    WHERE  plan_id = %s
+                """, (now, plan_id))
+                conn.commit()
+                _refresh_queue_positions_best_effort()
+                broadcast = _state["broadcast"]
+                for mid in started_ids:
+                    broadcast({
+                        "type": "migration_phase",
+                        "migration_id": mid,
+                        "phase": "NEW",
+                    })
+                return {"batch": None, "started": started_ids}
+
+            next_batch = int(batch_order)
 
             cur.execute("""
                 SELECT i.item_id, i.migration_id, i.mode, m.strategy, m.phase

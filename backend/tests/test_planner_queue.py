@@ -19,17 +19,27 @@ def test_cdc_queue_rule_accepts_strategy_when_mode_is_missing():
     )
 
 
-def test_running_bulk_blocks_next_batch():
-    assert not planner._can_start_plan_batch(
+def test_running_bulk_allows_pending_cdc_batch():
+    # Lanes are independent: a CDC batch may start while a non-CDC batch runs.
+    assert planner._can_start_plan_batch(
         running_items=[("BULK", "BULK_DIRECT")],
         pending_items=[("CDC", "CDC_DIRECT")],
     )
 
 
-def test_running_cdc_does_not_allow_pending_bulk_batch():
-    assert not planner._can_start_plan_batch(
+def test_running_cdc_allows_pending_bulk_batch():
+    # The reported bug: a non-CDC batch must start in parallel with running CDC.
+    assert planner._can_start_plan_batch(
         running_items=[("CDC", "CDC_DIRECT")],
         pending_items=[("BULK", "BULK_DIRECT")],
+    )
+
+
+def test_running_bulk_blocks_another_bulk_batch():
+    # The non-CDC lane has width 1: a second non-CDC batch waits its turn.
+    assert not planner._can_start_plan_batch(
+        running_items=[("BULK", "BULK_DIRECT")],
+        pending_items=[("BULK", "BULK_STAGE")],
     )
 
 

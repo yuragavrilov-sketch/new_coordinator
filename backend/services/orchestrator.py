@@ -266,7 +266,6 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
 
     started_ids: list[str] = []
     started_cdc_group_ids: set[str] = set()
-    next_batch: int | None = None
 
     conn = _state["get_conn"]()
     try:
@@ -294,39 +293,29 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
                 conn.commit()
                 return
 
-            cur.execute("""
-                SELECT COUNT(*)
-                FROM   migration_plan_items
-                WHERE  plan_id = %s
-                  AND  batch_order = %s
-                  AND  status <> 'DONE'
-            """, (plan_id, batch_order))
-            if (cur.fetchone()[0] or 0) > 0:
-                conn.commit()
-                return
+            # Advance both lanes independently: when a lane's current batch is
+            # fully DONE, pull that lane's next batch — without waiting on the
+            # other lane. (Non-CDC tables progress in parallel with CDC.)
+            now = datetime.now(timezone.utc).isoformat()
+            from routes import planner as _planner
+            promoted, promoted_cdc_groups = _planner._promote_ready_lane_batches(
+                cur, plan_id, now, actor="SYSTEM")
+            started_ids.extend(promoted)
+            started_cdc_group_ids.update(promoted_cdc_groups)
 
             cur.execute("""
-                SELECT batch_order
-                FROM   migration_plan_items
-                WHERE  plan_id = %s
-                  AND  status = 'PENDING'
-                GROUP  BY batch_order
-                ORDER  BY batch_order
-                LIMIT  1
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE status NOT IN ('DONE', 'FAILED', 'CANCELLED')
+                    ) AS active_count,
+                    COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_count,
+                    COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled_count
+                FROM migration_plan_items
+                WHERE plan_id = %s
             """, (plan_id,))
-            pending = cur.fetchone()
-            if not pending:
-                cur.execute("""
-                    SELECT
-                        COUNT(*) FILTER (
-                            WHERE status NOT IN ('DONE', 'FAILED', 'CANCELLED')
-                        ) AS active_count,
-                        COUNT(*) FILTER (WHERE status = 'FAILED') AS failed_count,
-                        COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled_count
-                    FROM migration_plan_items
-                    WHERE plan_id = %s
-                """, (plan_id,))
-                active_count, failed_count, cancelled_count = cur.fetchone()
+            active_count, failed_count, cancelled_count = cur.fetchone()
+            if (active_count or 0) == 0:
+                # Nothing pending or running in either lane — finalize the plan.
                 plan_status = _plan_status_without_pending(
                     active_count or 0,
                     failed_count or 0,
@@ -337,65 +326,13 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
                     SET    status = %s
                     WHERE  plan_id = %s
                 """, (plan_status, plan_id))
-                conn.commit()
-                return
-
-            next_batch = pending[0]
-            cur.execute("""
-                SELECT i.item_id, i.migration_id, m.phase, m.group_id, m.strategy
-                FROM   migration_plan_items i
-                LEFT JOIN migrations m ON m.migration_id = i.migration_id
-                WHERE  i.plan_id = %s
-                  AND  i.batch_order = %s
-                  AND  i.status = 'PENDING'
-                ORDER  BY sort_order, item_id
-            """, (plan_id, next_batch))
-            items = cur.fetchall()
-
-            now = datetime.now(timezone.utc).isoformat()
-            for item_id, next_mid, phase, group_id, strategy in items:
-                next_mid = str(next_mid)
+            else:
                 cur.execute("""
-                    UPDATE migrations
-                    SET    phase = 'NEW',
-                           state_changed_at = %s,
-                           updated_at = %s
-                    WHERE  migration_id = %s
-                      AND  phase = 'DRAFT'
-                """, (now, now, next_mid))
-                if cur.rowcount <= 0:
-                    item_status = _plan_item_status_for_phase(phase)
-                    if item_status:
-                        cur.execute("""
-                            UPDATE migration_plan_items
-                            SET    status = %s
-                            WHERE  item_id = %s
-                              AND  status = 'PENDING'
-                        """, (item_status, item_id))
-                    continue
-
-                cur.execute("""
-                    INSERT INTO migration_state_history
-                        (migration_id, from_phase, to_phase, message, actor_type)
-                    VALUES (%s, 'DRAFT', 'NEW', %s, 'SYSTEM')
-                """, (next_mid, f"Auto-started by planner (batch {next_batch})"))
-
-                cur.execute("""
-                    UPDATE migration_plan_items
-                    SET    status = 'RUNNING'
-                    WHERE  item_id = %s
-                      AND  status = 'PENDING'
-                """, (item_id,))
-                started_ids.append(next_mid)
-                if str(strategy or "").startswith("CDC_") and group_id:
-                    started_cdc_group_ids.add(str(group_id))
-
-            cur.execute("""
-                UPDATE migration_plans
-                SET    status = 'RUNNING',
-                       started_at = COALESCE(started_at, %s)
-                WHERE  plan_id = %s
-            """, (now, plan_id))
+                    UPDATE migration_plans
+                    SET    status = 'RUNNING',
+                           started_at = COALESCE(started_at, %s)
+                    WHERE  plan_id = %s
+                """, (now, plan_id))
 
         conn.commit()
     except Exception as exc:
@@ -414,7 +351,7 @@ def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
         })
     if started_ids:
         print(
-            f"[orchestrator] plan batch {next_batch} auto-started: "
+            f"[orchestrator] plan lane batch auto-started: "
             f"{', '.join(started_ids)}"
         )
     for group_id in sorted(started_cdc_group_ids):

@@ -1941,15 +1941,19 @@ def test_orchestrator_kicks_cdc_group_after_auto_starting_next_plan_batch(monkey
         def fetchone(self):
             if "RETURNING plan_id, batch_order" in self.sql:
                 return (42, 1)
-            if "SELECT COUNT(*)" in self.sql:
-                return (0,)
-            if "SELECT batch_order" in self.sql:
-                return (2,)
+            if "active_count" in self.sql:
+                # active_count, failed_count, cancelled_count (mid-next now RUNNING)
+                return (1, 0, 0)
             return None
 
         def fetchall(self):
             if "SELECT i.item_id, i.migration_id" in self.sql:
-                return [(7, "mid-next", "DRAFT", "gid-1", "CDC_DIRECT")]
+                # (item_id, migration_id, batch_order, mode, strategy, status, phase, group_id)
+                # CDC lane batch 1 is DONE, so the lane is free to start batch 2.
+                return [
+                    (1, "mid-done", 1, "CDC", "CDC_DIRECT", "DONE", "STEADY_STATE", "gid-1"),
+                    (7, "mid-next", 2, "CDC", "CDC_DIRECT", "PENDING", "DRAFT", "gid-1"),
+                ]
             return []
 
     class ConnStub:
