@@ -36,6 +36,7 @@ import services.job_queue       as job_queue
 import services.kafka_topics    as kafka_topics
 import services.connector_groups as connector_groups_svc
 import services.target_trigger_jobs as target_trigger_jobs
+import services.index_enable_jobs as index_enable_jobs
 import db.oracle_browser        as oracle_browser
 from services.strategy import Strategy
 
@@ -59,6 +60,11 @@ BULK_LANE_PHASES = frozenset({
 def _migration_lane(strategy: str | None) -> str:
     """Return the lane a migration belongs to: 'CDC' or 'BULK'."""
     return "CDC" if (strategy or "")[:4] == "CDC_" else "BULK"
+
+
+def _next_phase_after_indexes(strategy: str | None) -> str:
+    """Where INDEXES_ENABLING goes once the job is DONE."""
+    return "CDC_APPLYING" if _migration_lane(strategy) == "CDC" else "DATA_VERIFYING"
 
 
 def _lane_is_free(candidate_lane: str,
@@ -1623,86 +1629,40 @@ def _handle_topic_creating(mid: str, m: dict) -> None:
 
 
 def _handle_indexes_enabling(mid: str, m: dict) -> None:
-    """Enable UNUSABLE indexes and DISABLED constraints in a thread.
+    """Drive index enabling via a worker-claimed job (not a coordinator thread).
 
-    Triggers stay disabled until the operator starts the target-trigger job.
+    On first entry (no job yet) queue a PENDING job, then poll its state each
+    tick. A FAILED job is surfaced as INDEXES_ENABLE_ERROR and NOT auto-requeued
+    — the user re-runs it via trigger_indexes_enabling (which queues a fresh
+    job). Auto-requeuing here would mask the failure forever.
     """
-    if not _try_mark_in_prog(mid):
-        return
+    conn = _state["get_conn"]()
+    try:
+        state, _result, error_text = index_enable_jobs.latest_job_state(conn, mid)
+        if state is None:
+            index_enable_jobs.ensure_pending_job(conn, mid)
+            state = "PENDING"
+    finally:
+        conn.close()
 
-    def _run():
-        try:
-            dst_cfg = _oracle_cfg(m["target_connection_id"])
-            conn = oracle_scn.open_oracle_conn(dst_cfg)
-            try:
-                oracle_browser.set_table_logging(
-                    conn, m["target_schema"], m["target_table"], nologging=False,
-                )
-                result = oracle_browser.enable_all_disabled_objects(
-                    conn, m["target_schema"], m["target_table"],
-                )
-            finally:
-                conn.close()
-
-            err_count = (
-                len(result["errors"]["indexes"])
-                + len(result["errors"]["constraints"])
-            )
-            if err_count:
-                names = (
-                    [e["name"] for e in result["errors"]["indexes"]]
-                    + [e["name"] for e in result["errors"]["constraints"]]
-                )
-                err_detail = str(result["errors"])
-                _transition(
-                    mid, "INDEXES_ENABLING",
-                    message=(
-                        f"Ошибка пересчёта: {', '.join(names)}. "
-                        "Нажмите «Включить индексы» ещё раз для повторной попытки."
-                    ),
-                    extra_fields={
-                        "error_code": "INDEXES_ENABLE_ERROR",
-                        "error_text": err_detail[:2000],
-                    },
-                )
-                return
-
-            n_idx = len(result["enabled"]["indexes"])
-            n_con = len(result["enabled"]["constraints"])
-            n_fk_nv = len(result["enabled"].get("fk_novalidate", []))
-
-            try:
-                strategy = Strategy.parse(m.get("strategy"))
-            except ValueError:
-                _fail(mid, f"Неизвестная стратегия: {m.get('strategy')!r}", "UNKNOWN_STRATEGY")
-                return
-
-            if not strategy.has_cdc:
-                _safe_transition(
-                    mid, "INDEXES_ENABLING", "DATA_VERIFYING",
-                    message=(
-                        f"Включено: индексов={n_idx}, констрейнтов={n_con}, FK NOVALIDATE={n_fk_nv}. "
-                        "Triggers stay disabled until the manual trigger job is run. "
-                        "Без CDC — запуск сверки данных"
-                    ),
-                    extra_fields={"error_code": None, "error_text": None},
-                )
-            else:
-                _safe_transition(
-                    mid, "INDEXES_ENABLING", "CDC_APPLYING",
-                    message=(
-                        f"Включено: индексов={n_idx}, констрейнтов={n_con}, FK NOVALIDATE={n_fk_nv}. "
-                        "Ожидание CDC apply-worker"
-                    ),
-                    extra_fields={"error_code": None, "error_text": None},
-                )
-        except Exception as exc:
-            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
-                _fail(mid, str(exc), "INDEXES_ENABLE_ERROR")
-        finally:
-            _unmark_in_prog(mid)
-
-    threading.Thread(target=_run, daemon=True).start()
+    if state == "DONE":
+        to_phase = _next_phase_after_indexes(m.get("strategy"))
+        _safe_transition(
+            mid, "INDEXES_ENABLING", to_phase,
+            message="Индексы/констрейнты включены (worker job)",
+            extra_fields={"error_code": None, "error_text": None},
+        )
+    elif state == "FAILED" and m.get("error_code") != "INDEXES_ENABLE_ERROR":
+        # Surface once; the guard avoids rewriting history every tick.
+        _transition(
+            mid, "INDEXES_ENABLING",
+            message="Ошибка пересчёта индексов. Нажмите «Включить индексы» для повтора.",
+            extra_fields={
+                "error_code": "INDEXES_ENABLE_ERROR",
+                "error_text": (error_text or "")[:2000],
+            },
+        )
+    # PENDING / CLAIMED / RUNNING (or already-surfaced FAILED) → wait.
 
 
 def _handle_data_verifying(mid: str, m: dict) -> None:

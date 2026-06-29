@@ -123,3 +123,17 @@ def test_enable_table_objects_skips_partitioned_indexes(monkeypatch):
     assert "NIDX" in result["enabled"]["indexes"]
     assert "PIDX" not in result["enabled"]["indexes"]
     assert not any("PIDX" in s for s in executed)
+
+
+def test_next_phase_after_indexes_by_strategy():
+    import sys
+    from pathlib import Path
+    backend = Path(__file__).resolve().parents[1]
+    if str(backend) not in sys.path:
+        sys.path.insert(0, str(backend))
+    from services import orchestrator as orch
+
+    assert orch._next_phase_after_indexes("CDC_STAGE") == "CDC_APPLYING"
+    assert orch._next_phase_after_indexes("CDC_DIRECT") == "CDC_APPLYING"
+    assert orch._next_phase_after_indexes("BULK_STAGE") == "DATA_VERIFYING"
+    assert orch._next_phase_after_indexes(None) == "DATA_VERIFYING"
