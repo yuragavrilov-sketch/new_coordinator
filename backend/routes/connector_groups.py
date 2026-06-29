@@ -295,8 +295,9 @@ def prune_group_tables(group_id: str):
         return jsonify({
             "removed": removed,
             "removed_count": len(removed),
+            "synced": False,
             "sync_error": f"CDC connector config sync failed: {exc}",
-        }), 200
+        }), 207
     return jsonify({
         "removed": removed,
         "removed_count": len(removed),
@@ -316,8 +317,9 @@ def remove_group_table(group_id: str, source_schema: str, source_table: str):
     except Exception as exc:
         return jsonify({
             "removed": True,
+            "synced": False,
             "sync_error": f"CDC connector config sync failed: {exc}",
-        }), 200
+        }), 207
     return "", 204
 
 

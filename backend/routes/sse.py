@@ -62,16 +62,24 @@ def _unsubscribe(q: queue.Queue) -> None:
 def _stream(q: queue.Queue):
     try:
         yield "event: connected\ndata: {}\n\n"
+        # Snapshot under the lock, then yield outside it. A generator suspended
+        # at `yield` does not release the `with` lock, so yielding while holding
+        # status_lock would pin it across the (possibly slow) socket write and
+        # block the status poller for the duration.
         with _state["status_lock"]:
-            for svc, info in _state["service_status"].items():
-                evt = {
-                    "type":    "service_status",
-                    "service": svc,
-                    "status":  info["status"],
-                    "message": info["message"],
-                    "ts":      datetime.utcnow().isoformat() + "Z",
-                }
-                yield f"data: {json.dumps(evt)}\n\n"
+            snapshot = [
+                (svc, info["status"], info["message"])
+                for svc, info in _state["service_status"].items()
+            ]
+        for svc, status, message in snapshot:
+            evt = {
+                "type":    "service_status",
+                "service": svc,
+                "status":  status,
+                "message": message,
+                "ts":      datetime.utcnow().isoformat() + "Z",
+            }
+            yield f"data: {json.dumps(evt)}\n\n"
         while True:
             try:
                 yield q.get(timeout=20)

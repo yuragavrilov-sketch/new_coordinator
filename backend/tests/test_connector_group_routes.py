@@ -71,9 +71,10 @@ def test_remove_group_table_returns_warning_when_sync_fails_after_delete(monkeyp
 
     res = app.test_client().delete("/api/connector-groups/gid-1/tables/TCBPAY/ALLORDERS")
 
-    assert res.status_code == 200
+    assert res.status_code == 207
     assert res.get_json() == {
         "removed": True,
+        "synced": False,
         "sync_error": "CDC connector config sync failed: connect unavailable",
     }
     assert calls == [
@@ -144,10 +145,11 @@ def test_prune_group_tables_returns_warning_when_sync_fails(monkeypatch):
         json={"keep_tables": [{"source_schema": "TCBPAY", "source_table": "ALLORDERS"}]},
     )
 
-    assert res.status_code == 200
+    assert res.status_code == 207
     assert res.get_json() == {
         "removed": [{"source_schema": "TCBPAY", "source_table": "OLDORDERS"}],
         "removed_count": 1,
+        "synced": False,
         "sync_error": "CDC connector config sync failed: connect unavailable",
     }
     assert calls == [

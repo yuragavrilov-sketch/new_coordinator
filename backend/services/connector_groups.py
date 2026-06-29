@@ -201,8 +201,11 @@ def transition_group(group_id: str, to_status: str,
     conn = _conn()
     try:
         with conn.cursor() as cur:
+            # FOR UPDATE serializes concurrent transitions (e.g. orchestrator
+            # advance racing a user stop) so the recorded from_status reflects
+            # the true predecessor rather than a stale read.
             cur.execute(
-                "SELECT status FROM connector_groups WHERE group_id = %s",
+                "SELECT status FROM connector_groups WHERE group_id = %s FOR UPDATE",
                 (group_id,))
             row = cur.fetchone()
             from_status = row[0] if row else None

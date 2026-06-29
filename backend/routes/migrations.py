@@ -39,6 +39,11 @@ _VALID_PHASES = {
     "COMPLETED", "FAILED",
 }
 
+# Phases a migration never legitimately leaves to resume work. The raw phase
+# PATCH must not re-animate one of these into an active phase (which would have
+# the orchestrator pick it up with none of the prerequisite state in place).
+_TERMINAL_PHASES = {"COMPLETED", "CANCELLED", "FAILED"}
+
 _LIST_COLS = """
     migration_id, migration_name, phase, state_changed_at,
     source_connection_id, target_connection_id,
@@ -153,7 +158,22 @@ def list_migrations():
         conn = _state["get_conn"]()
         try:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT {_LIST_COLS} FROM migrations ORDER BY state_changed_at DESC")
+                # Bound the result set — the migrations table grows unbounded
+                # over a project's lifetime and an unlimited fetchall() loads it
+                # all into memory. Caller can page with ?limit=&offset=.
+                try:
+                    limit = min(max(int(request.args.get("limit", 500)), 1), 2000)
+                except (TypeError, ValueError):
+                    limit = 500
+                try:
+                    offset = max(int(request.args.get("offset", 0)), 0)
+                except (TypeError, ValueError):
+                    offset = 0
+                cur.execute(
+                    f"SELECT {_LIST_COLS} FROM migrations "
+                    f"ORDER BY state_changed_at DESC LIMIT %s OFFSET %s",
+                    (limit, offset),
+                )
                 return jsonify([_state["row_to_dict"](cur, r) for r in cur.fetchall()])
         finally:
             conn.close()
@@ -181,6 +201,7 @@ def get_migration(migration_id: str):
                     FROM migration_state_history
                     WHERE migration_id = %s
                     ORDER BY created_at DESC
+                    LIMIT 200
                 """, (migration_id,))
                 result["history"] = [_state["row_to_dict"](cur, r) for r in cur.fetchall()]
             return jsonify(result)
@@ -631,6 +652,18 @@ def transition_phase(migration_id: str):
                 if not row:
                     return jsonify({"error": "Not found"}), 404
                 from_phase = row[0]
+
+                # Block re-animating a terminal migration into a non-terminal
+                # phase — the orchestrator would resume it without chunks, stage
+                # table or connector config. Terminal→terminal stays allowed.
+                if (from_phase in _TERMINAL_PHASES
+                        and to_phase not in _TERMINAL_PHASES
+                        and to_phase != from_phase):
+                    return jsonify({
+                        "error": f"Cannot transition terminal phase "
+                                 f"'{from_phase}' → '{to_phase}'"
+                    }), 409
+
                 now = datetime.utcnow()
 
                 update_fields: dict = {
@@ -810,6 +843,15 @@ def migration_action(migration_id: str):
                 return jsonify({
                     "error": f"Action '{action}' requires phase '{required_from}', "
                              f"current phase is '{current_phase}'"
+                }), 409
+
+            # Actions with required_from=None (pause/cancel) are otherwise
+            # unguarded — reject them from terminal phases so a COMPLETED/
+            # CANCELLED/FAILED migration can't be driven back into PAUSED/
+            # CANCELLING (which would re-run it or re-delete its connector).
+            if required_from is None and current_phase not in _ACTIVE_PHASES:
+                return jsonify({
+                    "error": f"Action '{action}' not allowed in phase '{current_phase}'"
                 }), 409
 
             now = datetime.utcnow()
