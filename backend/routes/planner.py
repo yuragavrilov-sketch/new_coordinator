@@ -61,12 +61,16 @@ def _lanes_ready_to_promote(items) -> dict:
     return result
 
 
-def _promote_ready_lane_batches(cur, plan_id, now, actor: str = "SYSTEM"):
+def _promote_ready_lane_batches(cur, plan_id, now, actor: str = "SYSTEM", only_lanes=None):
     """Promote each lane's next ready batch (DRAFT→NEW) within an open cursor.
 
     Used both at plan start and on auto-advance: the two lanes progress
     independently, each pulling its lowest pending batch when it is free. The
     caller owns the transaction (commit/rollback) and post-commit broadcast.
+
+    only_lanes: optional set of lanes ({'CDC'}/{'BULK'}) to restrict promotion
+    to. Used by the add-items driver to start a freshly added non-CDC table
+    without touching the CDC lane (which is driven by the connector lifecycle).
 
     Returns (started_migration_ids, started_cdc_group_ids).
     """
@@ -89,6 +93,8 @@ def _promote_ready_lane_batches(cur, plan_id, now, actor: str = "SYSTEM"):
             (item_id, mid, phase, group_id, strategy))
 
     ready = _lanes_ready_to_promote(triples)
+    if only_lanes is not None:
+        ready = {lane: b for lane, b in ready.items() if lane in only_lanes}
 
     started_ids: list[str] = []
     started_cdc_group_ids: set = set()
@@ -125,6 +131,56 @@ def _promote_ready_lane_batches(cur, plan_id, now, actor: str = "SYSTEM"):
                 started_cdc_group_ids.add(str(group_id))
 
     return started_ids, started_cdc_group_ids
+
+
+def _start_ready_lane_batches(plan_id, only_lanes=None, actor: str = "SYSTEM",
+                              require_running: bool = True) -> list:
+    """Best-effort driver: promote ready batches for the given lanes after items
+    are added to a plan, so a freshly added table starts without waiting for an
+    unrelated migration to finish.
+
+    require_running=True advances only an already-RUNNING plan (used by the
+    generic planner add). require_running=False also starts a READY plan (used
+    by the schema-migration add-and-run flow, mirroring CDC autostart).
+
+    Opens and owns its own connection. Returns the started migration_ids.
+    """
+    conn = _state["get_conn"]()
+    started_ids: list = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT status FROM migration_plans WHERE plan_id = %s", (plan_id,))
+            row = cur.fetchone()
+            if not row:
+                return []
+            status = row[0]
+            if status in ("DONE", "FAILED", "CANCELLED"):
+                return []
+            if require_running and status != "RUNNING":
+                return []
+
+            now = datetime.now(timezone.utc).isoformat()
+            started_ids, _ = _promote_ready_lane_batches(
+                cur, plan_id, now, actor, only_lanes=only_lanes)
+            if started_ids:
+                cur.execute("""
+                    UPDATE migration_plans
+                    SET    status = 'RUNNING', started_at = COALESCE(started_at, %s)
+                    WHERE  plan_id = %s
+                """, (now, plan_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    broadcast = _state["broadcast"]
+    for mid in started_ids:
+        broadcast({"type": "migration_phase", "migration_id": mid, "phase": "NEW"})
+    if started_ids:
+        _refresh_queue_positions_best_effort()
+    return started_ids
 
 
 def _legacy_payload_has_cdc(batches, defaults) -> bool:
@@ -762,12 +818,20 @@ def add_plan_items(plan_id):
             """, (plan_id,))
 
         conn.commit()
-        return jsonify({"plan_id": plan_id, "items": items_created})
     except Exception as exc:
         conn.rollback()
         return jsonify({"error": str(exc)}), 500
     finally:
         conn.close()
+
+    # If the plan is already running, start the freshly added non-CDC batch now
+    # instead of waiting for an unrelated migration to finish.
+    try:
+        _start_ready_lane_batches(plan_id, only_lanes={"BULK"}, require_running=True)
+    except Exception as exc:
+        print(f"[planner.add_plan_items] bulk lane autostart warning: {exc}")
+
+    return jsonify({"plan_id": plan_id, "items": items_created})
 
 
 # ── Execute plan (create migrations) ─────────────────────────────────────────

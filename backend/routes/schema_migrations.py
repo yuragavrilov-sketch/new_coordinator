@@ -1180,6 +1180,20 @@ def add_plan_items(sm_id: str):
             plan_starts = autostart["plan_starts"]
             plan_start_error = autostart["plan_start_error"]
             cdc_queue_kicked = bool(autostart.get("cdc_queue_kicked", False))
+        else:
+            # Non-CDC add-and-run: the BULK lane has no connector dependency, so
+            # start its freshly added batch immediately (in parallel with any
+            # running CDC), mirroring the CDC autostart above.
+            try:
+                from routes.planner import _start_ready_lane_batches
+                bulk_started = _start_ready_lane_batches(
+                    plan_id, only_lanes={"BULK"}, require_running=False)
+                if bulk_started:
+                    plan_start = {"started": bulk_started}
+                    plan_starts = [plan_start]
+            except Exception as start_exc:
+                plan_start_error = str(start_exc)
+                print(f"[schema_migrations.add_plan_items] bulk lane autostart warning: {start_exc}")
         item_states = []
         try:
             item_states = _load_created_plan_item_states(conn, created)
