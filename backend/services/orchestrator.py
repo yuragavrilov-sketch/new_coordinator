@@ -20,6 +20,7 @@ from db.state_db import (
     get_active_migrations,
     row_to_dict,
     transition_phase,
+    PhaseChangedError,
     update_migration_fields,
 )
 
@@ -165,16 +166,28 @@ def _transition(migration_id: str, to_phase: str,
                 message: str | None = None,
                 error_code: str | None = None,
                 error_text: str | None = None,
-                extra_fields: dict | None = None) -> None:
+                extra_fields: dict | None = None,
+                expected_from: str | None = None) -> bool:
+    """Transition a migration. When *expected_from* is set, the write is a
+    compare-and-set that is atomic under the row lock; returns False (without
+    broadcasting) if the phase had already moved on (e.g. a concurrent cancel)."""
     conn = _state["get_conn"]()
     try:
-        from_phase = transition_phase(
-            conn, migration_id, to_phase,
-            message=message,
-            error_code=error_code,
-            error_text=error_text,
-            extra_fields=extra_fields,
-        )
+        try:
+            from_phase = transition_phase(
+                conn, migration_id, to_phase,
+                expected_from=expected_from,
+                message=message,
+                error_code=error_code,
+                error_text=error_text,
+                extra_fields=extra_fields,
+            )
+        except PhaseChangedError as exc:
+            conn.rollback()
+            print(f"[orchestrator] {migration_id}: skip transition "
+                  f"{expected_from}→{to_phase}, current phase is "
+                  f"{exc.current_phase} (cancelled?)")
+            return False
         conn.commit()
     finally:
         conn.close()
@@ -191,6 +204,7 @@ def _transition(migration_id: str, to_phase: str,
 
 
     _sync_plan_after_transition(migration_id, to_phase)
+    return True
 
 
 def _sync_plan_after_transition(migration_id: str, to_phase: str) -> None:
@@ -547,19 +561,28 @@ def _current_phase(migration_id: str) -> str | None:
 def _safe_transition(migration_id: str, expected_phase: str, to_phase: str,
                      **kwargs) -> bool:
     """Transition only if the migration is still in *expected_phase*.
-    Returns True if transitioned, False if phase changed (e.g. cancelled)."""
-    cur = _current_phase(migration_id)
-    if cur != expected_phase:
-        print(f"[orchestrator] {migration_id}: skip transition {expected_phase}→{to_phase}, "
-              f"current phase is {cur} (cancelled?)")
-        return False
-    _transition(migration_id, to_phase, **kwargs)
-    return True
+    Returns True if transitioned, False if phase changed (e.g. cancelled).
+
+    The check-and-write is a single compare-and-set under the row lock, so a
+    concurrent cancel can no longer slip between the read and the write."""
+    return _transition(migration_id, to_phase, expected_from=expected_phase, **kwargs)
 
 
 def _in_prog(migration_id: str) -> bool:
     with _in_progress_lock:
         return migration_id in _in_progress
+
+
+def _try_mark_in_prog(migration_id: str) -> bool:
+    """Atomically claim the in-progress slot. Returns True only if the
+    migration was not already in progress — replaces the racy
+    `if _in_prog(): return` + `_mark_in_prog()` two-step that let two threads
+    (orchestrator tick vs. connector-startup) both start the same migration."""
+    with _in_progress_lock:
+        if migration_id in _in_progress:
+            return False
+        _in_progress.add(migration_id)
+        return True
 
 
 def _mark_in_prog(migration_id: str) -> None:
@@ -740,24 +763,36 @@ def _broadcast_trigger_job_created(job: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _create_chunks_and_transition(mid: str, m: dict) -> None:
-    """Create ROWID chunks and transition to CHUNKING."""
-    if _in_prog(mid):
-        return
+    """Create ROWID chunks for a migration already in the CHUNKING phase.
 
-    # Check if chunks already created
-    conn = _state["get_conn"]()
+    The caller must already hold the in-progress mark for *mid*; this function
+    takes over releasing it (synchronously if chunks already exist, otherwise
+    when the background creation thread finishes). The caller must NOT unmark
+    after delegating here.
+
+    Chunk creation runs in a background thread, so the phase stays CHUNKING
+    until chunks are actually written; _handle_chunking only advances to
+    BULK_LOADING once the mark is cleared and chunks are present. The thread
+    therefore never needs to (and must not) blindly re-assert CHUNKING, which
+    would race-overwrite a concurrent cancel.
+    """
+    # Restart idempotency: chunks may already exist from a prior run.
     try:
-        stats = job_queue.get_chunk_stats(conn, mid)
-    finally:
-        conn.close()
+        conn = _state["get_conn"]()
+        try:
+            stats = job_queue.get_chunk_stats(conn, mid)
+        finally:
+            conn.close()
+    except Exception as exc:
+        # Don't leak the in-progress mark if the State DB is momentarily down.
+        print(f"[orchestrator] {mid}: chunk-stats read failed, will retry: {exc}")
+        _unmark_in_prog(mid)
+        return
 
     if stats["total"] > 0:
         _update(mid, {"total_chunks": stats["total"]})
-        _transition(mid, "CHUNKING",
-                    message=f"Чанки уже созданы ({stats['total']}), переход к нарезке")
+        _unmark_in_prog(mid)   # _handle_chunking will advance to BULK_LOADING
         return
-
-    _mark_in_prog(mid)
 
     def _run():
         try:
@@ -789,12 +824,13 @@ def _create_chunks_and_transition(mid: str, m: dict) -> None:
                           "NO_CHUNKS")
                     return
 
-                # Source table is genuinely empty — skip bulk loading,
-                # go straight to enabling indexes and then CDC listener
+                # Source table is genuinely empty — skip bulk loading. Only
+                # advance if still CHUNKING (compare-and-set), so a cancel that
+                # arrived during chunk creation is not overwritten.
                 _update(mid, {"total_chunks": 0})
-                _transition(mid, "INDEXES_ENABLING",
-                            message="Таблица-источник пуста (0 строк), "
-                                    "пропуск bulk-загрузки — включение индексов и запуск CDC")
+                _safe_transition(mid, "CHUNKING", "INDEXES_ENABLING",
+                                 message="Таблица-источник пуста (0 строк), "
+                                         "пропуск bulk-загрузки — включение индексов и запуск CDC")
                 return
 
             pg_conn = _state["get_conn"]()
@@ -804,10 +840,12 @@ def _create_chunks_and_transition(mid: str, m: dict) -> None:
                 pg_conn.close()
 
             _update(mid, {"total_chunks": len(chunks)})
-            _transition(mid, "CHUNKING",
-                        message=f"Создано {len(chunks)} чанков")
+            # Phase is already CHUNKING; _handle_chunking advances to
+            # BULK_LOADING once this thread clears the in-progress mark below.
+            print(f"[orchestrator] {mid}: created {len(chunks)} chunks")
         except Exception as exc:
-            _fail(mid, str(exc), "CHUNKING_ERROR")
+            if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
+                _fail(mid, str(exc), "CHUNKING_ERROR")
         finally:
             _unmark_in_prog(mid)
 
@@ -815,9 +853,23 @@ def _create_chunks_and_transition(mid: str, m: dict) -> None:
 
 
 def _handle_chunking(mid: str, m: dict) -> None:
-    """Chunks are written — transition to BULK_LOADING."""
-    _transition(mid, "BULK_LOADING",
-                message="Чанки записаны, запуск bulk-загрузки")
+    """Advance to BULK_LOADING once chunks are actually written.
+
+    Chunk creation runs in a background thread (see _create_chunks_and_transition),
+    so we must wait for it to finish AND verify chunks exist before advancing —
+    otherwise workers enter BULK_LOADING with nothing to claim, and the late
+    chunk-creation completion races the phase backwards."""
+    if _in_prog(mid):
+        return  # chunk-creation thread still running
+    conn = _state["get_conn"]()
+    try:
+        stats = job_queue.get_chunk_stats(conn, mid)
+    finally:
+        conn.close()
+    if stats["total"] == 0:
+        return  # not chunked yet — wait for the creation thread
+    _safe_transition(mid, "CHUNKING", "BULK_LOADING",
+                     message="Чанки записаны, запуск bulk-загрузки")
 
 
 def _handle_bulk_loading(mid: str, m: dict) -> None:
@@ -870,9 +922,8 @@ def _handle_bulk_loaded(mid: str, m: dict) -> None:
 
 def _handle_stage_validating(mid: str, m: dict) -> None:
     """Run validation in a separate thread."""
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
         try:
@@ -906,9 +957,8 @@ def _handle_baseline_publishing(mid: str, m: dict) -> None:
     chunks (chunk_type='BASELINE') in migration_chunks, then move to
     BASELINE_LOADING so workers pick them up.
     """
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
         try:
@@ -1086,9 +1136,8 @@ def _handle_baseline_published(mid: str, m: dict) -> None:
 
 def _handle_stage_dropping(mid: str, m: dict) -> None:
     """Drop the stage table — runs in a thread."""
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
         try:
@@ -1443,11 +1492,11 @@ def _handle_new(mid: str, m: dict) -> None:
     _update(mid, {"queue_position": None})
 
     # Create stage table (if STAGE strategy)
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
+        delegated = False    # True once we hand the mark to _create_chunks_and_transition
         try:
             src_cfg = _oracle_cfg(m["source_connection_id"])
             dst_cfg = _oracle_cfg(m["target_connection_id"])
@@ -1482,10 +1531,13 @@ def _handle_new(mid: str, m: dict) -> None:
                 _prepare_target_for_direct_load(mid, m, dst_cfg, msg_parts)
 
             if not strategy.has_cdc:
-                _safe_transition(mid, "NEW", "CHUNKING",
-                                 message=", ".join(msg_parts) + ", no CDC -> chunking")
-                _unmark_in_prog(mid)
-                _create_chunks_and_transition(mid, m)
+                # Only delegate chunk creation if the cancel-safe transition
+                # actually fired; _create_chunks_and_transition takes over the
+                # in-progress mark, so the finally below must NOT clear it.
+                if _safe_transition(mid, "NEW", "CHUNKING",
+                                    message=", ".join(msg_parts) + ", no CDC -> chunking"):
+                    delegated = True
+                    _create_chunks_and_transition(mid, m)
                 return
             else:
                 _safe_transition(mid, "NEW", "TOPIC_CREATING",
@@ -1494,18 +1546,19 @@ def _handle_new(mid: str, m: dict) -> None:
             if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
                 _fail(mid, str(exc), "PREPARING_ERROR")
         finally:
-            _unmark_in_prog(mid)
+            if not delegated:
+                _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
 
 
 def _handle_topic_creating(mid: str, m: dict) -> None:
     """Pre-create the Kafka topic for this table, then create chunks."""
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
+        delegated = False    # True once we hand the mark to _create_chunks_and_transition
         try:
             topic_prefix = m.get("topic_prefix", "")
             src_schema = m["source_schema"].upper()
@@ -1525,19 +1578,19 @@ def _handle_topic_creating(mid: str, m: dict) -> None:
                 topic_name=topic_name,
             )
 
-            # Transition to chunking
-            _safe_transition(mid, "TOPIC_CREATING", "CHUNKING",
-                             message=f"Топик {topic_name} создан, нарезка чанков")
-
-            # Create chunks
-            _unmark_in_prog(mid)
-            _create_chunks_and_transition(mid, m)
+            # Transition to chunking, then hand off chunk creation (which takes
+            # over the in-progress mark — finally below must not clear it).
+            if _safe_transition(mid, "TOPIC_CREATING", "CHUNKING",
+                                message=f"Топик {topic_name} создан, нарезка чанков"):
+                delegated = True
+                _create_chunks_and_transition(mid, m)
             return
         except Exception as exc:
             if _current_phase(mid) not in ("CANCELLING", "CANCELLED"):
                 _fail(mid, str(exc), "TOPIC_CREATE_ERROR")
         finally:
-            _unmark_in_prog(mid)
+            if not delegated:
+                _unmark_in_prog(mid)
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -1547,9 +1600,8 @@ def _handle_indexes_enabling(mid: str, m: dict) -> None:
 
     Triggers stay disabled until the operator starts the target-trigger job.
     """
-    if _in_prog(mid):
+    if not _try_mark_in_prog(mid):
         return
-    _mark_in_prog(mid)
 
     def _run():
         try:
@@ -1632,9 +1684,8 @@ def _handle_data_verifying(mid: str, m: dict) -> None:
 
     if not task_id:
         # First tick — create the data_compare task in a daemon thread
-        if _in_prog(mid):
+        if not _try_mark_in_prog(mid):
             return
-        _mark_in_prog(mid)
 
         def _run():
             try:

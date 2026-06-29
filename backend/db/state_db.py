@@ -851,11 +851,25 @@ def get_active_migrations(conn) -> list[dict]:
         return [row_to_dict(cur, r) for r in cur.fetchall()]
 
 
+class PhaseChangedError(Exception):
+    """Raised by transition_phase when the row is not in the expected from-phase.
+
+    Carries the actual current phase so the caller can log/decide. The check
+    happens under the SELECT ... FOR UPDATE row lock, so it is atomic against
+    concurrent transitions (e.g. a user cancel racing an orchestrator advance).
+    """
+
+    def __init__(self, current_phase: str | None):
+        self.current_phase = current_phase
+        super().__init__(f"phase changed to {current_phase!r}")
+
+
 def transition_phase(
     conn,
     migration_id: str,
     to_phase: str,
     *,
+    expected_from: str | None = None,
     actor_type: str = "SYSTEM",
     actor_id: str | None = None,
     message: str | None = None,
@@ -867,6 +881,10 @@ def transition_phase(
     Transition a migration to *to_phase*.
     Returns the previous phase.
     Caller must commit/rollback the connection.
+
+    If *expected_from* is given and the current phase differs, raises
+    PhaseChangedError without writing — lets callers do a compare-and-set
+    that is atomic under the row lock acquired below.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -877,6 +895,9 @@ def transition_phase(
         if not row:
             raise ValueError(f"Migration {migration_id} not found")
         from_phase = row[0]
+
+        if expected_from is not None and from_phase != expected_from:
+            raise PhaseChangedError(from_phase)
 
         fields: dict = {
             "phase":            to_phase,
