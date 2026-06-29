@@ -45,9 +45,14 @@ def _diff_table(src_meta: dict, tgt_meta: dict) -> dict:
 
     cols_missing = [n for n in src_cols if n not in tgt_cols]
     cols_extra = [n for n in tgt_cols if n not in src_cols]
+    # Compare the full column shape, not just the bare type name — otherwise
+    # VARCHAR2(100) vs VARCHAR2(4000), NUMBER(10,2) vs NUMBER(18,4), or a
+    # NOT NULL vs NULL difference all read as a false match.
+    _COL_ATTRS = ("data_type", "data_length", "data_precision", "data_scale", "nullable")
     cols_type = [
         n for n in src_cols
-        if n in tgt_cols and src_cols[n].get("data_type") != tgt_cols[n].get("data_type")
+        if n in tgt_cols
+        and any(src_cols[n].get(a) != tgt_cols[n].get(a) for a in _COL_ATTRS)
     ]
 
     src_idx = {i["name"]: i for i in src_meta.get("indexes", [])}

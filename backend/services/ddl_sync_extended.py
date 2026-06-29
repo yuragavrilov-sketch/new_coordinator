@@ -15,6 +15,27 @@ def _exec_on_target(tgt_conn, sql: str):
     tgt_conn.commit()
 
 
+def _exec_in_schema(tgt_conn, schema: str, sql: str):
+    """Execute code-object DDL with CURRENT_SCHEMA set to *schema*.
+
+    Oracle stores PL/SQL source (packages, procedures, types) WITHOUT a schema
+    prefix, so an unqualified `CREATE OR REPLACE PACKAGE "X" ...` would otherwise
+    land in the connected user's schema, not the target schema. Set the session
+    schema for the duration and restore it afterwards.
+    """
+    safe = schema.upper().replace('"', '""')
+    with tgt_conn.cursor() as cur:
+        cur.execute(f'ALTER SESSION SET CURRENT_SCHEMA = "{safe}"')
+        try:
+            cur.execute(sql)
+        finally:
+            cur.execute(
+                "ALTER SESSION SET CURRENT_SCHEMA = "
+                "SYS_CONTEXT('USERENV','SESSION_USER')"
+            )
+    tgt_conn.commit()
+
+
 def sync_view(src_conn, tgt_conn, schema: str, name: str) -> dict:
     """CREATE OR REPLACE VIEW on target from source definition."""
     info = get_view_info(src_conn, schema, name)
@@ -47,23 +68,23 @@ def sync_code_object(src_conn, tgt_conn, schema: str, name: str, obj_type: str) 
         spec = get_source_code(src_conn, schema, name, "PACKAGE")
         body = get_source_code(src_conn, schema, name, "PACKAGE BODY")
         if spec:
-            _exec_on_target(tgt_conn, f'CREATE OR REPLACE {spec}')
+            _exec_in_schema(tgt_conn, schema, f'CREATE OR REPLACE {spec}')
         if body:
-            _exec_on_target(tgt_conn, f'CREATE OR REPLACE {body}')
+            _exec_in_schema(tgt_conn, schema, f'CREATE OR REPLACE {body}')
         return {"action": "compiled", "object": name, "spec": bool(spec), "body": bool(body)}
     elif obj_type == "TYPE":
         src = get_source_code(src_conn, schema, name, "TYPE")
         body = get_source_code(src_conn, schema, name, "TYPE BODY")
         if src:
-            _exec_on_target(tgt_conn, f'CREATE OR REPLACE {src}')
+            _exec_in_schema(tgt_conn, schema, f'CREATE OR REPLACE {src}')
         if body:
-            _exec_on_target(tgt_conn, f'CREATE OR REPLACE {body}')
+            _exec_in_schema(tgt_conn, schema, f'CREATE OR REPLACE {body}')
         return {"action": "compiled", "object": name, "source": bool(src), "body": bool(body)}
     else:
         code = get_source_code(src_conn, schema, name, obj_type)
         if not code:
             return {"error": f"{obj_type} {name} has no source code on source"}
-        _exec_on_target(tgt_conn, f'CREATE OR REPLACE {code}')
+        _exec_in_schema(tgt_conn, schema, f'CREATE OR REPLACE {code}')
         return {"action": "compiled", "object": name}
 
 
@@ -73,13 +94,17 @@ def sync_sequence(src_conn, tgt_conn, schema: str, name: str, action: str = "cre
     if not info:
         return {"error": f"Sequence {name} not found on source"}
 
+    # Oracle stores NOCACHE sequences with cache_size 0, but `CACHE 0` is
+    # invalid DDL (ORA-04013) — emit NOCACHE in that case.
+    cache_clause = "NOCACHE" if not info["cache_size"] else f'CACHE {info["cache_size"]}'
+
     if action == "create":
         ddl = (
             f'CREATE SEQUENCE "{schema}"."{name}"'
             f' MINVALUE {info["min_value"]}'
             f' MAXVALUE {info["max_value"]}'
             f' INCREMENT BY {info["increment_by"]}'
-            f' CACHE {info["cache_size"]}'
+            f' {cache_clause}'
             f' START WITH {info["last_number"]}'
         )
         _exec_on_target(tgt_conn, ddl)
@@ -90,7 +115,7 @@ def sync_sequence(src_conn, tgt_conn, schema: str, name: str, action: str = "cre
             f' INCREMENT BY {info["increment_by"]}'
             f' MINVALUE {info["min_value"]}'
             f' MAXVALUE {info["max_value"]}'
-            f' CACHE {info["cache_size"]}'
+            f' {cache_clause}'
         )
         _exec_on_target(tgt_conn, ddl)
         return {"action": "altered", "object": name}

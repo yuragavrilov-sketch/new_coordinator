@@ -29,8 +29,14 @@ def sync_target_objects(
     if types is None:
         types = {"constraints", "indexes", "triggers"}
 
+    # Nest so src_conn is always closed even if opening the target raises
+    # (otherwise the source connection/session leaks under a down target).
     src_conn = open_oracle_conn(src_cfg)
-    dst_conn = open_oracle_conn(dst_cfg)
+    try:
+        dst_conn = open_oracle_conn(dst_cfg)
+    except Exception:
+        src_conn.close()
+        raise
     try:
         result = {
             "constraints": {"added": [], "skipped": [], "errors": []},
@@ -109,6 +115,7 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
     with dst_conn.cursor() as cur:
         cur.execute("""
             SELECT ac.constraint_name, ac.constraint_type,
+                   ac.r_owner, ac.r_constraint_name,
                    LISTAGG(acc.column_name, ',')
                        WITHIN GROUP (ORDER BY acc.position) AS cols
             FROM   all_constraints  ac
@@ -118,14 +125,27 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
             WHERE  ac.owner      = :s
               AND  ac.table_name = :t
               AND  ac.constraint_type IN ('P','U','R','C')
-            GROUP BY ac.constraint_name, ac.constraint_type
+            GROUP BY ac.constraint_name, ac.constraint_type,
+                     ac.r_owner, ac.r_constraint_name
         """, {"s": tgt_schema.upper(), "t": tgt_table.upper()})
         tgt_rows_raw = cur.fetchall()
-        tgt_keys = {(r[1], r[2]) for r in tgt_rows_raw}
+        tgt_keys = {(r[1], r[4]) for r in tgt_rows_raw}
+        # FK structural identity must include the referenced table+columns, not
+        # just the local columns — otherwise an existing FK on the same local
+        # cols pointing at a DIFFERENT parent table is wrongly treated as a
+        # match and the correct FK is never created.
+        # cols_csv -> set of (ref_table, ref_cols_csv)
+        tgt_fk_refs: dict[str, set[tuple[str, str]]] = {}
         # Map type_code → (constraint_name, cols) for PK/UK drop-and-recreate
         tgt_by_type: dict[str, list[tuple[str, str]]] = {}
-        for cname_t, ctype_t, cols_t in tgt_rows_raw:
+        for cname_t, ctype_t, r_owner_t, r_cname_t, cols_t in tgt_rows_raw:
             tgt_by_type.setdefault(ctype_t, []).append((cname_t, cols_t))
+            if ctype_t == "R":
+                ref_table_t, ref_cols_t = _resolve_ref(dst_conn, r_owner_t, r_cname_t)
+                if ref_table_t:
+                    tgt_fk_refs.setdefault(cols_t, set()).add(
+                        (ref_table_t.upper(), (ref_cols_t or "").upper())
+                    )
 
     s = tgt_schema.upper()
     t = tgt_table.upper()
@@ -135,8 +155,10 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
     for cname, ctype, r_owner, r_cname, delete_rule, cols in sorted(
         src_rows, key=lambda r: _order.get(r[1], 9)
     ):
+        # FK identity is checked below against the referenced table too; for
+        # non-FK constraints the (type, local-cols) key is sufficient.
         key = (ctype, cols)
-        if key in tgt_keys:
+        if ctype != "R" and key in tgt_keys:
             out["skipped"].append(cname)
             continue
 
@@ -184,6 +206,11 @@ def _sync_constraints(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt
                         "name": cname,
                         "error": f"Cannot resolve referenced constraint {r_owner}.{r_cname}",
                     })
+                    continue
+                # Skip only when an existing target FK on the same local columns
+                # also references the same table+columns.
+                if (ref_table.upper(), (ref_cols or "").upper()) in tgt_fk_refs.get(cols, set()):
+                    out["skipped"].append(cname)
                     continue
                 # Map r_owner → tgt_schema when FK points to the same source schema
                 ref_schema = (
@@ -339,17 +366,20 @@ def _sync_triggers(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_ta
         )
         tgt_names = {r[0] for r in cur.fetchall()}
 
-    # Replace source schema.table reference in description header
-    src_ref = f"{src_schema.upper()}.{src_table.upper()}"
-    tgt_ref = f"{tgt_schema.upper()}.{tgt_table.upper()}"
-
     for trg_name, description, body in src_rows:
         if trg_name in tgt_names:
             out["skipped"].append(trg_name)
             continue
         try:
-            desc = (description or "").replace(src_ref, tgt_ref)
-            ddl  = f"CREATE OR REPLACE TRIGGER {desc}\n{body or ''}"
+            # Rewrite source-schema references in BOTH the header and the PL/SQL
+            # body. A schema-qualified call left pointing at the source schema
+            # (e.g. SRC.pkg.proc, INSERT INTO SRC.audit) would compile invalid
+            # or silently reach back into the source instance on the target.
+            desc = _rewrite_schema_refs(
+                description, src_schema, src_table, tgt_schema, tgt_table)
+            body_rw = _rewrite_schema_refs(
+                body, src_schema, src_table, tgt_schema, tgt_table)
+            ddl  = f"CREATE OR REPLACE TRIGGER {desc}\n{body_rw or ''}"
             with dst_conn.cursor() as cur:
                 cur.execute(ddl)
             tgt_names.add(trg_name)
@@ -365,3 +395,22 @@ def _sync_triggers(src_conn, dst_conn, src_schema, src_table, tgt_schema, tgt_ta
 def _qcols(cols_str: str) -> str:
     """'COL1,COL2' → '"COL1", "COL2"'"""
     return ", ".join(f'"{c.strip()}"' for c in cols_str.split(","))
+
+
+def _rewrite_schema_refs(text: str | None, src_schema: str, src_table: str,
+                         tgt_schema: str, tgt_table: str) -> str | None:
+    """Rewrite source-schema references to the target schema in trigger DDL.
+
+    Substitutes the full schema.table first (covers a renamed base table), then
+    any remaining bare ``src_schema.`` prefix. Case-insensitive, word-boundary
+    guarded so it won't corrupt unrelated identifiers. Cross-schema bodies that
+    reference *other* objects still warrant manual review.
+    """
+    if not text:
+        return text
+    ss, st = src_schema.upper(), src_table.upper()
+    ts, tt = tgt_schema.upper(), tgt_table.upper()
+    text = re.sub(rf'\b{re.escape(ss)}\.{re.escape(st)}\b',
+                  f'{ts}.{tt}', text, flags=re.IGNORECASE)
+    text = re.sub(rf'\b{re.escape(ss)}\.', f'{ts}.', text, flags=re.IGNORECASE)
+    return text

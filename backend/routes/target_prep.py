@@ -82,12 +82,16 @@ def _diff_summary(src: dict, tgt: dict) -> dict:
     src_col_map = {c["name"]: c for c in src["columns"]}
     tgt_col_map = {c["name"]: c for c in tgt["columns"]}
 
+    # Compare the full column shape (length/precision/scale/nullable), not just
+    # the bare type name — otherwise VARCHAR2(100) vs VARCHAR2(4000) or
+    # NOT NULL vs NULL read as a false match.
+    _COL_ATTRS = ("data_type", "data_length", "data_precision", "data_scale", "nullable")
     cols_missing = sum(1 for c in src["columns"] if c["name"] not in tgt_col)
     cols_extra   = sum(1 for c in tgt["columns"] if c["name"] not in src_col_map)
     cols_type    = sum(
         1 for c in src["columns"]
         if c["name"] in tgt_col_map
-        and c["data_type"] != tgt_col_map[c["name"]]["data_type"]
+        and any(c.get(a) != tgt_col_map[c["name"]].get(a) for a in _COL_ATTRS)
     )
 
     def _idx_key(i: dict) -> tuple:

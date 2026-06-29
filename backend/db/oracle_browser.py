@@ -730,11 +730,14 @@ def get_full_ddl_info(conn, schema: str, table: str) -> dict:
         """, {"s": schema, "t": table})
         indexes = [
             {
-                "name":       r[0],
-                "unique":     r[1] == "UNIQUE",
-                "index_type": r[2],
-                "status":     "VALID" if r[3] == "N/A" else r[3],
-                "columns":    r[5].split(",") if r[5] else [],
+                "name":        r[0],
+                "unique":      r[1] == "UNIQUE",
+                "index_type":  r[2],
+                "status":      "VALID" if r[3] == "N/A" else r[3],
+                # Partitioned indexes can't be rebuilt as a whole (ORA-14086);
+                # callers must skip them when marking UNUSABLE / rebuilding.
+                "partitioned": r[4] == "YES",
+                "columns":     r[5].split(",") if r[5] else [],
             }
             for r in cur.fetchall()
         ]
@@ -772,8 +775,12 @@ def execute_target_action(conn, action: str, schema: str, table: str, object_nam
     if action not in _valid:
         raise ValueError(f"Unknown action: {action}")
 
-    # Build DDL statement — identifiers are double-quoted to preserve case
-    s, t, o = schema.upper(), table.upper(), object_name
+    # Build DDL statement — identifiers are double-quoted to preserve case.
+    # Escape embedded double-quotes (Oracle: "" inside a quoted identifier) so a
+    # value like `CON1" NOVALIDATE --` can't break out and inject DDL.
+    def _qid(name: str) -> str:
+        return name.upper().replace('"', '""')
+    s, t, o = _qid(schema), _qid(table), _qid(object_name)
     if action == "disable_index":
         ddl = f'ALTER INDEX "{s}"."{o}" UNUSABLE'
     elif action == "enable_index":
@@ -888,6 +895,9 @@ def rebuild_unusable_constraint_indexes(conn, schema: str, table: str) -> list[s
     rebuilt: list[str] = []
     with conn.cursor() as cur:
         for idx in info["indexes"]:
+            if idx.get("partitioned"):
+                # ORA-14086: a partitioned index can't be rebuilt as a whole.
+                continue
             if idx["name"].upper() in protected and idx["status"] == "UNUSABLE":
                 try:
                     cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" {rebuild_clause}')
@@ -919,6 +929,10 @@ def mark_indexes_unusable(conn, schema: str, table: str, skip_pk: bool = True) -
     with conn.cursor() as cur:
         for idx in info["indexes"]:
             if idx["status"] != "VALID":
+                continue
+            if idx.get("partitioned"):
+                # Partitioned indexes report status 'N/A' (normalised to VALID)
+                # and can't be rebuilt as a whole later — don't disable them.
                 continue
             if idx["name"].upper() in protected:
                 continue
@@ -983,6 +997,10 @@ def enable_all_disabled_objects(conn, schema: str, table: str) -> dict:
 
     with conn.cursor() as cur:
         for idx in info["indexes"]:
+            if idx.get("partitioned"):
+                # ORA-14086: a partitioned index can't be rebuilt as a whole;
+                # it also never gets marked UNUSABLE by mark_indexes_unusable.
+                continue
             if idx["status"] == "UNUSABLE":
                 try:
                     cur.execute(f'ALTER INDEX "{s}"."{idx["name"]}" {rebuild_clause}')
