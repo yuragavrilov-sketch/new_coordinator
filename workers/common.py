@@ -780,6 +780,20 @@ def complete_index_enable_job(conn, job_id: str, result: dict) -> None:
     conn.commit()
 
 
+def heartbeat_index_enable_job(conn, job_id: str) -> None:
+    """Mark the job RUNNING and refresh claimed_at so reset_stale_jobs treats it
+    as a live heartbeat (not a stale claim). Guarded by worker_id."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE index_enable_jobs
+            SET    state = 'RUNNING',
+                   started_at = COALESCE(started_at, NOW()),
+                   claimed_at = NOW()
+            WHERE  job_id = %s AND worker_id = %s
+        """, (job_id, WORKER_ID))
+    conn.commit()
+
+
 def fail_index_enable_job(conn, job_id: str, error_text: str) -> None:
     with conn.cursor() as cur:
         cur.execute("""

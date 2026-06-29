@@ -1225,19 +1225,9 @@ def trigger_indexes_enabling(migration_id: str) -> None:
 
     phase = m["phase"]
     if phase == "FAILED" and m.get("error_code") == "INDEXES_ENABLE_ERROR":
-        # Recovery path: transition back to INDEXES_ENABLING, then re-fetch
+        # Recovery path: transition back to INDEXES_ENABLING
         _transition(migration_id, "INDEXES_ENABLING",
                     message="Повторный запуск пересчёта индексов")
-        conn = get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT * FROM migrations WHERE migration_id = %s",
-                    (migration_id,),
-                )
-                m = row_to_dict(cur, cur.fetchone())
-        finally:
-            conn.close()
     elif phase != "INDEXES_ENABLING":
         raise ValueError(
             f"Migration is in phase {phase}, expected INDEXES_ENABLING"

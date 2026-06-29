@@ -72,6 +72,7 @@ CDC_POLL_ERROR_THRESHOLD = max(1, int(os.environ.get("CDC_POLL_ERROR_THRESHOLD",
 CDC_SCAN_INTERVAL  = int(os.environ.get("CDC_SCAN_INTERVAL",  3))
 CMP_POLL_INTERVAL  = int(os.environ.get("CMP_POLL_INTERVAL",  5))
 WORKER_HEARTBEAT_SEC = int(os.environ.get("WORKER_HEARTBEAT_SEC", 10))
+INDEX_ENABLE_HEARTBEAT_SEC = int(os.environ.get("INDEX_ENABLE_HEARTBEAT_SEC", "60"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -726,7 +727,7 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def worker_heartbeat_loop(stop_event: threading.Event) -> None:
-    capabilities = ["bulk", "baseline", "cdc", "compare", "ddl"]
+    capabilities = ["bulk", "baseline", "cdc", "compare", "ddl", "index_enable"]
     pg = db.get_pg_conn_with_retry()
     try:
         while not stop_event.is_set():
@@ -1016,40 +1017,78 @@ def index_enable_loop(stop_event: threading.Event) -> None:
         while not stop_event.is_set():
             try:
                 job = db.claim_index_enable_job(pg)
-                if job is None:
-                    time.sleep(BULK_POLL_INTERVAL)
-                    continue
-                print(f"[index-enable] claimed job {job['job_id']} "
-                      f"for {job['target_schema']}.{job['target_table']}")
-                configs = db.load_configs(pg)
-                ora = db.open_oracle(job["target_connection_id"], configs)
-                try:
-                    result = oracle_ddl.enable_table_objects(
-                        ora, job["target_schema"], job["target_table"],
-                    )
-                finally:
-                    try:
-                        ora.close()
-                    except Exception:
-                        pass
-
-                err_count = (len(result["errors"]["indexes"])
-                             + len(result["errors"]["constraints"]))
-                if err_count:
-                    db.fail_index_enable_job(
-                        pg, job["job_id"], str(result["errors"])[:4000])
-                else:
-                    db.complete_index_enable_job(pg, job["job_id"], result)
-            except KeyboardInterrupt:
-                raise
             except Exception as exc:
-                print(f"[index-enable] loop error: {exc}")
-                try:
-                    pg.close()
-                except Exception:
-                    pass
+                print(f"[index-enable] claim error: {exc}")
+                try: pg.close()
+                except Exception: pass
                 pg = db.get_pg_conn()
                 time.sleep(BULK_POLL_INTERVAL)
+                continue
+            if job is None:
+                time.sleep(BULK_POLL_INTERVAL)
+                continue
+
+            print(f"[index-enable] claimed job {job['job_id']} "
+                  f"for {job['target_schema']}.{job['target_table']}")
+            try:
+                configs = db.load_configs(pg)
+            except Exception as exc:
+                # pg trouble — reconnect and leave the job for stale-reset to requeue
+                print(f"[index-enable] config-load error: {exc}")
+                try: pg.close()
+                except Exception: pass
+                pg = db.get_pg_conn()
+                time.sleep(BULK_POLL_INTERVAL)
+                continue
+
+            # Run the (possibly long) DDL in a thread so this loop can heartbeat
+            # claimed_at on pg — preventing reset_stale_jobs from reclaiming a
+            # still-running job and double-executing the rebuild. The thread touches
+            # ONLY the Oracle connection (never pg), so there is no cross-thread pg use.
+            box: dict = {}
+            def _do_enable():
+                try:
+                    ora = db.open_oracle(job["target_connection_id"], configs)
+                    try:
+                        box["result"] = oracle_ddl.enable_table_objects(
+                            ora, job["target_schema"], job["target_table"])
+                    finally:
+                        try: ora.close()
+                        except Exception: pass
+                except Exception as exc:
+                    box["error"] = f"{type(exc).__name__}: {exc}"
+
+            t = threading.Thread(target=_do_enable, daemon=True, name="index-enable-ddl")
+            t.start()
+            while True:
+                t.join(timeout=INDEX_ENABLE_HEARTBEAT_SEC)
+                if not t.is_alive():
+                    break
+                try:
+                    db.heartbeat_index_enable_job(pg, job["job_id"])
+                except Exception as exc:
+                    print(f"[index-enable] heartbeat error: {exc}")
+                    try: pg.close()
+                    except Exception: pass
+                    pg = db.get_pg_conn()
+
+            # Record outcome. A hard exception in the DDL thread now marks the job
+            # FAILED (was previously swallowed, leaving the migration stuck).
+            try:
+                if "error" in box:
+                    db.fail_index_enable_job(pg, job["job_id"], box["error"])
+                else:
+                    result = box.get("result") or {"enabled": {}, "errors": {"indexes": [], "constraints": []}}
+                    err_count = len(result["errors"]["indexes"]) + len(result["errors"]["constraints"])
+                    if err_count:
+                        db.fail_index_enable_job(pg, job["job_id"], str(result["errors"])[:4000])
+                    else:
+                        db.complete_index_enable_job(pg, job["job_id"], result)
+            except Exception as exc:
+                print(f"[index-enable] result-write error: {exc}")
+                try: pg.close()
+                except Exception: pass
+                pg = db.get_pg_conn()
     finally:
         try:
             pg.close()

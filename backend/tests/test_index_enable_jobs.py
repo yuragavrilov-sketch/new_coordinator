@@ -82,6 +82,17 @@ def test_fail_is_guarded_by_worker_id():
     assert conn.committed
 
 
+def test_heartbeat_is_guarded_by_worker_id():
+    conn = ConnStub()
+    worker_common.heartbeat_index_enable_job(conn, "job-1")
+    sql, params = conn.cur.executed[-1]
+    assert "worker_id = %s" in sql
+    assert "RUNNING" in sql
+    assert "claimed_at = NOW()" in sql
+    assert worker_common.WORKER_ID in params
+    assert conn.committed
+
+
 def test_enable_table_objects_skips_partitioned_indexes(monkeypatch):
     import oracle_ddl
 
