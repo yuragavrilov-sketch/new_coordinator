@@ -1004,6 +1004,60 @@ def compare_loop(stop_event: threading.Event) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# INDEX ENABLE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def index_enable_loop(stop_event: threading.Event) -> None:
+    """Background thread: claim + process index-enable jobs."""
+    import oracle_ddl
+    print(f"[index-enable] loop started (worker_id={WORKER_ID})")
+    pg = db.get_pg_conn_with_retry()
+    try:
+        while not stop_event.is_set():
+            try:
+                job = db.claim_index_enable_job(pg)
+                if job is None:
+                    time.sleep(BULK_POLL_INTERVAL)
+                    continue
+                print(f"[index-enable] claimed job {job['job_id']} "
+                      f"for {job['target_schema']}.{job['target_table']}")
+                configs = db.load_configs(pg)
+                ora = db.open_oracle(job["target_connection_id"], configs)
+                try:
+                    result = oracle_ddl.enable_table_objects(
+                        ora, job["target_schema"], job["target_table"],
+                    )
+                finally:
+                    try:
+                        ora.close()
+                    except Exception:
+                        pass
+
+                err_count = (len(result["errors"]["indexes"])
+                             + len(result["errors"]["constraints"]))
+                if err_count:
+                    db.fail_index_enable_job(
+                        pg, job["job_id"], str(result["errors"])[:4000])
+                else:
+                    db.complete_index_enable_job(pg, job["job_id"], result)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                print(f"[index-enable] loop error: {exc}")
+                try:
+                    pg.close()
+                except Exception:
+                    pass
+                pg = db.get_pg_conn()
+                time.sleep(BULK_POLL_INTERVAL)
+    finally:
+        try:
+            pg.close()
+        except Exception:
+            pass
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1033,6 +1087,12 @@ def main() -> None:
     )
     cmp.start()
 
+    iel = threading.Thread(
+        target=index_enable_loop, args=(main_stop,),
+        name="index-enable-loop", daemon=True,
+    )
+    iel.start()
+
     from ddl_apply_worker import ddl_apply_loop
     ddl = threading.Thread(
         target=ddl_apply_loop, args=(main_stop,),
@@ -1048,6 +1108,7 @@ def main() -> None:
         hb.join(timeout=5)
         mgr.join(timeout=15)
         cmp.join(timeout=10)
+        iel.join(timeout=10)
         ddl.join(timeout=10)
         print("[worker] stopped")
 
