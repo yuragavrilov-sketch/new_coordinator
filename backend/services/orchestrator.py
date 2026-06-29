@@ -41,18 +41,42 @@ from services.strategy import Strategy
 
 TICK_INTERVAL = 5  # seconds
 
-# Phases that occupy the "loading slot".  Only ONE migration at a time is
-# allowed in these phases; the rest wait in NEW so Kafka doesn't accumulate
-# a growing CDC backlog while waiting.
-_HEAVY_PHASES = frozenset({
+# Phases that occupy a bulk "lane".  Each lane (CDC / non-CDC) admits only ONE
+# migration in these phases at a time; the rest wait in NEW.  INDEXES_ENABLING
+# and everything after it are the non-blocking "tail" — they do NOT hold a lane,
+# so the next table can start while the previous one enables indexes / catches
+# up CDC.
+BULK_LANE_PHASES = frozenset({
     "TOPIC_CREATING",
     "CHUNKING",
     "BULK_LOADING", "BULK_LOADED",
     "STAGE_VALIDATING", "STAGE_VALIDATED",
     "BASELINE_PUBLISHING", "BASELINE_LOADING", "BASELINE_PUBLISHED",
     "STAGE_DROPPING",
-    "INDEXES_ENABLING",
 })
+
+
+def _migration_lane(strategy: str | None) -> str:
+    """Return the lane a migration belongs to: 'CDC' or 'BULK'."""
+    return "CDC" if (strategy or "")[:4] == "CDC_" else "BULK"
+
+
+def _lane_is_free(candidate_lane: str,
+                  other_migrations: list[tuple[str | None, str]]) -> bool:
+    """True iff no OTHER migration in the same lane occupies a blocking phase.
+
+    other_migrations: list of (strategy, phase) for every migration except the
+    candidate.
+    """
+    return not any(
+        _migration_lane(strat) == candidate_lane and phase in BULK_LANE_PHASES
+        for strat, phase in other_migrations
+    )
+
+
+# Backward-compat alias: existing code (start gate, _update_queue_positions)
+# still references _HEAVY_PHASES — those sites are updated in a later task.
+_HEAVY_PHASES = BULK_LANE_PHASES | {"INDEXES_ENABLING"}
 
 # Track migrations running in a dedicated thread (long-running phases)
 _in_progress: set[str] = set()
