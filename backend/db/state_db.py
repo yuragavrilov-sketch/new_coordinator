@@ -255,6 +255,7 @@ def _init_schema_legacy() -> None:
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_batch_size       INTEGER NOT NULL DEFAULT 500000",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_total     INTEGER",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_done      INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS baseline_chunks_failed    INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS stage_tablespace          VARCHAR(128) NOT NULL DEFAULT ''",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS queue_position            INTEGER",
                 "ALTER TABLE migrations ADD COLUMN IF NOT EXISTS data_compare_task_id      UUID",

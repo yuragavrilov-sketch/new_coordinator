@@ -234,12 +234,16 @@ def claim_chunk(conn) -> Optional[dict]:
 
 
 def update_chunk_progress(conn, chunk_id: str, rows_loaded: int) -> None:
+    # Refresh claimed_at so reset_stale_chunks treats this as a live heartbeat,
+    # not a stale claim — a long-running chunk would otherwise be reset to PENDING
+    # and reclaimed by another worker, double-processing the same ROWID range.
+    # The worker_id guard makes a reassigned chunk's stale-owner update a no-op.
     with conn.cursor() as cur:
         cur.execute("""
             UPDATE migration_chunks
-            SET    rows_loaded = %s, status = 'RUNNING'
-            WHERE  chunk_id   = %s
-        """, (rows_loaded, chunk_id))
+            SET    rows_loaded = %s, status = 'RUNNING', claimed_at = NOW()
+            WHERE  chunk_id   = %s AND worker_id = %s
+        """, (rows_loaded, chunk_id, WORKER_ID))
     conn.commit()
 
 
@@ -250,9 +254,9 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
             SET    status       = 'DONE',
                    rows_loaded  = %s,
                    completed_at = NOW()
-            WHERE  chunk_id     = %s
+            WHERE  chunk_id     = %s AND worker_id = %s
             RETURNING migration_id, COALESCE(chunk_type, 'BULK')
-        """, (rows_loaded, chunk_id))
+        """, (rows_loaded, chunk_id, WORKER_ID))
         row = cur.fetchone()
         if row:
             migration_id, chunk_type = row
@@ -275,6 +279,20 @@ def complete_chunk(conn, chunk_id: str, rows_loaded: int) -> None:
     conn.commit()
 
 
+def _bump_failed_counter(cur, migration_id: str, chunk_type: str) -> None:
+    """Increment the failure counter matching the chunk type.
+
+    BASELINE chunks have their own counter so they don't pollute the BULK
+    `chunks_failed` metric the UI/orchestrator read. `col` is from a fixed
+    whitelist, not user input, so the f-string is injection-safe.
+    """
+    col = "baseline_chunks_failed" if chunk_type == "BASELINE" else "chunks_failed"
+    cur.execute(
+        f"UPDATE migrations SET {col} = {col} + 1, updated_at = NOW() "
+        "WHERE migration_id = %s",
+        (migration_id,))
+
+
 def fail_chunk_permanent(conn, chunk_id: str, error_text: str) -> None:
     """Mark a chunk FAILED immediately, skipping retry logic.
 
@@ -287,24 +305,19 @@ def fail_chunk_permanent(conn, chunk_id: str, error_text: str) -> None:
             SET    status       = 'FAILED',
                    error_text   = %s,
                    completed_at = NOW()
-            WHERE  chunk_id     = %s
-            RETURNING migration_id
-        """, (error_text[:2000], chunk_id))
+            WHERE  chunk_id     = %s AND worker_id = %s
+            RETURNING migration_id, COALESCE(chunk_type, 'BULK')
+        """, (error_text[:2000], chunk_id, WORKER_ID))
         row = cur.fetchone()
         if row:
-            cur.execute("""
-                UPDATE migrations
-                SET    chunks_failed = chunks_failed + 1,
-                       updated_at    = NOW()
-                WHERE  migration_id  = %s
-            """, (row[0],))
+            _bump_failed_counter(cur, row[0], row[1])
     conn.commit()
 
 
 def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT retry_count, migration_id
+            SELECT retry_count, migration_id, COALESCE(chunk_type, 'BULK'), worker_id
             FROM   migration_chunks
             WHERE  chunk_id = %s
             FOR UPDATE
@@ -313,7 +326,14 @@ def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
         if not row:
             conn.rollback()
             return
-        retry_count, migration_id = row
+        retry_count, migration_id, chunk_type, owner_id = row
+
+        # If the chunk was reassigned to another worker (stale-reset reclaim),
+        # the stale owner must not reset/fail it — that would clobber the new
+        # claim and double-count failures.
+        if owner_id != WORKER_ID:
+            conn.rollback()
+            return
 
         if retry_count < _MAX_RETRIES:
             cur.execute("""
@@ -334,12 +354,7 @@ def fail_chunk(conn, chunk_id: str, error_text: str) -> None:
                        completed_at = NOW()
                 WHERE  chunk_id     = %s
             """, (error_text[:2000], chunk_id))
-            cur.execute("""
-                UPDATE migrations
-                SET    chunks_failed = chunks_failed + 1,
-                       updated_at    = NOW()
-                WHERE  migration_id  = %s
-            """, (migration_id,))
+            _bump_failed_counter(cur, migration_id, chunk_type)
     conn.commit()
 
 

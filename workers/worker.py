@@ -100,10 +100,16 @@ def _build_insert(cursor_description, target_schema: str,
 
 
 def _flush_batch(dst_conn, insert_sql: str, batch: list) -> None:
-    """Execute one batch insert and commit."""
+    """Execute one batch insert WITHOUT committing.
+
+    The whole chunk is one Oracle transaction (commit happens once in
+    _process_bulk_chunk). This keeps chunk retries idempotent: a mid-chunk
+    failure rolls back every batch, so a retry re-reads the same ROWID range
+    from scratch without leaving committed duplicate rows in the stage table
+    (which has no primary key to absorb them).
+    """
     with dst_conn.cursor() as ic:
         ic.executemany(insert_sql, batch)
-    dst_conn.commit()
 
 
 def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
@@ -156,6 +162,8 @@ def _process_bulk_chunk(chunk: dict, pg_conn, configs: dict) -> None:
                 rows_loaded += len(batch)
                 db.update_chunk_progress(pg_conn, chunk_id, rows_loaded)
                 print(f"  → {rows_loaded} rows")
+            # Commit the whole chunk atomically — see _flush_batch docstring.
+            dst_conn.commit()
     finally:
         for c in (src_conn, dst_conn):
             try: c.close()
@@ -520,6 +528,7 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
 
     try:
         from kafka import KafkaConsumer
+        from kafka.structs import OffsetAndMetadata, TopicPartition
     except ImportError as exc:
         detail = f"kafka-python not installed: {exc}"
         print(f"[cdc:{tag}] {detail}")
@@ -657,10 +666,11 @@ def cdc_thread(migration: dict, stop_event: threading.Event) -> None:
                     break
 
                 # Весь батч по этому TP применился — коммитим Oracle и Kafka.
-                # Не используем consumer.commit() без аргументов на success-path,
-                # т.к. мы итерируемся по TP и хотим коммитить только этот TP.
+                # ВАЖНО: коммитим offset ТОЛЬКО этого TP. consumer.commit() без
+                # аргументов закоммитил бы позиции всех партиций из poll(), включая
+                # ещё не применённые к Oracle — что приводит к потере событий.
                 oracle_conn.commit()
-                consumer.commit()
+                consumer.commit({_tp: OffsetAndMetadata(messages[-1].offset + 1, "")})
 
             if polled > 0:
                 print(f"[cdc:{tag}] poll: applied={applied_in_batch}/{polled}"
