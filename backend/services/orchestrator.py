@@ -74,10 +74,6 @@ def _lane_is_free(candidate_lane: str,
     )
 
 
-# Backward-compat alias: existing code (start gate, _update_queue_positions)
-# still references _HEAVY_PHASES — those sites are updated in a later task.
-_HEAVY_PHASES = BULK_LANE_PHASES | {"INDEXES_ENABLING"}
-
 # Track migrations running in a dedicated thread (long-running phases)
 _in_progress: set[str] = set()
 _in_progress_lock = threading.Lock()
@@ -630,40 +626,46 @@ def _update_queue_positions() -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                WITH active_slot AS (
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM   migrations
-                        WHERE  phase = ANY(%s)
-                    ) AS busy
-                ),
-                candidates AS (
+                WITH lanes AS (
                     SELECT m.migration_id,
-                           ROW_NUMBER() OVER (ORDER BY m.state_changed_at ASC) AS pos
+                           m.phase,
+                           m.state_changed_at,
+                           CASE WHEN LEFT(COALESCE(m.strategy,''),4) = 'CDC_'
+                                THEN 'CDC' ELSE 'BULK' END AS lane,
+                           cg.status AS group_status
                     FROM   migrations m
                     LEFT JOIN connector_groups cg ON cg.group_id = m.group_id
-                    WHERE  m.phase = 'NEW'
-                      AND  (
-                            LEFT(COALESCE(m.strategy, ''), 4) <> 'CDC_'
-                            OR cg.status = 'RUNNING'
-                      )
+                ),
+                busy_lane AS (
+                    SELECT lane, BOOL_OR(phase = ANY(%s)) AS busy
+                    FROM   lanes
+                    GROUP BY lane
+                ),
+                candidates AS (
+                    SELECT l.migration_id, l.lane,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY l.lane ORDER BY l.state_changed_at ASC
+                           ) AS pos
+                    FROM   lanes l
+                    WHERE  l.phase = 'NEW'
+                      AND  (l.lane = 'BULK' OR l.group_status = 'RUNNING')
                 ),
                 desired AS (
                     SELECT c.migration_id,
                            CASE
-                             WHEN a.busy THEN c.pos
+                             WHEN b.busy THEN c.pos
                              WHEN c.pos = 1 THEN NULL
                              ELSE c.pos - 1
                            END AS queue_position
                     FROM candidates c
-                    CROSS JOIN active_slot a
+                    JOIN busy_lane b ON b.lane = c.lane
                 )
                 UPDATE migrations m
                 SET    queue_position = desired.queue_position
                 FROM   desired
                 WHERE  m.migration_id = desired.migration_id
                   AND  m.queue_position IS DISTINCT FROM desired.queue_position
-            """, (list(_HEAVY_PHASES),))
+            """, (list(BULK_LANE_PHASES),))
 
             # Clear stale queue_position on non-NEW or non-runnable NEW migrations.
             cur.execute("""
@@ -1458,23 +1460,24 @@ def _handle_new(mid: str, m: dict) -> None:
             return
         m = _sync_cdc_runtime_context(mid, m, group)
 
-    # Queue gate (same as legacy)
+    # Lane gate: only block on OTHER migrations in the SAME lane (CDC vs non-CDC)
+    # that occupy a blocking bulk phase. Cross-lane work runs in parallel.
+    candidate_lane = _migration_lane(m.get("strategy"))
     conn = _state["get_conn"]()
     try:
         with conn.cursor() as cur:
-            placeholders = ",".join(["%s"] * len(_HEAVY_PHASES))
+            placeholders = ",".join(["%s"] * len(BULK_LANE_PHASES))
             cur.execute(
-                f"""SELECT 1 FROM migrations
+                f"""SELECT strategy, phase FROM migrations
                     WHERE  phase IN ({placeholders})
-                      AND  migration_id != %s
-                    LIMIT 1""",
-                (*_HEAVY_PHASES, mid),
+                      AND  migration_id != %s""",
+                (*BULK_LANE_PHASES, mid),
             )
-            slot_busy = cur.fetchone() is not None
+            others = cur.fetchall()
     finally:
         conn.close()
 
-    if slot_busy:
+    if not _lane_is_free(candidate_lane, others):
         _update_queue_positions()
         return
 

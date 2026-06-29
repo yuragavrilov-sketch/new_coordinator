@@ -1898,8 +1898,10 @@ def test_orchestrator_treats_steady_state_as_plan_done():
     assert orchestrator._plan_item_status_for_phase("STEADY_STATE") == "DONE"
 
 
-def test_orchestrator_index_enable_phase_holds_load_slot():
-    assert "INDEXES_ENABLING" in orchestrator._HEAVY_PHASES
+def test_orchestrator_index_enable_phase_does_not_block_lane():
+    # INDEXES_ENABLING is the non-blocking "tail" phase; it must NOT be in
+    # BULK_LANE_PHASES so that the next table can start while indexes enable.
+    assert "INDEXES_ENABLING" not in orchestrator.BULK_LANE_PHASES
 
 
 def test_orchestrator_keeps_plan_running_when_no_pending_but_active_items():
@@ -2479,10 +2481,14 @@ def test_orchestrator_starts_new_cdc_migration_when_group_running(monkeypatch):
         def fetchone(self):
             return self.rows.pop(0) if self.rows else None
 
+        def fetchall(self):
+            rows, self.rows = self.rows, []
+            return rows
+
     class ConnStub:
         def __init__(self):
             self.cursors = [
-                CursorStub([None]),          # no heavy slot busy
+                CursorStub([]),              # no blocking migrations in same lane
                 CursorStub([("mid-1",)]),    # this migration is first runnable NEW
             ]
 
